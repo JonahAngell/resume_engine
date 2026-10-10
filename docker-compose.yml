@@ -1,0 +1,29 @@
+services:
+  app:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      APP_ENV: local
+      DATABASE_URL: postgresql://resume_engine:resume_engine@db:5432/resume_engine
+      GOTENBERG_URL: http://gotenberg:3000
+    depends_on:
+      db: { condition: service_healthy }
+      gotenberg: { condition: service_started }
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: resume_engine
+      POSTGRES_USER: resume_engine
+      POSTGRES_PASSWORD: resume_engine
+    volumes: [resume-engine-db:/var/lib/postgresql/data]
+    healthcheck:
+      {
+        test: ["CMD-SHELL", "pg_isready -U resume_engine -d resume_engine"],
+        interval: 5s,
+        timeout: 5s,
+        retries: 12,
+      }
+  gotenberg:
+    image: gotenberg/gotenberg:8
+volumes:
+  resume-engine-db:

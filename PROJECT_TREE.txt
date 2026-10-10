@@ -1,0 +1,178 @@
+.
+├── .githooks
+│   └── pre-commit
+├── .launch
+│   ├── opa
+│   │   └── authz.rego
+│   ├── compose.yaml
+│   └── config
+├── .ruff_cache
+│   ├── 0.16.10
+│   │   ├── 3176113807011665662
+│   │   └── 8197791006927792930
+│   ├── .gitignore
+│   └── CACHEDIR.TAG
+├── assets
+│   ├── Color Palette.png
+│   ├── Compact Logo.png
+│   ├── Concept Mock-Up.png
+│   ├── Designer.png
+│   ├── Editor Add Bullet Mockup.png
+│   ├── favicon-128.png
+│   ├── favicon-16.png
+│   ├── favicon-256.png
+│   ├── favicon-32.png
+│   ├── favicon-48.png
+│   ├── favicon-512.png
+│   ├── favicon-64.png
+│   ├── favicon-source.png
+│   ├── Favicon.png
+│   ├── Library Page Mock-Up.png
+│   ├── logo-compact-128.png
+│   ├── logo-compact-256.png
+│   ├── logo-compact-64.png
+│   ├── logo-compact-light-bg.png
+│   ├── logo-compact.png
+│   ├── logo-compact.webp
+│   ├── logo-primary-320.png
+│   ├── logo-primary-480.png
+│   ├── logo-primary.png
+│   ├── logo-primary.webp
+│   ├── Main Logo.png
+│   └── README.txt
+├── backend
+│   ├── app
+│   │   ├── templates
+│   │   │   └── resume.html
+│   │   ├── database.py
+│   │   ├── editing_repository.py
+│   │   ├── editing_schemas.py
+│   │   ├── identity.py
+│   │   ├── library_repository.py
+│   │   ├── library_schemas.py
+│   │   ├── library_service.py
+│   │   ├── main.py
+│   │   ├── phase2j_repository.py
+│   │   ├── phase2k_repository.py
+│   │   ├── phase2l_repository.py
+│   │   ├── phase2l.py
+│   │   ├── phase2m_repository.py
+│   │   ├── render.py
+│   │   └── schemas.py
+│   ├── migrations
+│   │   ├── 001_phase1b_master_library.sql
+│   │   ├── 002_phase1c_editing.sql
+│   │   ├── 003_phase1d_ownership_guards.sql
+│   │   ├── 004_phase2_historical_library.sql
+│   │   ├── 005_phase2a_seed_selections.sql
+│   │   ├── 006_phase2b_seed_selections.sql
+│   │   ├── 007_phase2c_bullet_selections.sql
+│   │   ├── 008_phase2d_custom_section_guard.sql
+│   │   ├── 009_phase2g_resume_metadata.sql
+│   │   ├── 010_phase2j_reusable_bullet_placements.sql
+│   │   ├── 011_phase2k_library_management.sql
+│   │   ├── 012_phase2l_date_sorting_metadata.sql
+│   │   ├── 013_phase3b_placement_backfill.sql
+│   │   └── 014_phase3c1_bullet_ownership.sql
+│   └── requirements.txt
+├── frontend
+│   ├── src
+│   │   ├── assets
+│   │   │   ├── favicon-256.png
+│   │   │   ├── logo-compact.png
+│   │   │   └── logo-primary-480.png
+│   │   ├── api.ts
+│   │   ├── app-version.ts
+│   │   ├── App.tsx
+│   │   ├── AppIcon.tsx
+│   │   ├── ConfirmDialog.tsx
+│   │   ├── EditorHistory.ts
+│   │   ├── FitIndicator.tsx
+│   │   ├── HomeDialogs.tsx
+│   │   ├── LibraryEntryForms.tsx
+│   │   ├── main.tsx
+│   │   ├── ModalShell.tsx
+│   │   ├── MonthYearField.tsx
+│   │   ├── OverflowMenu.tsx
+│   │   ├── resume-print.css
+│   │   ├── ResumePreview.tsx
+│   │   ├── RevisionHistoryPanel.tsx
+│   │   ├── SaveCoordinator.ts
+│   │   └── StandaloneLibrary.tsx
+│   ├── index.html
+│   ├── package-lock.json
+│   └── package.json
+├── seed
+│   └── jonah-resume.json
+├── templates
+│   ├── DAIS-Resume-Template-2026.docx
+│   ├── DAIS-Resume-Template-2026.pdf
+│   ├── harvard-2025-template_bullet.docx
+│   ├── harvard-2025-template_bullet.pdf
+│   ├── Jonah Angell Resume - Site Reliability Engineer (October 2026).pdf
+│   ├── Jonah Angell Resume October 2026.docx
+│   ├── Resume Template - SheetsResume.com - 2025.docx
+│   └── Resume Template - SheetsResume.com - 2025.pdf
+├── tests
+│   ├── app-version-git-hook.test.mjs
+│   ├── app-version-sync.test.mjs
+│   ├── async_test_utils.py
+│   ├── resume-layout.spec.ts
+│   ├── test_hotfix3b1_contract.py
+│   ├── test_hotfix3b1_integration.py
+│   ├── test_phase1b_contract.py
+│   ├── test_phase1c_contract.py
+│   ├── test_phase1d_identity.py
+│   ├── test_phase1d_integration.py
+│   ├── test_phase1d_opa.py
+│   ├── test_phase2_contract.py
+│   ├── test_phase2_integration.py
+│   ├── test_phase2b_integration.py
+│   ├── test_phase2c_integration.py
+│   ├── test_phase2d_integration.py
+│   ├── test_phase2e_integration.py
+│   ├── test_phase2g_contract.py
+│   ├── test_phase2g_integration.py
+│   ├── test_phase2h_contract.py
+│   ├── test_phase2j_contract.py
+│   ├── test_phase2j_integration.py
+│   ├── test_phase2k_contract.py
+│   ├── test_phase2l_contract.py
+│   ├── test_phase2m_contract.py
+│   ├── test_phase2o_contract.py
+│   ├── test_phase3a_contract.py
+│   ├── test_phase3b_contract.py
+│   ├── test_phase3b_integration.py
+│   ├── test_phase3b2_contract.py
+│   ├── test_phase3c_contract.py
+│   ├── test_phase3c_integration.py
+│   ├── test_render_api.py
+│   └── tooling-safety.test.mjs
+├── tools
+│   ├── check-partially-staged.mjs
+│   ├── create-project-tree.mjs
+│   ├── create-review-bundle.mjs
+│   └── sync-app-version.mjs
+├── .dockerignore
+├── .env.example
+├── .gitignore
+├── .prettierignore
+├── .prettierrc
+├── docker-compose.yml
+├── Dockerfile
+├── FEATURE_REQUEST_TEMPLATE.md
+├── HOTFIX_README.md
+├── HOTFIX3B1_PACKAGE_README.md
+├── IMPLEMENTATION_README.md
+├── package-lock.json
+├── package.json
+├── PHASE3B_PACKAGE_README.md
+├── PHASE3B2_PACKAGE_README.md
+├── PHASE3C_PACKAGE_README.md
+├── PHASE3C1_PACKAGE_README.md
+├── playwright.config.ts
+├── PROJECT_CONTEXT.md
+├── pytest.ini
+├── README.md
+├── REQUIREMENTS_TRACEABILITY.csv
+└── review-bundle-files.txt

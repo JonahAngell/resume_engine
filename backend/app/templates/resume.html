@@ -1,0 +1,367 @@
+﻿<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @page {
+        size: Letter;
+        margin: 0;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: #fff;
+        color: #17233d;
+        font-family: Arial, sans-serif;
+        font-size: 10pt;
+      }
+      .pages {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .resume-page {
+        width: 8.5in;
+        height: 11in;
+        padding: 0.55in 0.62in;
+        background: #fff;
+        overflow: hidden;
+        page-break-after: always;
+        break-after: page;
+      }
+      .resume-page:last-child {
+        page-break-after: auto;
+      }
+      .page-content {
+        height: 9.9in;
+        overflow: hidden;
+      }
+      .source {
+        position: absolute;
+        left: -99999px;
+        top: 0;
+        width: 7.26in;
+        visibility: hidden;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 12px;
+      }
+      .header h1 {
+        font-size: 20pt;
+        margin: 0;
+      }
+      .contact {
+        font-size: 8.5pt;
+      }
+      .section {
+        margin: 0 0 10px;
+        break-inside: avoid;
+      }
+      .section-title {
+        font-size: 10pt;
+        text-transform: uppercase;
+        border-bottom: 1px solid #456fa8;
+        margin: 0 0 5px;
+        padding-bottom: 2px;
+      }
+      .item {
+        margin: 0 0 7px;
+        break-inside: avoid;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .muted {
+        font-size: 8.5pt;
+      }
+      ul {
+        margin: 3px 0 0;
+        padding-left: 18px;
+      }
+      li {
+        margin: 1px 0;
+      }
+      .continuation {
+        font-size: 8pt;
+        font-style: italic;
+        margin-bottom: 3px;
+      }
+      {% if measure %}
+      .resume-page:not([data-active-page="true"]) { display: none; }
+      {% endif %}
+      @media print {
+        .pages {
+          gap: 0;
+        }
+        .resume-page {
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="source" class="source">
+      <div class="header" data-section-id="profile">
+        <h1>{{resume.header.name}}</h1>
+        <div class="contact">
+          {{resume.header.email}}{% if resume.header.phone %} |
+          {{resume.header.phone}}{% endif %}{% if resume.header.linkedin_label
+          %} | {{resume.header.linkedin_label}}{% endif %}
+        </div>
+      </div>
+      {% set order=resume.section_order or
+      ['summary','work_experience','projects','education','tools','leadership','personal_interests']
+      %} {% for key in order %}{% if key=='summary' and resume.summary %}
+      <section class="section" data-section-id="summary">
+        <h2 class="section-title">Professional Summary</h2>
+        <div class="item" data-item-id="summary">{{resume.summary}}</div>
+      </section>
+      {% elif key in ['projects','work_experience','leadership'] %}{% set
+      rows=resume[key] %}{% if rows %}
+      <section
+        class="section"
+        data-section="{{ key | replace('_', '-') }}"
+        data-section-id="{{key}}"
+      >
+        <h2 class="section-title">
+          {{'Work Experience' if key=='work_experience' else key|replace('_','
+          ')}}
+        </h2>
+        {% for x in rows %}
+        <article class="item" data-item-id="{{x.id}}">
+          <div class="row">
+            <b
+              >{{x.name if key=='projects' else ('' if x.suppress_organization
+              else x.organization)}}</b
+            ><span>{{x.location or ''}}</span>
+          </div>
+          <div class="row">
+            <b>{{x.subtitle if key=='projects' else x.title}}</b
+            ><span>{{x.date}}</span>
+          </div>
+          {% if x.bullets %}
+          <ul>
+            {% for b in x.bullets %}
+            <li data-bullet-id="{{x.id}}-bullet-{{loop.index0}}">{{b}}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </section>
+      {% endif %} {% elif key=='education' and resume.education %}
+      <section class="section" data-section-id="education">
+        <h2 class="section-title">Education</h2>
+        {% for x in resume.education %}
+        <article class="item" data-item-id="education-{{loop.index0}}">
+          <div class="row">
+            <b>{{x.institution}}</b><span>{{x.location}}</span>
+          </div>
+          <div class="row">
+            <b>{{x.degree}}</b><span>{{x.graduation_date}}</span>
+          </div>
+          {% if x.bullets %}
+          <ul>
+            {% for b in x.bullets %}
+            <li>{{b}}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </section>
+      {% elif key in ['tools','tool_groups'] and resume.tool_groups %}
+      <section class="section" data-section-id="tools">
+        <h2 class="section-title">Skills</h2>
+        {% for g in resume.tool_groups %}
+        <div class="item" data-item-id="tool-group-{{loop.index0}}">
+          {% if g.bullets %}<b>{{g.name}}</b>
+          <div>{{g["items"]|join(", ")}}</div>
+          <ul>
+            {% for b in g.bullets %}
+            <li>{{b}}</li>
+            {% endfor %}
+          </ul>
+          {% else %}<b>{{g.name}}:</b> {{g["items"]|join(", ")}}{% endif %}
+        </div>
+        {% endfor %}
+      </section>
+      {% elif key=='personal_interests' and resume.personal_interests %}
+      <section class="section" data-section-id="personal_interests">
+        <h2 class="section-title">Personal Interests</h2>
+
+        {% if resume.interest_layout == 'lines' %} {% for interest in
+        resume.personal_interests %}
+        <div
+          class="item interest-item interest-item-lines"
+          data-item-id="interest-{{ loop.index0 }}"
+        >
+          <strong>{{ interest }}</strong>
+
+          {% set matched =
+          (resume.personal_interest_items|selectattr("body","equalto",interest)|list)
+          %}{% set bullets = matched[0].bullets if matched else [] %} {% if
+          bullets %}
+          <ul>
+            {% for bullet in bullets %}
+            <li
+              data-bullet-id="interest-{{ loop.parent.index0 }}-bullet-{{ loop.index0 }}"
+            >
+              {{ bullet }}
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+        {% endfor %} {% else %}
+        <div
+          class="item interest-item interest-item-compact"
+          data-item-id="interests"
+        >
+          {{ resume.personal_interests | join(' • ') }}
+        </div>
+        {% endif %}
+      </section>
+      {% elif key.startswith('custom:') %}{% set sid=key[7:] %}{% for sec in
+      resume.custom_sections if sec.id|string==sid %}
+      <section class="section" data-section-id="custom:{{sec.id}}">
+        <h2 class="section-title">{{sec.title}}</h2>
+        {% for e in sec.entries %}
+        <article class="item" data-item-id="{{e.id}}">
+          <div class="row">
+            <b>{{e.primary_text}}</b><span>{{e.date or ''}}</span>
+          </div>
+          <div class="row muted">
+            <span>{{e.secondary_text or ''}}</span
+            ><span>{{e.location or ''}}</span>
+          </div>
+          {% if e.bullets %}
+          <ul>
+            {% for b in e.bullets %}
+            <li data-bullet-id="{{e.id}}-bullet-{{loop.index0}}">{{b}}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </article>
+        {% endfor %}
+      </section>
+      {% endfor %}{% endif %}{% endfor %}
+    </div>
+    <div id="pages" class="pages"></div>
+    <script>
+      // Contract markers: document.fonts.ready; data-page-index; structured page descriptors.
+
+      (async () => {
+        const state = {
+          type: "resume-pages",
+          state: "loading",
+          contract: "{{renderer_contract_version}}",
+        };
+        try {
+          if (document.fonts) {
+            state.state = "waiting-for-fonts";
+            await document.fonts.ready;
+          }
+          state.state = "measuring";
+          const source = document.getElementById("source"),
+            pages = document.getElementById("pages");
+          let page;
+          const newPage = () => {
+            page = document.createElement("section");
+            page.className = "resume-page";
+            page.dataset.pageIndex = String(pages.children.length);
+            const c = document.createElement("div");
+            c.className = "page-content";
+            page.append(c);
+            pages.append(page);
+            return c;
+          };
+          let content = newPage();
+          const fits = () => content.scrollHeight <= content.clientHeight + 1;
+          for (const unit of [...source.children]) {
+            const clone = unit.cloneNode(true);
+            content.append(clone);
+            if (fits()) continue;
+            clone.remove();
+            if (unit.classList.contains("section")) {
+              const title = unit.querySelector(".section-title");
+              const items = [...unit.querySelectorAll(":scope > .item")];
+              if (items.length) {
+                content = newPage();
+                const section = unit.cloneNode(false);
+                if (title) section.append(title.cloneNode(true));
+                content.append(section);
+                for (const item of items) {
+                  const ic = item.cloneNode(true);
+                  section.append(ic);
+                  if (fits()) continue;
+                  ic.remove();
+                  content = newPage();
+                  const next = unit.cloneNode(false);
+                  if (title) {
+                    const h = title.cloneNode(true);
+                    next.append(h);
+                    const mark = document.createElement("div");
+                    mark.className = "continuation";
+                    mark.textContent = "Continued";
+                    next.append(mark);
+                  }
+                  content.append(next);
+                  next.append(ic);
+                  if (!fits()) {
+                    ic.dataset.oversized = "true";
+                    ic.style.breakInside = "auto";
+                  }
+                }
+                continue;
+              }
+            }
+            content = newPage();
+            content.append(clone);
+          }
+          source.remove();
+          const descriptors = [...pages.children].map((p, i) => ({
+            index: i,
+            section_ids: [...p.querySelectorAll("[data-section-id]")].map(
+              (x) => x.dataset.sectionId,
+            ),
+            item_ids: [...p.querySelectorAll("[data-item-id]")].map(
+              (x) => x.dataset.itemId,
+            ),
+            bullet_ids: [...p.querySelectorAll("[data-bullet-id]")].map(
+              (x) => x.dataset.bulletId,
+            ),
+            oversized_item_ids: [
+              ...p.querySelectorAll("[data-oversized=true]"),
+            ].map((x) => x.dataset.itemId),
+          }));
+          state.state = "measured";
+          state.actual_page_count = descriptors.length;
+          state.pages = descriptors;
+          const showPage = (index) => { const safe=Math.max(0,Math.min(descriptors.length-1,Number(index)||0)); [...pages.children].forEach((p,i)=>p.dataset.activePage=String(i===safe)); };
+          {% if measure %}
+          showPage(0);
+          addEventListener("message",event=>{if(event.data?.type==="resume-show-page")showPage(event.data.pageIndex)});
+          {% endif %}
+          parent.postMessage(state, "*");
+        } catch (e) {
+          parent.postMessage(
+            {
+              ...state,
+              state: "measurement-error",
+              error_code: "PAGINATION_FAILED",
+              message: "Resume measurement failed.",
+            },
+            "*",
+          );
+        }
+      })();
+    </script>
+  </body>
+</html>
