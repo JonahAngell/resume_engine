@@ -1,0 +1,20 @@
+{
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "prettier": "^3.9.9",
+    "prettier-plugin-sql": "^0.20.0"
+  },
+  "scripts": {
+    "format:check": "prettier --check .",
+    "review:bundle": "node tools/create-review-bundle.mjs --files review-bundle-files.txt --title \"RESUME ENGINE REVIEW BUNDLE\"",
+    "review:bundle:custom": "node tools/create-review-bundle.mjs --title \"RESUME ENGINE REVIEW BUNDLE\"",
+    "tree:generate": "node tools/create-project-tree.mjs",
+    "test:tooling": "node --test tests/tooling-safety.test.mjs",
+    "test:version": "node --test tests/app-version-sync.test.mjs tests/app-version-git-hook.test.mjs",
+    "version:sync": "node tools/sync-app-version.mjs",
+    "version:check": "node tools/sync-app-version.mjs --check",
+    "version:bump": "node tools/sync-app-version.mjs --bump",
+    "version:hook": "node tools/sync-app-version.mjs --hook",
+    "test:browser": "playwright test tests/resume-layout.spec.ts"
+  }
+}
