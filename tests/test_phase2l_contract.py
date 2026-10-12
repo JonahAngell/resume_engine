@@ -82,7 +82,7 @@ def test_sort_and_grouping_contract():
 
         for text in (
             "Leading recruiters recommend",
-            "Preferred page length",
+            "Target length",
             "Date format",
         ):
             assert text in ui

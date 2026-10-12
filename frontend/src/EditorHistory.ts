@@ -21,7 +21,9 @@ export class EditorHistory {
 
   subscribe(listener: () => void) {
     this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   }
   private notify() {
     for (const listener of this.listeners) listener();

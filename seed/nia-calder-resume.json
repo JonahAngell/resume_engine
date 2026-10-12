@@ -1,0 +1,140 @@
+{
+  "header": {
+    "name": "Nia Calder",
+    "phone": "(414) 555-0148",
+    "email": "nia.calder@example.com",
+    "linkedin_label": "linkedin.com/in/nia-calder-sample",
+    "linkedin_url": "https://www.linkedin.com/in/nia-calder-sample"
+  },
+  "summary": "Data analyst who started as a theater electrician and now turns crew schedules, ticketing exports, and device logs into decisions operations teams can use. Eight years across live production and product analytics, with a habit of replacing shared spreadsheets with checks people actually trust.",
+  "education": [
+    {
+      "institution": "University of Wisconsin–Milwaukee, Peck School of the Arts",
+      "location": "Milwaukee, WI",
+      "degree": "Bachelor of Fine Arts, Theatre Production (Lighting)",
+      "graduation_date": "May 2016"
+    },
+    {
+      "institution": "Milwaukee Area Technical College",
+      "location": "Milwaukee, WI",
+      "degree": "Certificate, Data Analytics",
+      "graduation_date": "December 2020"
+    }
+  ],
+  "tool_groups": [
+    {
+      "name": "Technical Languages",
+      "items": ["SQL", "Python", "Excel", "JavaScript"]
+    },
+    {
+      "name": "Platforms",
+      "items": [
+        "Snowflake",
+        "dbt",
+        "Looker",
+        "Airtable",
+        "Spektrix",
+        "Jupyter",
+        "PostgreSQL",
+        "Git"
+      ]
+    },
+    {
+      "name": "Production Tools",
+      "items": ["ETC Eos", "Vectorworks", "Lightwright", "QLab"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "Cue Ledger",
+      "subtitle": "Python, SQLite",
+      "date": "2019–2021",
+      "bullets": [
+        "Built a desktop log for focus notes and channel changes during tech, used by the electrics crew on two Northline tours.",
+        "Exported a CSV the production manager could diff against the designer's paperwork, catching 12 mis-patched conventions before a 2020 opening."
+      ]
+    },
+    {
+      "name": "House Power Map",
+      "subtitle": "Observable, GeoJSON",
+      "date": "2023",
+      "bullets": [
+        "Mapped circuit capacity for 11 small venues a civic arts fund supported, so visiting companies could see available dimmers before they advanced the show.",
+        "Published the map as a static page; three venues adopted it as the first sheet of their tech packet."
+      ]
+    },
+    {
+      "name": "Renewal Risk Notes",
+      "subtitle": "SQL, dbt, Looker",
+      "date": "2025",
+      "bullets": [
+        "Scored Fieldnote accounts whose loggers had more than two unexplained outages in 90 days, separating battery faults from gateway dropouts.",
+        "Support used the list to schedule proactive swaps; the pilot cohort cut emergency shipments 15% over one quarter."
+      ]
+    }
+  ],
+  "work_experience": [
+    {
+      "organization": "Fieldnote Instruments",
+      "location": "Milwaukee, WI",
+      "title": "Product Analyst",
+      "date": "March 2024 – Present",
+      "bullets": [
+        "Own the weekly reliability review for a fleet of 1,200 portable environmental loggers used by municipal parks departments.",
+        "Built a dbt model in Snowflake that cut false 'sensor offline' alarms 37% by splitting battery faults from gateway dropouts.",
+        "Wrote acceptance criteria with firmware and support for a self-serve calibration flow, reducing related tickets 22% across two quarters.",
+        "Designed a Looker dashboard for account managers covering device uptime, replacement lead time, and sites at risk before renewal."
+      ]
+    },
+    {
+      "organization": "Harborlight Civic Labs",
+      "location": "Milwaukee, WI",
+      "title": "Data Analyst",
+      "date": "June 2021 – February 2024",
+      "bullets": [
+        "Modeled attendance and staffing for 14 neighborhood arts venues, replacing a spreadsheet three program managers updated by hand.",
+        "Wrote Python jobs that reconciled Spektrix ticketing exports with volunteer shift logs, closing a 6–9% attendance gap that had been booked as walk-up traffic.",
+        "Presented quarterly findings to a board committee; two venues moved from Thursday double-shifts to staggered calls and saved about 180 crew hours a season."
+      ]
+    },
+    {
+      "organization": "Northline Touring Cooperative",
+      "location": "Chicago, IL",
+      "title": "Production Data Coordinator",
+      "date": "August 2018 – May 2021",
+      "bullets": [
+        "Kept the advance packet and labor calendar for a 9-city contemporary dance tour, tracking 40+ local crew calls a week.",
+        "Replaced paper dimmer schedules with an Airtable base and a Python check that flagged conflicts between truck loads and venue power limits.",
+        "Cut load-in overtime at three venues by rewriting the cable pull order from the prior year's actuals instead of the design plot alone."
+      ]
+    },
+    {
+      "organization": "Milwaukee Repertory Theater",
+      "location": "Milwaukee, WI",
+      "title": "Lighting Electrician",
+      "date": "September 2016 – July 2018",
+      "bullets": [
+        "Hung, circuited, and focused repertory plots for a four-show season in the Quadracci Powerhouse, typically 180–220 instruments per turn.",
+        "Maintained the fixture and gel inventory designers used to decide rentals, reducing unplanned rental spend by about $4,000 in the 2017–18 season.",
+        "Trained 8 overhire electricians on the house console and safety checks before tech week."
+      ]
+    }
+  ],
+  "leadership": [
+    {
+      "organization": "Cream City Stagehands Workshop",
+      "location": "Milwaukee, WI",
+      "title": "Workshop Lead",
+      "date": "January 2019 – December 2022",
+      "bullets": [
+        "Ran monthly skills nights for 15–25 early-career technicians covering knot craft, power distribution, and how to read a light plot.",
+        "Paired 30 participants with overhire calls at local houses over four seasons and kept a shared contact list houses still use."
+      ]
+    }
+  ],
+  "personal_interests": [
+    "Still calls the occasional community-theater show",
+    "Restoring vintage practicals",
+    "Cross-country skiing on the Oak Leaf Trail"
+  ]
+}

@@ -19,6 +19,7 @@ class Education(BaseModel):
     location: str = ""
     degree: str = ""
     graduation_date: str = ""
+    bullets: list[str] = []
 
 
 class ToolGroup(BaseModel):

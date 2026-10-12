@@ -91,10 +91,14 @@ class CompositionState(BaseModel):
     display_title: str = ""
     target_company: str = ""
     target_role: str = ""
+    job_description_id: UUID | None = None
     preferred_page_length: int = 1
     date_format: str = "long"
+    template_style: str = "classic"
+    skill_row_max: int = 4
     section_sort_modes: dict[str, str] = {}
     summary_variant_id: UUID | None = None
+    profile_id: UUID | None = None
     revision: int
     archived_at: object | None = None
     created_at: object | None = None
@@ -139,6 +143,7 @@ class CompositionMetadataWrite(BaseModel):
     display_title: str = Field(default="", max_length=200)
     target_company: str = Field(default="", max_length=200)
     target_role: str = Field(default="", max_length=200)
+    job_description_id: UUID | None = None
 
 class CompositionLifecycleWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -179,15 +184,30 @@ class BulletPlacementReorder(BaseModel):
     destination_parent_type: DestinationParentType
     destination_parent_id: UUID
     ids: list[UUID]
+class ToolVisibilityWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    included: bool
+class ToolOrderWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    ids: list[UUID]
+
+
 class BulletUsageUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=1)
 
+TemplateStyle = Literal["classic", "sheets", "harvard", "dais", "sre"]
+
+
 class CompositionPreferencesWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=1)
-    preferred_page_length: int = Field(ge=1, le=3)
+    preferred_page_length: int = Field(ge=1, le=10)
     date_format: Literal["year", "numeric", "short", "long"] = "long"
+    template_style: TemplateStyle = "classic"
+    skill_row_max: int = Field(default=4, ge=1, le=20)
     section_sort_modes: dict[str, Literal["automatic", "manual"]] = {}
 
 

@@ -17,7 +17,7 @@ def test_seed_and_render_contract():
     seed = client.get("/api/seed")
     assert seed.status_code == 200
     data = seed.json()
-    assert data["header"]["name"] == "Jonah Angell"
+    assert data["header"]["name"] == "Nia Calder"
     html = client.post("/api/render", json=data)
     assert html.status_code == 200
     assert "width: 8.5in" in html.text

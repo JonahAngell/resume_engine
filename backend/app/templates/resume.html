@@ -1,8 +1,9 @@
-﻿<!doctype html>
+<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
     <style>
+      {{ font_css | safe }}
       @page {
         size: Letter;
         margin: 0;
@@ -17,6 +18,48 @@
         color: #17233d;
         font-family: Arial, sans-serif;
         font-size: 10pt;
+        --pad-top: 0.55in;
+        --pad-right: 0.62in;
+        --pad-bottom: 0.55in;
+        --pad-left: 0.62in;
+        --content-height: 9.9in;
+      }
+      body.template-sheets {
+        --pad-top: 0.5in;
+        --pad-right: 0.5in;
+        --pad-bottom: 0.5in;
+        --pad-left: 0.5in;
+        --content-height: 10in;
+        font-family: "EB Garamond", Garamond, "Times New Roman", serif;
+        font-size: 12pt;
+      }
+      body.template-harvard {
+        --pad-top: 0.89in;
+        --pad-right: 0.42in;
+        --pad-bottom: 0.19in;
+        --pad-left: 0.42in;
+        --content-height: 9.92in;
+        font-family: Carlito, Calibri, "Segoe UI", sans-serif;
+        font-size: 11pt;
+      }
+      body.template-dais {
+        --pad-top: 0.31in;
+        --pad-right: 0.5in;
+        --pad-bottom: 0.38in;
+        --pad-left: 0.5in;
+        --content-height: 10.31in;
+        font-family: Tinos, "Liberation Serif", "Times New Roman", Times, serif;
+        font-size: 11pt;
+      }
+      body.template-sre {
+        --pad-top: 0.5in;
+        --pad-right: 0.5in;
+        --pad-bottom: 0.5in;
+        --pad-left: 0.5in;
+        --content-height: 10in;
+        font-family: Carlito, Calibri, "Segoe UI", sans-serif;
+        font-size: 11pt;
+        line-height: 1.22;
       }
       .pages {
         display: flex;
@@ -26,7 +69,7 @@
       .resume-page {
         width: 8.5in;
         height: 11in;
-        padding: 0.55in 0.62in;
+        padding: var(--pad-top) var(--pad-right) var(--pad-bottom) var(--pad-left);
         background: #fff;
         overflow: hidden;
         page-break-after: always;
@@ -36,14 +79,14 @@
         page-break-after: auto;
       }
       .page-content {
-        height: 9.9in;
+        height: var(--content-height);
         overflow: hidden;
       }
       .source {
         position: absolute;
         left: -99999px;
         top: 0;
-        width: 7.26in;
+        width: calc(8.5in - var(--pad-left) - var(--pad-right));
         visibility: hidden;
       }
       .header {
@@ -92,8 +135,125 @@
         font-style: italic;
         margin-bottom: 3px;
       }
+      .template-sheets .header h1 {
+        font-size: 18pt;
+      }
+      .template-harvard .header h1 {
+        font-size: 16pt;
+        font-weight: 700;
+      }
+      .template-dais .header h1 {
+        font-size: 14pt;
+      }
+      .template-sre .header {
+        margin-bottom: 0;
+      }
+      .template-sre .header h1 {
+        font-size: 14pt;
+        font-weight: 700;
+        line-height: 1.15;
+      }
+      .template-sre .contact {
+        font-size: 11pt;
+      }
+      .template-sre .section,
+      .template-sre .item {
+        margin: 0;
+      }
+      .template-sre .section-title {
+        border-bottom: 1.5pt solid #000;
+        text-transform: uppercase;
+        font-weight: 700;
+        font-size: 11pt;
+        line-height: 1.15;
+        margin: 0;
+        padding: 0 0 1pt;
+      }
+      .template-sre .section[data-section-id="summary"] .item {
+        line-height: 1.4;
+      }
+      .template-sre ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+      .template-sre li {
+        position: relative;
+        margin: 0;
+        padding-left: 0.5in;
+      }
+      .template-sre li::before {
+        content: "•";
+        position: absolute;
+        left: 0.25in;
+      }
+      .template-sheets .section-title,
+      .template-dais .section-title {
+        border-bottom: 0;
+        text-transform: uppercase;
+        font-weight: 700;
+        font-size: 11pt;
+      }
+      .template-sheets .section-title {
+        border-top: 1px solid #222;
+        border-bottom: 1px solid #222;
+        letter-spacing: 0.04em;
+        padding: 1px 0;
+      }
+      .template-harvard .section-title {
+        border-bottom: 0;
+        text-align: center;
+        text-transform: none;
+        font-weight: 700;
+        font-size: 12pt;
+      }
+      .template-sheets .role,
+      .template-dais .role,
+      .template-sre .role {
+        font-style: italic;
+        font-weight: 400;
+      }
+      .template-sre .role.project-date {
+        font-weight: 700;
+      }
+      .template-harvard .role {
+        font-style: normal;
+        font-weight: 700;
+      }
+      .template-dais .skill-items {
+        font-style: italic;
+      }
+      .template-sre .skill-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      .template-sre .skill-table th,
+      .template-sre .skill-table td {
+        padding: 0 0.12in 0 0;
+        text-align: left;
+        vertical-align: top;
+        font-weight: 400;
+        line-height: 1.22;
+      }
+      .template-sre .skill-table th {
+        font-weight: 700;
+        padding-bottom: 2px;
+      }
+      mark.resume-keyword-hit {
+        background: #9be7b3;
+        color: inherit;
+        padding: 0;
+      }
+      .resume-line-suggestion {
+        background: #ffe08a;
+      }
+      li.resume-line-suggestion {
+        background: #ffe08a;
+        box-shadow: inset 3px 0 0 #e2b100;
+      }
       {% if measure %}
-      .resume-page:not([data-active-page="true"]) { display: none; }
+      body.paginated .resume-page:not([data-active-page="true"]) { display: none; }
       {% endif %}
       @media print {
         .pages {
@@ -105,21 +265,31 @@
       }
     </style>
   </head>
-  <body>
+  <body class="template-{{ template_style }}">
+    {% macro section_heading(key, fallback) -%}
+    {%- if template_style == 'harvard' and key == 'work_experience' -%}Experience
+    {%- elif template_style == 'harvard' and key == 'leadership' -%}Leadership &amp; Activities
+    {%- elif template_style == 'harvard' and key == 'tools' -%}Skills &amp; Interests
+    {%- elif template_style == 'sheets' and key == 'tools' -%}Skills
+    {%- elif template_style == 'sheets' and key == 'personal_interests' -%}Interests
+    {%- elif template_style == 'sre' and key == 'summary' -%}Summary
+    {%- elif template_style == 'sre' and key == 'tools' -%}Tools
+    {%- else -%}{{ fallback }}
+    {%- endif -%}
+    {%- endmacro %}
+    {% set contact_sep = ' • ' if template_style == 'harvard' else (' ∙ ' if template_style == 'sre' else (' · ' if template_style == 'dais' else ' | ')) %}
     <div id="source" class="source">
       <div class="header" data-section-id="profile">
         <h1>{{resume.header.name}}</h1>
         <div class="contact">
-          {{resume.header.email}}{% if resume.header.phone %} |
-          {{resume.header.phone}}{% endif %}{% if resume.header.linkedin_label
-          %} | {{resume.header.linkedin_label}}{% endif %}
+          {{resume.header.email}}{% if resume.header.phone %}{{ contact_sep }}{{resume.header.phone}}{% endif %}{% if resume.header.linkedin_label %}{{ contact_sep }}{{resume.header.linkedin_label}}{% endif %}
         </div>
       </div>
       {% set order=resume.section_order or
       ['summary','work_experience','projects','education','tools','leadership','personal_interests']
       %} {% for key in order %}{% if key=='summary' and resume.summary %}
       <section class="section" data-section-id="summary">
-        <h2 class="section-title">Professional Summary</h2>
+        <h2 class="section-title">{{ section_heading('summary', 'Professional Summary') }}</h2>
         <div class="item" data-item-id="summary">{{resume.summary}}</div>
       </section>
       {% elif key in ['projects','work_experience','leadership'] %}{% set
@@ -130,21 +300,44 @@
         data-section-id="{{key}}"
       >
         <h2 class="section-title">
-          {{'Work Experience' if key=='work_experience' else key|replace('_','
-          ')}}
+          {{ section_heading(key, 'Work Experience' if key=='work_experience' else key|replace('_', ' ')) }}
         </h2>
         {% for x in rows %}
         <article class="item" data-item-id="{{x.id}}">
-          <div class="row">
-            <b
-              >{{x.name if key=='projects' else ('' if x.suppress_organization
-              else x.organization)}}</b
-            ><span>{{x.location or ''}}</span>
+          {% if key != 'projects' and x.suppress_organization %}
+          <div class="row row-secondary">
+            {% if template_style == 'sheets' %}<span class="role">{{x.title}}</span>{% else %}<b class="role">{{x.title}}</b>{% endif %}
+            <span>{{x.date}}</span>
           </div>
-          <div class="row">
-            <b>{{x.subtitle if key=='projects' else x.title}}</b
-            ><span>{{x.date}}</span>
+          {% elif key == 'projects' and template_style == 'sre' %}
+          <div class="row row-primary">
+            <b>{{x.name}}{% if x.subtitle %} | {{x.subtitle}}{% endif %}</b>
+            <b class="role project-date">{{x.date}}</b>
           </div>
+          {% elif key == 'projects' and template_style == 'dais' %}
+          <div class="row row-primary">
+            <span class="role">{{x.name}}</span><span>{{x.date}}</span>
+          </div>
+          {% if x.subtitle %}<div class="muted">{{x.subtitle}}</div>{% endif %}
+          {% elif template_style == 'sheets' %}
+          <div class="row row-primary">
+            <b>{{x.name if key=='projects' else x.organization}}</b>
+            <span>{{x.date}}</span>
+          </div>
+          <div class="row row-secondary">
+            <span class="role">{{x.subtitle if key=='projects' else x.title}}</span>
+            <span>{{x.location or ''}}</span>
+          </div>
+          {% else %}
+          <div class="row row-primary">
+            <b>{{x.name if key=='projects' else x.organization}}</b>
+            <span>{{x.location or ''}}</span>
+          </div>
+          <div class="row row-secondary">
+            <b class="role">{{x.subtitle if key=='projects' else x.title}}</b>
+            <span>{{x.date}}</span>
+          </div>
+          {% endif %}
           {% if x.bullets %}
           <ul>
             {% for b in x.bullets %}
@@ -157,19 +350,28 @@
       </section>
       {% endif %} {% elif key=='education' and resume.education %}
       <section class="section" data-section-id="education">
-        <h2 class="section-title">Education</h2>
+        <h2 class="section-title">{{ section_heading('education', 'Education') }}</h2>
         {% for x in resume.education %}
         <article class="item" data-item-id="education-{{loop.index0}}">
-          <div class="row">
+          {% if template_style == 'sheets' %}
+          <div class="row row-primary">
+            <b>{{x.institution}}</b><span>{{x.graduation_date}}</span>
+          </div>
+          <div class="row row-secondary">
+            <span class="role">{{x.degree}}</span><span>{{x.location}}</span>
+          </div>
+          {% else %}
+          <div class="row row-primary">
             <b>{{x.institution}}</b><span>{{x.location}}</span>
           </div>
-          <div class="row">
-            <b>{{x.degree}}</b><span>{{x.graduation_date}}</span>
+          <div class="row row-secondary">
+            <b class="role">{{x.degree}}</b><span>{{x.graduation_date}}</span>
           </div>
+          {% endif %}
           {% if x.bullets %}
           <ul>
             {% for b in x.bullets %}
-            <li>{{b}}</li>
+            <li data-bullet-id="{{x.id}}-bullet-{{loop.index0}}">{{b}}</li>
             {% endfor %}
           </ul>
           {% endif %}
@@ -178,23 +380,56 @@
       </section>
       {% elif key in ['tools','tool_groups'] and resume.tool_groups %}
       <section class="section" data-section-id="tools">
-        <h2 class="section-title">Skills</h2>
+        <h2 class="section-title">{{ section_heading('tools', 'Skills') }}</h2>
+        {% if template_style == 'sre' %}
+        <table class="skill-table item" data-item-id="tools">
+          <thead>
+            <tr>
+              {% for block in skill_table.blocks %}
+              <th colspan="{{ block.columns|length }}" data-item-id="tool-group-{{ loop.index0 }}">{{ block.label }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row_index in range(skill_table.rows) %}
+            <tr>
+              {% for block in skill_table.blocks %}
+              {% for column in block.columns %}
+              <td>{% if column|length > row_index %}- {{ column[row_index] }}{% endif %}</td>
+              {% endfor %}
+              {% endfor %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% for block in skill_table.blocks if block.bullets %}
+        <div class="item" data-item-id="tool-group-{{ loop.index0 }}-notes">
+          <ul>
+            {% for bullet in block.bullets %}
+            <li data-bullet-id="{{ block.id }}-bullet-{{ loop.index0 }}">{{ bullet }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endfor %}
+        {% else %}
+        {% set skill_sep = '; ' if template_style == 'sheets' else ', ' %}
         {% for g in resume.tool_groups %}
         <div class="item" data-item-id="tool-group-{{loop.index0}}">
           {% if g.bullets %}<b>{{g.name}}</b>
-          <div>{{g["items"]|join(", ")}}</div>
+          <div class="skill-items">{{g["items"]|join(skill_sep)}}</div>
           <ul>
             {% for b in g.bullets %}
-            <li>{{b}}</li>
+            <li data-bullet-id="{{ g.id }}-bullet-{{ loop.index0 }}">{{ b }}</li>
             {% endfor %}
           </ul>
-          {% else %}<b>{{g.name}}:</b> {{g["items"]|join(", ")}}{% endif %}
+          {% else %}<b>{{g.name}}:</b> <span class="skill-items">{{g["items"]|join(skill_sep)}}</span>{% endif %}
         </div>
         {% endfor %}
+        {% endif %}
       </section>
       {% elif key=='personal_interests' and resume.personal_interests %}
       <section class="section" data-section-id="personal_interests">
-        <h2 class="section-title">Personal Interests</h2>
+        <h2 class="section-title">{{ section_heading('personal_interests', 'Personal Interests') }}</h2>
 
         {% if resume.interest_layout == 'lines' %} {% for interest in
         resume.personal_interests %}
@@ -211,7 +446,7 @@
           <ul>
             {% for bullet in bullets %}
             <li
-              data-bullet-id="interest-{{ loop.parent.index0 }}-bullet-{{ loop.index0 }}"
+              data-bullet-id="{% if matched[0].id %}{{ matched[0].id }}{% else %}interest-{{ loop.parent.index0 }}{% endif %}-bullet-{{ loop.index0 }}"
             >
               {{ bullet }}
             </li>
@@ -284,48 +519,170 @@
           };
           let content = newPage();
           const fits = () => content.scrollHeight <= content.clientHeight + 1;
-          for (const unit of [...source.children]) {
-            const clone = unit.cloneNode(true);
-            content.append(clone);
-            if (fits()) continue;
-            clone.remove();
-            if (unit.classList.contains("section")) {
-              const title = unit.querySelector(".section-title");
-              const items = [...unit.querySelectorAll(":scope > .item")];
-              if (items.length) {
-                content = newPage();
-                const section = unit.cloneNode(false);
-                if (title) section.append(title.cloneNode(true));
-                content.append(section);
-                for (const item of items) {
-                  const ic = item.cloneNode(true);
-                  section.append(ic);
-                  if (fits()) continue;
-                  ic.remove();
-                  content = newPage();
-                  const next = unit.cloneNode(false);
-                  if (title) {
-                    const h = title.cloneNode(true);
-                    next.append(h);
-                    const mark = document.createElement("div");
-                    mark.className = "continuation";
-                    mark.textContent = "Continued";
-                    next.append(mark);
-                  }
-                  content.append(next);
-                  next.append(ic);
-                  if (!fits()) {
-                    ic.dataset.oversized = "true";
-                    ic.style.breakInside = "auto";
-                  }
-                }
-                continue;
-              }
+          const occupied = () => (content.textContent || "").trim().length > 0;
+          const wordsOf = (value) =>
+            (value || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+          const fillWords = (el, text) => {
+            const words = wordsOf(text);
+            if (!words.length) {
+              el.textContent = "";
+              return "";
             }
-            content = newPage();
-            content.append(clone);
+            let count = 0;
+            for (let n = 1; n <= words.length; n += 1) {
+              el.textContent = words.slice(0, n).join(" ");
+              if (fits()) count = n;
+              else break;
+            }
+            if (!count) {
+              el.textContent = "";
+              return words.join(" ");
+            }
+            el.textContent = words.slice(0, count).join(" ");
+            return words.slice(count).join(" ");
+          };
+          const spillText = (el, proto, reopen) => {
+            let rest = fillWords(el, wordsOf(proto.textContent).join(" "));
+            if (!(el.textContent || "").trim()) {
+              el.textContent = wordsOf(proto.textContent).join(" ");
+              el.dataset.oversized = "true";
+              return;
+            }
+            while (rest) {
+              const host = reopen();
+              const next = proto.cloneNode(false);
+              host.append(next);
+              const more = fillWords(next, rest);
+              if (!(next.textContent || "").trim()) {
+                next.textContent = rest;
+                next.dataset.oversized = "true";
+                return;
+              }
+              rest = more;
+            }
+          };
+          const placeLeaf = (node, parent, reopen) => {
+            const put = (host) => {
+              const clone = node.cloneNode(true);
+              host.append(clone);
+              if (fits()) return null;
+              clone.remove();
+              return clone;
+            };
+            if (!put(parent)) return parent;
+            if (occupied()) parent = reopen();
+            const clone = node.cloneNode(true);
+            parent.append(clone);
+            if (fits()) return parent;
+            if (!node.querySelector(".row, ul, h1"))
+              spillText(clone, node, () => {
+                parent = reopen();
+                return parent;
+              });
+            else clone.dataset.oversized = "true";
+            return parent;
+          };
+          const placeItem = (item, section, reopenSection) => {
+            const bullets = [...item.querySelectorAll(":scope > ul > li")];
+            if (!bullets.length) {
+              placeLeaf(item, section, reopenSection);
+              return section;
+            }
+            const shellOf = () => {
+              const shell = item.cloneNode(true);
+              const list = shell.querySelector(":scope > ul");
+              if (list) list.replaceChildren();
+              return shell;
+            };
+            let shell = shellOf();
+            section.append(shell);
+            if (!fits()) {
+              shell.remove();
+              if (occupied()) section = reopenSection();
+              shell = shellOf();
+              section.append(shell);
+              if (!fits()) shell.dataset.oversized = "true";
+            }
+            let list = shell.querySelector(":scope > ul");
+            if (!list) {
+              list = document.createElement("ul");
+              shell.append(list);
+            }
+            for (const bullet of bullets) {
+              list = placeLeaf(bullet, list, () => {
+                section = reopenSection();
+                shell = shellOf();
+                section.append(shell);
+                list = shell.querySelector(":scope > ul");
+                if (!list) {
+                  list = document.createElement("ul");
+                  shell.append(list);
+                }
+                return list;
+              });
+            }
+            if (list && !list.children.length) list.remove();
+            return section;
+          };
+          for (const unit of [...source.children]) {
+            if (!unit.classList.contains("section")) {
+              placeLeaf(unit, content, () => {
+                content = newPage();
+                return content;
+              });
+              continue;
+            }
+            const title = unit.querySelector(":scope > .section-title");
+            const columns = unit.querySelector(":scope > .tool-columns");
+            const items = [
+              ...unit.querySelectorAll(
+                ":scope > .item, :scope > .tool-columns > .item",
+              ),
+            ];
+            const startSection = (continued) => {
+              if (continued) content = newPage();
+              const section = unit.cloneNode(false);
+              if (title) section.append(title.cloneNode(true));
+              if (continued) {
+                const mark = document.createElement("div");
+                mark.className = "continuation";
+                mark.textContent = "Continued";
+                section.append(mark);
+              }
+              content.append(section);
+              if (!fits() && occupied()) {
+                section.remove();
+                content = newPage();
+                content.append(section);
+              }
+              return section;
+            };
+            let section = startSection(false);
+            if (columns && !items.length) {
+              placeLeaf(columns, section, () => {
+                section = startSection(true);
+                return section;
+              });
+              continue;
+            }
+            if (columns) {
+              const block = columns.cloneNode(true);
+              section.append(block);
+              if (fits()) continue;
+              block.remove();
+            }
+            for (const item of items) {
+              section = placeItem(item, section, () => startSection(true));
+            }
           }
+          [...pages.querySelectorAll(".resume-page")].forEach((sheet) => {
+            if (!sheet.querySelector(".item, .header, li")) sheet.remove();
+          });
+          [...pages.children].forEach((sheet, index) => {
+            sheet.dataset.pageIndex = String(index);
+          });
           source.remove();
+          document.body.classList.add("paginated");
           const descriptors = [...pages.children].map((p, i) => ({
             index: i,
             section_ids: [...p.querySelectorAll("[data-section-id]")].map(
@@ -347,7 +704,101 @@
           const showPage = (index) => { const safe=Math.max(0,Math.min(descriptors.length-1,Number(index)||0)); [...pages.children].forEach((p,i)=>p.dataset.activePage=String(i===safe)); };
           {% if measure %}
           showPage(0);
-          addEventListener("message",event=>{if(event.data?.type==="resume-show-page")showPage(event.data.pageIndex)});
+          const clearKeywordHits = () => {
+            document.querySelectorAll("mark.resume-keyword-hit").forEach((mark) => {
+              mark.replaceWith(document.createTextNode(mark.textContent || ""));
+            });
+            document.getElementById("pages")?.normalize();
+          };
+          const clearLineSuggestions = () => {
+            document.querySelectorAll(".resume-line-suggestion").forEach((line) => {
+              line.classList.remove("resume-line-suggestion");
+            });
+          };
+          const quoteAttr = (value) => String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          const normLine = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
+          const highlightLines = (lines, excerpts) => {
+            const root = document.getElementById("pages");
+            clearLineSuggestions();
+            if (!root) return;
+            for (const id of [...new Set((lines || []).map((line) => String(line).trim()).filter(Boolean))]) {
+              const value = quoteAttr(id);
+              const line = root.querySelector(`[data-bullet-id="${value}"]`)
+                || root.querySelector(`[data-item-id="${value}"]`)
+                || root.querySelector(`[data-section-id="${value}"]`);
+              line?.classList.add("resume-line-suggestion");
+            }
+            const bullets = [...root.querySelectorAll("li")];
+            for (const excerpt of [...new Set((excerpts || []).map((line) => normLine(line)).filter((line) => line.length >= 12))]) {
+              const hit = bullets.find((bullet) => {
+                const text = normLine(bullet.textContent);
+                if (text.length < 12) return false;
+                return text.startsWith(excerpt) || excerpt.startsWith(text);
+              });
+              hit?.classList.add("resume-line-suggestion");
+            }
+          };
+          const highlightKeywords = (terms) => {
+            const root = document.getElementById("pages");
+            clearKeywordHits();
+            const cleaned = [...new Set((terms || []).map((term) => String(term).trim()).filter(Boolean))]
+              .sort((left, right) => right.length - left.length);
+            if (!root || !cleaned.length) return;
+            const pattern = new RegExp(
+              cleaned.map((term) => "(?<!\\w)" + term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?!\\w)").join("|"),
+              "gi",
+            );
+            const nodes = [];
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let current;
+            while ((current = walker.nextNode())) {
+              if (!current.nodeValue || !current.nodeValue.trim()) continue;
+              if (current.parentElement?.closest("script, style")) continue;
+              nodes.push(current);
+            }
+            for (const textNode of nodes) {
+              const text = textNode.nodeValue || "";
+              pattern.lastIndex = 0;
+              const fragment = document.createDocumentFragment();
+              let cursor = 0;
+              let match;
+              let found = false;
+              while ((match = pattern.exec(text))) {
+                found = true;
+                if (match.index > cursor) fragment.append(document.createTextNode(text.slice(cursor, match.index)));
+                const mark = document.createElement("mark");
+                mark.className = "resume-keyword-hit";
+                mark.textContent = match[0];
+                fragment.append(mark);
+                cursor = match.index + match[0].length;
+                if (match.index === pattern.lastIndex) pattern.lastIndex += 1;
+              }
+              if (!found) continue;
+              if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)));
+              textNode.parentNode.replaceChild(fragment, textNode);
+            }
+          };
+          const revealHighlight = () => {
+            const root = document.getElementById("pages");
+            if (!root) return;
+            const active = root.querySelector('.resume-page[data-active-page="true"]');
+            if (active?.querySelector("mark.resume-keyword-hit, .resume-line-suggestion")) return;
+            const hit = root.querySelector("mark.resume-keyword-hit, .resume-line-suggestion");
+            const page = hit?.closest(".resume-page");
+            if (!page) return;
+            const pageIndex = Number(page.dataset.pageIndex);
+            if (!Number.isFinite(pageIndex)) return;
+            showPage(pageIndex);
+            parent.postMessage({ type: "resume-highlight-page", pageIndex }, "*");
+          };
+          addEventListener("message", (event) => {
+            if (event.data?.type === "resume-show-page") showPage(event.data.pageIndex);
+            if (event.data?.type === "resume-highlight") {
+              highlightLines(event.data.lines, event.data.excerpts);
+              highlightKeywords(event.data.terms);
+              revealHighlight();
+            }
+          });
           {% endif %}
           parent.postMessage(state, "*");
         } catch (e) {

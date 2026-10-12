@@ -26,17 +26,21 @@ async def import_seed(
         return False, existing[0]
     data = resume.model_dump()
     async with conn.transaction():
-        await conn.execute(
-            "INSERT INTO profiles(user_id,name,phone,email,linkedin_label,linkedin_url) VALUES (%s,%s,%s,%s,%s,%s)",
-            (
-                user_id,
-                data["header"]["name"],
-                data["header"]["phone"],
-                data["header"]["email"],
-                data["header"]["linkedin_label"],
-                data["header"]["linkedin_url"],
-            ),
-        )
+        profile_id = (
+            await (
+                await conn.execute(
+                    "INSERT INTO profiles(user_id,label,name,phone,email,linkedin_label,linkedin_url,sort_order) VALUES (%s,'Default',%s,%s,%s,%s,%s,0) RETURNING id",
+                    (
+                        user_id,
+                        data["header"]["name"],
+                        data["header"]["phone"],
+                        data["header"]["email"],
+                        data["header"]["linkedin_label"],
+                        data["header"]["linkedin_url"],
+                    ),
+                )
+            ).fetchone()
+        )[0]
         summary_id = (
             await (
                 await conn.execute(
@@ -139,8 +143,8 @@ async def import_seed(
         composition = (
             await (
                 await conn.execute(
-                    "INSERT INTO resume_compositions(user_id,name,summary_variant_id,render_payload) VALUES (%s,'Seed Resume',%s,%s::jsonb) RETURNING id",
-                    (user_id, summary_id, json.dumps(data)),
+                    "INSERT INTO resume_compositions(user_id,name,summary_variant_id,profile_id,render_payload) VALUES (%s,'Seed Resume',%s,%s,%s::jsonb) RETURNING id",
+                    (user_id, summary_id, profile_id, json.dumps(data)),
                 )
             ).fetchone()
         )[0]

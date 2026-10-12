@@ -16,7 +16,7 @@ class CurrentUserResponse(BaseModel):
 
 class SeedImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    seed_key: str = "jonah-resume-v1"
+    seed_key: str = "nia-calder-resume-v1"
 
 
 class SeedImportResponse(BaseModel):
@@ -26,6 +26,7 @@ class SeedImportResponse(BaseModel):
 
 class ProfileWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    label: str = Field(min_length=1, max_length=120)
     name: str = Field(min_length=1, max_length=200)
     phone: str = ""
     email: str = ""
@@ -83,6 +84,17 @@ class CompositionSummarySelection(BaseModel):
     summary_variant_id: UUID | None
 
 
+class CompositionProfileSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    profile_id: UUID
+
+
+class ProfileDuplicate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    label: str = Field(min_length=1, max_length=120)
+
+
 class CompositionInterestSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=1)
@@ -106,6 +118,8 @@ class CompositionSummary(BaseModel):
     display_title: str = ""
     target_company: str = ""
     target_role: str = ""
+    job_description_id: UUID | None = None
+    profile_id: UUID | None = None
     archived_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -114,7 +128,7 @@ class CompositionSummary(BaseModel):
 
 
 class LibraryResponse(BaseModel):
-    profile: dict | None
+    profiles: list[dict] = []
     summary_variants: list[dict]
     education: list[dict]
     tool_groups: list[dict]
@@ -125,6 +139,8 @@ class LibraryResponse(BaseModel):
     custom_sections: list[dict] = []
     compositions: list[CompositionSummary]
     composition_bullets: list[dict] = []
+    composition_items: list[dict] = []
+    composition_custom_sections: list[dict] = []
 
 
 class ToolGroupWrite(BaseModel):

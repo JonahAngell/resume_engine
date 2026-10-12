@@ -3,17 +3,24 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import ModalShell from "./ModalShell";
 import { confirmDialog } from "./ConfirmDialog";
+import { SectionHelp } from "./SectionHelp";
+import { bulletCoaching } from "./resumeCoaching";
 import compactLogo from "./assets/logo-compact.png";
 import {
   LibraryEntryForm,
   LibraryEntryKind,
   cloneBlankDraft,
+  hydrateEducationDraft,
+  profilePayload,
+  profileWriteError,
 } from "./LibraryEntryForms";
+import ChoiceList from "./ChoiceList";
 
 type Status = "active" | "archived" | "all";
 type View = "list" | "card";
 const SECTIONS = [
   ["", "All Items", "all-items"],
+  ["profile", "Profile", "profile"],
   ["experience", "Experience", "experience"],
   ["projects", "Projects", "projects"],
   ["education", "Education", "education"],
@@ -34,6 +41,7 @@ export default function StandaloneLibrary({
   lib,
   onHome,
   onBin,
+  onJobs,
   onOpenResume,
   reloadLibrary,
   onReturnToResume,
@@ -58,7 +66,9 @@ export default function StandaloneLibrary({
   );
   const [entryDetail, setEntryDetail] = useState<any>(null);
   const [entryConfirmed, setEntryConfirmed] = useState<any>(null);
-  const [entryTab, setEntryTab] = useState<"details" | "bullets">("details");
+  const [entryTab, setEntryTab] = useState<
+    "details" | "bullets" | "variants" | "usage"
+  >("details");
   const [createKind, setCreateKind] = useState<LibraryEntryKind | null>(
     initialTarget?.createKind || null,
   );
@@ -103,12 +113,36 @@ export default function StandaloneLibrary({
         page: String(requested),
         page_size: String(pageSize),
       });
-      const [items, nextCounts] = await Promise.all([
+      const bulletSections = SECTIONS.map(([key]) => key).filter(
+        (key) => key && key !== section,
+      );
+      const [items, bulletTotals] = await Promise.all([
         api<any>(`/api/library-management/items?${params}`),
-        api<any>("/api/library-management/counts"),
+        Promise.all(
+          bulletSections.map(async (key) => {
+            const countParams = new URLSearchParams({
+              q: query,
+              status,
+              section: key,
+              page: "1",
+              page_size: "1",
+            });
+            const row = await api<any>(
+              `/api/library-management/items?${countParams}`,
+            );
+            return [key, row.total_items || 0] as const;
+          }),
+        ),
       ]);
       if (items.total_pages && requested > items.total_pages)
         return load(items.total_pages);
+      const nextCounts: Record<string, number> = {};
+      for (const [key, total] of bulletTotals) nextCounts[key] = total;
+      if (section) nextCounts[section] = items.total_items || 0;
+      nextCounts.all = SECTIONS.reduce(
+        (sum, [key]) => (key ? sum + (nextCounts[key] || 0) : sum),
+        0,
+      );
       setData(items);
       setCounts(nextCounts);
       setPage(items.page);
@@ -225,22 +259,44 @@ export default function StandaloneLibrary({
       ),
     [data.total_pages, page],
   );
+  const entryMode =
+    section === "profile" || (section !== "" && contentView === "entries");
+  const sectionCounts = useMemo(() => {
+    if (!entryMode) return counts;
+    const next: Record<string, number> = {};
+    let all = 0;
+    for (const [key] of SECTIONS) {
+      if (!key) continue;
+      const n = entriesFor(lib, key).filter((row: any) =>
+        entryMatches(row, query, status),
+      ).length;
+      next[key] = n;
+      all += n;
+    }
+    next.all = all;
+    return next;
+  }, [entryMode, counts, lib, query, status]);
   return (
     <main className="library-shell">
       <aside className="home-rail library-rail" aria-label="Primary navigation">
-        <img className="rail-logo" src={compactLogo} alt="Resume Engine" />
-        <button className="rail-link" onClick={onHome}>
-          <AppIcon name="home" />
-          Home
-        </button>
-        <button className="rail-link active" aria-current="page">
-          <AppIcon name="library" />
-          Library
-        </button>
-        <button className="rail-link" onClick={onBin}>
-          <AppIcon name="bin" />
-          Bin
-        </button>
+        <nav className="rail-nav">
+          <button className="rail-link" onClick={onHome}>
+            <AppIcon name="home" />
+            Home
+          </button>
+          <button className="rail-link active" aria-current="page">
+            <AppIcon name="library" />
+            Library
+          </button>
+          <button className="rail-link" onClick={onJobs}>
+            <AppIcon name="jobs" />
+            Jobs
+          </button>
+          <button className="rail-link" onClick={onBin}>
+            <AppIcon name="bin" />
+            Bin
+          </button>
+        </nav>
       </aside>
       <section className="library-workspace">
         <header className="library-page-header">
@@ -287,6 +343,7 @@ export default function StandaloneLibrary({
                   ["Leadership", "leadership"],
                   ["Skill Group", "tool-group"],
                   ["Interest", "interest"],
+                  ["Profile", "profile"],
                   ["Custom Section", "custom-section"],
                   ["Custom Entry", "custom-entry"],
                 ].map(([label, kind]: any) => (
@@ -338,14 +395,15 @@ export default function StandaloneLibrary({
                   setSection(key);
                   setPage(1);
                   setEntryDetail(null);
-                  if (key === "") setContentView("bullets");
+                  if (key === "" ) setContentView("bullets");
+                  if (key === "profile") setContentView("entries");
                 }}
               >
                 <span>
                   <AppIcon name={icon} />
                   {label}
                 </span>
-                <strong>{counts[key || "all"] || 0}</strong>
+                <strong>{sectionCounts[key || "all"] || 0}</strong>
               </button>
             ))}
             <div className="library-tip">
@@ -366,7 +424,7 @@ export default function StandaloneLibrary({
             aria-busy={busy}
           >
             <div className="library-result-toolbar" ref={toolbarRef}>
-              {section !== "" && (
+              {section !== "" && section !== "profile" && (
                 <div
                   className="view-toggle content-toggle"
                   role="group"
@@ -415,28 +473,39 @@ export default function StandaloneLibrary({
                 </button>
               </div>
               <div className="library-filters">
-                <select
-                  aria-label="Status filter"
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value as Status)}
-                >
-                  <option value="active">Active Items</option>
-                  <option value="archived">Archived Items</option>
-                  <option value="all">All Items</option>
-                </select>
+                <div className="view-toggle" role="group" aria-label="Status filter">
+                  {(
+                    [
+                      ["active", "Active"],
+                      ["archived", "Archived"],
+                      ["all", "All"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <button
+                      type="button"
+                      key={key}
+                      aria-pressed={status === key}
+                      onClick={() => setStatus(key)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="library-results-viewport" ref={viewportRef}>
-              {section !== "" && contentView === "entries" ? (
+              {entryMode ? (
                 <EntryResults
                   lib={lib}
                   section={section}
                   query={query}
                   status={status}
+                  view={view}
                   selectedId={entryDetail?.id}
                   onSelect={(x: any) => {
-                    setEntryDetail(structuredClone(x));
-                    setEntryConfirmed(structuredClone(x));
+                    const row = hydrateEducationDraft(structuredClone(x));
+                    setEntryDetail(row);
+                    setEntryConfirmed(structuredClone(row));
                     setEntryTab("details");
                   }}
                 />
@@ -550,7 +619,7 @@ export default function StandaloneLibrary({
                 </div>
               )}
             </div>
-            {!(section !== "" && contentView === "entries") && (
+            {!entryMode && (
               <nav
                 ref={paginationRef}
                 className="library-pagination"
@@ -584,14 +653,17 @@ export default function StandaloneLibrary({
             )}
           </section>
           <aside className="library-details" aria-label="Library details">
-            {section !== "" && contentView === "entries" ? (
+            {entryMode ? (
               <EntryDetails
+                lib={lib}
+                section={section}
                 detail={entryDetail}
                 confirmed={entryConfirmed}
                 tab={entryTab}
                 setTab={setEntryTab}
                 setDetail={setEntryDetail}
                 reloadLibrary={reloadLibrary}
+                onOpenResume={onOpenResume}
                 onOpenBullet={(id: string) => {
                   setContentView("bullets");
                   localStorage.setItem(
@@ -658,8 +730,8 @@ export default function StandaloneLibrary({
                         }
                       />
                     </label>
-                    <label>
-                      Section
+                    <div className="choice-field">
+                      <span>Section</span>
                       <SectionSelect
                         value={detail.section}
                         onChange={(next) =>
@@ -687,15 +759,25 @@ export default function StandaloneLibrary({
                           })
                         }
                       />
-                    </label>
-                    <label>
-                      Parent / Context
-                      <select
+                    </div>
+                    <div className="choice-field">
+                      <span>Parent / Context</span>
+                      <ChoiceList
+                        label="Parent or context"
                         value={detail.parent_id || ""}
-                        onChange={(e) => {
+                        options={[
+                          { value: "", label: "No parent" },
+                          ...(detail.parent_options || [])
+                            .filter((x: any) => x.section === detail.section)
+                            .map((x: any) => ({
+                              value: x.id,
+                              label: x.label,
+                            })),
+                        ]}
+                        onChange={(next) => {
                           const selectedParent = (
                             detail.parent_options || []
-                          ).find((x: any) => x.id === e.target.value);
+                          ).find((x: any) => x.id === next);
                           setDetail({
                             ...detail,
                             parent_id: selectedParent?.id || null,
@@ -703,17 +785,8 @@ export default function StandaloneLibrary({
                             parent_context: selectedParent?.label || "",
                           });
                         }}
-                      >
-                        <option value="">No parent</option>
-                        {(detail.parent_options || [])
-                          .filter((x: any) => x.section === detail.section)
-                          .map((x: any) => (
-                            <option key={x.id} value={x.id}>
-                              {x.label}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
+                      />
+                    </div>
                     <label>
                       Tags
                       <span className="tag-chip-list" aria-label="Current tags">
@@ -910,7 +983,7 @@ export default function StandaloneLibrary({
       {createOpen && (
         <CreateDialog
           close={() => setCreateOpen(false)}
-          saved={async (id) => {
+          saved={async (id: string) => {
             setCreateOpen(false);
             await load(1);
             const row = { id };
@@ -928,89 +1001,20 @@ function SectionSelect({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(
-    Math.max(
-      0,
-      SECTIONS.slice(1).findIndex(([key]) => key === value),
-    ),
-  );
-  const ref = useRef<HTMLDivElement>(null);
-  const options = SECTIONS.slice(1);
-  useEffect(() => {
-    const close = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
-  const choose = (next: string) => {
-    onChange(next);
-    setOpen(false);
-  };
-  const keyDown = (event: React.KeyboardEvent) => {
-    if (["Enter", " "].includes(event.key)) {
-      event.preventDefault();
-      if (open) choose(options[active][0]);
-      else setOpen(true);
-      return;
-    }
-    if (event.key === "Escape") {
-      setOpen(false);
-      return;
-    }
-    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-      event.preventDefault();
-      setOpen(true);
-      setActive((current) =>
-        event.key === "Home"
-          ? 0
-          : event.key === "End"
-            ? options.length - 1
-            : event.key === "ArrowDown"
-              ? Math.min(options.length - 1, current + 1)
-              : Math.max(0, current - 1),
-      );
-    }
-  };
+  const options = SECTIONS.slice(1).filter(([key]) => key !== "profile");
   return (
-    <div className="section-select" ref={ref}>
-      <button
-        type="button"
-        className="section-select-trigger"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        onKeyDown={keyDown}
-      >
-        <span>
-          <AppIcon name={sectionIconName(value)} />
-          {sectionLabel(value)}
-        </span>
-        <span aria-hidden="true">⌄</span>
-      </button>
-      {open && (
-        <div
-          className="section-select-options"
-          role="listbox"
-          aria-label="Section"
+    <div className="section-choices" role="group" aria-label="Section">
+      {options.map(([key, label, icon]) => (
+        <button
+          type="button"
+          key={key}
+          aria-pressed={value === key}
+          onClick={() => onChange(key)}
         >
-          {options.map(([key, label, icon], index) => (
-            <button
-              type="button"
-              role="option"
-              aria-selected={value === key}
-              className={active === index ? "active" : ""}
-              key={key}
-              onMouseEnter={() => setActive(index)}
-              onClick={() => choose(key)}
-            >
-              <AppIcon name={icon} />
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
+          <AppIcon name={icon} />
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1053,7 +1057,9 @@ function Variants({ detail, mutate }: any) {
             >
               {v.archived_at ? "Archived" : "Active"}
             </span>{" "}
-            {new Date(v.updated_at).toLocaleDateString()}
+            {v.updated_at
+              ? new Date(v.updated_at).toLocaleDateString()
+              : ""}
           </small>
           <div className="variant-actions">
             <button onClick={() => setEditing({ ...v })}>Edit</button>
@@ -1165,12 +1171,14 @@ function Variants({ detail, mutate }: any) {
     </div>
   );
 }
-function Usage({ rows, onOpenResume }: any) {
+function Usage({ rows, onOpenResume, empty }: any) {
   return (
     <div className="usage-list">
       {!rows.length ? (
         <div className="library-state">
-          <strong>This bullet is not currently used in a resume</strong>
+          <strong>
+            {empty || "This bullet is not currently used in a resume"}
+          </strong>
         </div>
       ) : (
         rows.map((u: any) => (
@@ -1239,13 +1247,13 @@ function CreateDialog({ close, saved }: any) {
             onChange={(e) => setX({ ...x, body: e.target.value })}
           />
         </label>
-        <label>
-          Section
+        <div className="choice-field">
+          <span>Section</span>
           <SectionSelect
             value={x.section}
             onChange={(section) => setX({ ...x, section })}
           />
-        </label>
+        </div>
         <label>
           Parent context
           <input
@@ -1291,10 +1299,17 @@ function sectionForKind(kind: LibraryEntryKind) {
       leadership: "leadership",
       "tool-group": "skills",
       interest: "interests",
+      profile: "profile",
       "custom-section": "custom",
       "custom-entry": "custom",
     } as any
   )[kind];
+}
+function entryMatches(x: any, query: string, status: string) {
+  return (
+    (status === "all" || (status === "archived") === !!x.archived_at) &&
+    JSON.stringify(x).toLowerCase().includes(query.toLowerCase())
+  );
 }
 function entriesFor(lib: any, section: string) {
   if (section === "experience") return lib.employment || [];
@@ -1303,11 +1318,77 @@ function entriesFor(lib: any, section: string) {
   if (section === "leadership") return lib.leadership || [];
   if (section === "skills") return lib.tool_groups || [];
   if (section === "interests") return lib.interests || [];
+  if (section === "profile") return lib.profiles || [];
   return lib.custom_sections || [];
 }
-function entryTitle(x: any) {
+function entryDates(x: any) {
+  if (x.date_label) return x.date_label;
+  if (x.display_date) return x.display_date;
+  if (x.graduation_date) return x.graduation_date;
+  return "";
+}
+function entryCells(section: string, x: any) {
+  const modified = x.updated_at
+    ? new Date(x.updated_at).toLocaleDateString()
+    : "—";
+  const degree = [x.degree_type, x.degree_major].filter(Boolean).join(" ");
+  const tools = (x.items || []).map((t: any) => t.name).filter(Boolean);
+  if (section === "profile")
+    return [
+      { label: "Profile", width: "minmax(140px, 1.3fr)", primary: x.label || "Untitled", secondary: x.name || "" },
+      { label: "Email", width: "minmax(0, 1.2fr)", text: x.email || "—" },
+      { label: "Phone", width: "minmax(0, 0.8fr)", text: x.phone || "—" },
+      { label: "LinkedIn", width: "minmax(0, 1fr)", text: x.linkedin_label || "—" },
+      { label: "Last Modified", width: "110px", text: modified },
+    ];
+  if (section === "experience" || section === "leadership")
+    return [
+      { label: "Role", width: "minmax(140px, 1.4fr)", primary: x.title || x.organization || x.name || "Untitled", secondary: x.title ? x.organization || "" : x.subtitle || "" },
+      { label: "Location", width: "minmax(0, 0.8fr)", text: x.location || "—" },
+      { label: "Dates", width: "minmax(0, 0.9fr)", text: entryDates(x) || "—" },
+      { label: "Bullets", width: "72px", text: String(groupEntryBullets(x).length) },
+      { label: "Last Modified", width: "110px", text: modified },
+    ];
+  if (section === "projects")
+    return [
+      { label: "Project", width: "minmax(140px, 1.4fr)", primary: x.name || x.title || "Untitled", secondary: x.organization || x.subtitle || "" },
+      { label: "Location", width: "minmax(0, 0.8fr)", text: x.location || "—" },
+      { label: "Dates", width: "minmax(0, 0.9fr)", text: entryDates(x) || "—" },
+      { label: "Bullets", width: "72px", text: String(groupEntryBullets(x).length) },
+      { label: "Last Modified", width: "110px", text: modified },
+    ];
+  if (section === "education")
+    return [
+      { label: "School", width: "minmax(140px, 1.3fr)", primary: x.institution || "Untitled", secondary: x.college_school || "" },
+      { label: "Degree", width: "minmax(0, 1fr)", text: x.degree || degree || "—" },
+      { label: "Location", width: "minmax(0, 0.8fr)", text: x.location || "—" },
+      { label: "Graduation", width: "minmax(0, 0.7fr)", text: entryDates(x) || "—" },
+      { label: "Last Modified", width: "110px", text: modified },
+    ];
+  if (section === "skills")
+    return [
+      { label: "Group", width: "minmax(140px, 1fr)", primary: x.name || "Untitled", secondary: "" },
+      { label: "Tools", width: "minmax(0, 1.6fr)", text: tools.join(", ") || "—" },
+      { label: "Tool Count", width: "88px", text: String(tools.length) },
+      { label: "Last Modified", width: "110px", text: modified },
+    ];
+  if (section === "interests")
+    return [
+      { label: "Interest", width: "minmax(180px, 1fr)", primary: x.body || "Untitled", secondary: "" },
+      { label: "Last Modified", width: "110px", text: modified },
+    ];
+  return [
+    { label: "Section", width: "minmax(140px, 1.2fr)", primary: x.title || x.name || "Untitled", secondary: "" },
+    { label: "Layout", width: "minmax(0, 0.7fr)", text: x.layout || "—" },
+    { label: "Entries", width: "72px", text: String((x.entries || []).length) },
+    { label: "Last Modified", width: "110px", text: modified },
+  ];
+}
+function ProjectHelp({ name }: { name: string }) {
   return (
-    x.organization || x.name || x.institution || x.body || x.title || "Untitled"
+    <span className="project-help" onClick={(event) => event.stopPropagation()}>
+      <SectionHelp name={name} notes={bulletCoaching} />
+    </span>
   );
 }
 function EntryResults({
@@ -1315,50 +1396,128 @@ function EntryResults({
   section,
   query,
   status,
+  view,
   selectedId,
   onSelect,
 }: any) {
-  const rows = entriesFor(lib, section).filter(
-    (x: any) =>
-      (status === "all" || (status === "archived") === !!x.archived_at) &&
-      JSON.stringify(x).toLowerCase().includes(query.toLowerCase()),
+  const rows = entriesFor(lib, section).filter((x: any) =>
+    entryMatches(x, query, status),
   );
+  if (!rows.length)
+    return (
+      <div className="library-state">
+        <strong>{query ? "No matching records" : "No Library records"}</strong>
+        <span>
+          {query
+            ? "Try another search or filter."
+            : "Use Add New to create reusable content."}
+        </span>
+      </div>
+    );
+  const columns = entryCells(section, rows[0]);
+  const grid = {
+    "--entry-columns": columns.map((c) => c.width).join(" "),
+  } as React.CSSProperties;
+  if (view === "card")
+    return (
+      <div className="library-cards entry-cards">
+        {rows.map((x: any) => {
+          const cells = entryCells(section, x);
+          const lead = cells[0];
+          const entryHelp =
+            section === "projects" || section === "leadership";
+          return (
+            <article
+              className={`${selectedId === x.id ? "selected" : ""} ${entryHelp ? "project-entry-card" : ""}`.trim()}
+              key={x.id}
+              onClick={entryHelp ? () => onSelect(x) : undefined}
+            >
+              {entryHelp ? (
+                <div className="entry-title-row">
+                  <button
+                    type="button"
+                    className="entry-name-open"
+                    onClick={() => onSelect(x)}
+                  >
+                    <strong>{lead.primary}</strong>
+                  </button>
+                  <ProjectHelp name={lead.primary} />
+                </div>
+              ) : null}
+              <button type="button" onClick={() => onSelect(x)}>
+                {entryHelp ? null : <strong>{lead.primary}</strong>}
+                {lead.secondary ? <span>{lead.secondary}</span> : null}
+                <span className="library-card-meta">
+                  {cells.slice(1).map((cell) => (
+                    <span key={cell.label}>
+                      {cell.label}: {cell.text}
+                    </span>
+                  ))}
+                </span>
+                {x.archived_at && <em>Archived</em>}
+              </button>
+            </article>
+          );
+        })}
+      </div>
+    );
   return (
     <div className="entry-results">
-      <div className="entry-table-head">
-        <span>Entry</span>
-        <span>Location / Layout</span>
-        <span>Dates / Tools</span>
-        <span>Count</span>
-        <span>Last Modified</span>
+      <div className="entry-table-head" style={grid}>
+        {columns.map((cell) => (
+          <span key={cell.label}>{cell.label}</span>
+        ))}
       </div>
-      {rows.map((x: any) => (
-        <button
-          className={`entry-table-row ${selectedId === x.id ? "selected" : ""}`}
-          key={x.id}
-          onClick={() => onSelect(x)}
-        >
-          <span>
-            <strong>{entryTitle(x)}</strong>
-            <small>{x.title || x.subtitle || x.degree_major || ""}</small>
-          </span>
-          <span>{x.location || x.layout || "—"}</span>
-          <span>
-            {x.date_label ||
-              x.display_date ||
-              (x.items || []).map((t: any) => t.name).join(", ") ||
-              "—"}
-          </span>
-          <span>
-            {section === "custom"
-              ? (x.entries || []).length
-              : groupEntryBullets(x).length}
-          </span>
-          <span>
-            {x.updated_at ? new Date(x.updated_at).toLocaleDateString() : "—"}
-          </span>
-        </button>
-      ))}
+      {rows.map((x: any) => {
+        const cells = entryCells(section, x);
+        const entryHelp =
+          section === "projects" || section === "leadership";
+        const className = `entry-table-row ${selectedId === x.id ? "selected" : ""} ${entryHelp ? "entry-with-help" : ""}`.trim();
+        const body = cells.map((cell) =>
+          cell.primary != null ? (
+            <span key={cell.label}>
+              {entryHelp ? (
+                <div className="entry-title-row">
+                  <button
+                    type="button"
+                    className="entry-name-open"
+                    onClick={() => onSelect(x)}
+                  >
+                    <strong>{cell.primary}</strong>
+                  </button>
+                  <ProjectHelp name={cell.primary} />
+                </div>
+              ) : (
+                <strong>{cell.primary}</strong>
+              )}
+              <small>{cell.secondary}</small>
+            </span>
+          ) : (
+            <span key={cell.label}>{cell.text}</span>
+          ),
+        );
+        if (entryHelp)
+          return (
+            <div
+              className={className}
+              key={x.id}
+              style={grid}
+              onClick={() => onSelect(x)}
+            >
+              {body}
+            </div>
+          );
+        return (
+          <button
+            className={className}
+            key={x.id}
+            style={grid}
+            onClick={() => onSelect(x)}
+          >
+            {body}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -1386,16 +1545,73 @@ function kindForSection(section: string): LibraryEntryKind {
       skills: "tool-group",
       interests: "interest",
       custom: "custom-section",
+      profile: "profile",
     } as any
   )[section];
 }
+function recordUsage(lib: any, section: string, detail: any) {
+  const compositions = lib?.compositions || [];
+  const named = (id: string) =>
+    compositions.find((c: any) => String(c.id) === String(id));
+  const row = (composition: any, context: string) => ({
+    placement_id: String(composition.id),
+    composition_id: composition.id,
+    resume_name: composition.name,
+    section,
+    variant_name: context,
+    status: composition.archived_at ? "Archived" : "Current",
+  });
+  if (section === "profile")
+    return compositions
+      .filter((c: any) => String(c.profile_id || "") === String(detail.id))
+      .map((c: any) => row(c, detail.label || "Header"));
+  if (section === "custom")
+    return (lib?.composition_custom_sections || [])
+      .filter((link: any) => String(link.section_id) === String(detail.id))
+      .map((link: any) => named(link.composition_id))
+      .filter(Boolean)
+      .map((c: any) => row(c, detail.title || "Custom section"));
+  const itemSection: Record<string, string> = {
+    experience: "work_experience",
+    projects: "projects",
+    education: "education",
+    leadership: "leadership",
+    skills: "tool_groups",
+    interests: "personal_interests",
+  };
+  return (lib?.composition_items || [])
+    .filter(
+      (link: any) =>
+        String(link.item_id) === String(detail.id) &&
+        link.section === itemSection[section],
+    )
+    .map((link: any) => named(link.composition_id))
+    .filter(Boolean)
+    .map((c: any) => row(c, sectionLabel(section)));
+}
+function variantDetail(bullet: any) {
+  return {
+    id: bullet.id,
+    variants: (bullet.variants || []).map((v: any) => ({
+      id: v.variant_id || v.id,
+      name: v.variant_name || v.name || "Variant",
+      body: v.body || "",
+      is_default: v.is_default,
+      archived_at: v.variant_archived_at || null,
+      updated_at: v.variant_updated_at || v.updated_at || bullet.updated_at,
+    })),
+  };
+}
 function EntryDetails({
+  lib,
+  section: librarySection,
   detail,
   confirmed,
   tab,
   setTab,
   setDetail,
   reloadLibrary,
+  onOpenResume,
   onOpenBullet,
   setError,
 }: any) {
@@ -1407,19 +1623,22 @@ function EntryDetails({
       </div>
     );
   const section =
-    detail.kind === "employment"
-      ? "experience"
-      : detail.kind === "project"
-        ? "projects"
-        : detail.kind === "leadership"
-          ? "leadership"
-          : detail.institution
-            ? "education"
-            : detail.items
-              ? "skills"
-              : detail.body
-                ? "interests"
-                : "custom";
+    librarySection ||
+    ("linkedin_url" in detail && detail.label != null
+      ? "profile"
+      : detail.kind === "employment"
+        ? "experience"
+        : detail.kind === "project"
+          ? "projects"
+          : detail.kind === "leadership"
+            ? "leadership"
+            : detail.institution
+              ? "education"
+              : detail.items
+                ? "skills"
+                : detail.body
+                  ? "interests"
+                  : "custom");
   const kind = kindForSection(section);
   const save = async () => {
     try {
@@ -1432,8 +1651,17 @@ function EntryDetails({
         path = `/api/library/tool-groups/${detail.id}`;
       else if (kind === "interest")
         path = `/api/library/interests/${detail.id}`;
+      else if (kind === "profile")
+        path = `/api/library/profiles/${detail.id}`;
       else path = `/api/library/custom-sections/${detail.id}`;
-      await api(path, { method: "PUT", body: JSON.stringify(detail) });
+      const body =
+        kind === "profile" ? profilePayload(detail) : detail;
+      const message = kind === "profile" ? profileWriteError(detail) : "";
+      if (message) {
+        setError(message);
+        return;
+      }
+      await api(path, { method: "PUT", body: JSON.stringify(body) });
       await reloadLibrary();
     } catch (e: any) {
       setError(e.message);
@@ -1446,7 +1674,9 @@ function EntryDetails({
         : kind === "tool-group"
           ? "tool_groups"
           : kind === "interest"
-            ? "interests"
+          ? "interests"
+          : kind === "profile"
+            ? "profiles"
             : kind === "custom-section"
               ? "custom-sections"
               : "content_items";
@@ -1476,6 +1706,31 @@ function EntryDetails({
     setDetail(null);
   };
   const bullets = groupEntryBullets(detail);
+  const usage = recordUsage(lib, section, detail);
+  const refreshAfterVariant = async (fn: () => Promise<any>) => {
+    try {
+      await fn();
+      const next = await reloadLibrary();
+      const row = entriesFor(next, section).find(
+        (x: any) => x.id === detail.id,
+      );
+      if (row) setDetail(hydrateEducationDraft(structuredClone(row)));
+    } catch (e: any) {
+      setError(e.message);
+      throw e;
+    }
+  };
+  const duplicateProfile = async () => {
+    try {
+      await api(`/api/library/profiles/${detail.id}/duplicate`, {
+        method: "POST",
+        body: JSON.stringify({ label: `${detail.label} Copy` }),
+      });
+      await reloadLibrary();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
   return (
     <>
       <div className="detail-heading">
@@ -1489,12 +1744,28 @@ function EntryDetails({
         >
           Details
         </button>
+        {kind !== "profile" && (
+          <button
+            role="tab"
+            aria-selected={tab === "bullets"}
+            onClick={() => setTab("bullets")}
+          >
+            Bullets ({bullets.length})
+          </button>
+        )}
         <button
           role="tab"
-          aria-selected={tab === "bullets"}
-          onClick={() => setTab("bullets")}
+          aria-selected={tab === "variants"}
+          onClick={() => setTab("variants")}
         >
-          Bullets ({bullets.length})
+          Variants ({kind === "profile" ? 1 : bullets.reduce((n: number, b: any) => n + (b.variants?.length || 0), 0)})
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "usage"}
+          onClick={() => setTab("usage")}
+        >
+          Usage ({usage.length})
         </button>
       </div>
       {tab === "details" ? (
@@ -1515,7 +1786,7 @@ function EntryDetails({
             </button>
           </div>
         </>
-      ) : (
+      ) : tab === "bullets" ? (
         <div className="entry-bullets">
           {bullets.map((b: any) => (
             <div className="bullet-row" key={b.id}>
@@ -1526,6 +1797,45 @@ function EntryDetails({
             </div>
           ))}
         </div>
+      ) : tab === "variants" ? (
+        kind === "profile" ? (
+          <div className="variant-management variant-list">
+            <article className="variant-card">
+              <div className="variant-card-header">
+                <strong>{detail.label}</strong>
+              </div>
+              <p className="variant-wording">
+                {[detail.name, detail.email, detail.phone, detail.linkedin_label]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+              <div className="variant-actions">
+                <button onClick={duplicateProfile}>Duplicate</button>
+              </div>
+            </article>
+          </div>
+        ) : bullets.length ? (
+          <div className="entry-variants">
+            {bullets.map((b: any) => (
+              <Variants
+                key={b.id}
+                detail={variantDetail(b)}
+                mutate={refreshAfterVariant}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="library-state">
+            <strong>This record has no wording variants</strong>
+            <span>Bullets added to this entry will show their variants here.</span>
+          </div>
+        )
+      ) : (
+        <Usage
+          rows={usage}
+          onOpenResume={onOpenResume}
+          empty={`This ${sectionLabel(section).toLowerCase()} is not currently used in a resume`}
+        />
       )}
     </>
   );
@@ -1548,11 +1858,17 @@ function EntryCreateDialog({ kind, lib, close, saved, setError }: any) {
       else if (kind === "education") path = "/api/library/education";
       else if (kind === "tool-group") path = "/api/library/tool-groups";
       else if (kind === "interest") path = "/api/library/interests";
+      else if (kind === "profile") path = "/api/library/profiles";
       else if (kind === "custom-section") path = "/api/library/custom-sections";
       else path = "/api/library/custom-entries";
+      const message = kind === "profile" ? profileWriteError(draft) : "";
+      if (message) {
+        setError(message);
+        return;
+      }
       const row = await api<any>(path, {
         method: "POST",
-        body: JSON.stringify(draft),
+        body: JSON.stringify(kind === "profile" ? profilePayload(draft) : draft),
       });
       saved({ ...draft, ...row });
     } catch (e: any) {
@@ -1563,23 +1879,26 @@ function EntryCreateDialog({ kind, lib, close, saved, setError }: any) {
     <ModalShell title={`Add ${kind.replaceAll("-", " ")}`} close={close}>
       <LibraryEntryForm kind={kind} draft={draft} setDraft={setDraft} />
       {kind === "custom-entry" && (
-        <label>
-          Custom section
-          <select
+        <div className="choice-field">
+          <span>Custom section</span>
+          <ChoiceList
+            label="Custom section"
             value={draft.section_id}
-            onChange={(e) => setDraft({ ...draft, section_id: e.target.value })}
-          >
-            {(lib.custom_sections || []).map((x: any) => (
-              <option value={x.id} key={x.id}>
-                {x.title}
-              </option>
-            ))}
-          </select>
-        </label>
+            empty="Create a custom section before adding an entry."
+            options={(lib.custom_sections || [])
+              .filter((x: any) => !x.archived_at)
+              .map((x: any) => ({ value: x.id, label: x.title }))}
+            onChange={(section_id) => setDraft({ ...draft, section_id })}
+          />
+        </div>
       )}
       <div className="form-actions">
         <button onClick={close}>Cancel</button>
-        <button className="primary" onClick={submit}>
+        <button
+          className="primary"
+          onClick={submit}
+          disabled={kind === "custom-entry" && !draft.section_id}
+        >
           Create Entry
         </button>
       </div>
@@ -1623,7 +1942,10 @@ function BulkDialog({ kind, close, apply }: any) {
           />
         </div>
       ) : (
-        <SectionSelect value={section} onChange={setSection} />
+        <div className="choice-field">
+          <span>Section</span>
+          <SectionSelect value={section} onChange={setSection} />
+        </div>
       )}
       <div className="form-actions">
         <button onClick={close}>Cancel</button>
