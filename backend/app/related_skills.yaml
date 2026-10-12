@@ -1,0 +1,1476 @@
+# Related skills used to place a missing keyword on a resume line.
+# How to add a cluster, alias, phrase, or combination: docs/related-skills.md
+#
+# Authoring rules learned from related_skills.py (keep these in mind when editing):
+#   * Text is lowercased. .NET, node.js (and other Name.js tools), and the language R are
+#     kept whole before other punctuation becomes a space.
+#     ".NET" -> "dotnet", "ASP.NET" -> "asp dotnet", "node.js" -> "nodejs", "R" -> "r",
+#     "R&D" -> "rnd". Other punctuation still splits: "A/B testing" -> "a b testing",
+#     "S-Log3" -> "s log3", "scikit-learn" -> "scikit learn".
+#   * There is no stemming. "pipeline" does not match "pipelines" and "recruiting" does not
+#     match "recruited". Use a single-word alias (dashboards: dashboard) or list both forms.
+#   * Single-word aliases are applied word-by-word to ALL text and to cluster terms.
+#     Because "hr: human resources" exists, "hr business partner" is stored as
+#     "human resources business partner". Alias VALUES are not re-aliased, so they must be
+#     written in that fully expanded form (hrbp: human resources business partner).
+#   * Avoid bare common English words as names (rest, go, red, avid, resolve, premiere,
+#     slider, net, lean, a, it). They create false matches. Use a phrase instead.
+#   * A term may sit in more than one cluster when it genuinely bridges two concepts.
+
+clusters:
+
+  # ------------------------------------------------------------------
+  # Existing clusters (original entries kept unchanged, additions below them)
+  # ------------------------------------------------------------------
+
+  - id: python
+    names:
+      - python
+      - pandas
+      - numpy
+      - scipy
+      - scikit-learn
+      - jupyter
+      - matplotlib
+      # added
+      - pyspark
+      - polars
+      - seaborn
+      - plotly
+      - statsmodels
+      - flask
+      - django
+      - fastapi
+    phrases:
+      - machine learning
+      - data analysis
+
+  - id: sql
+    names:
+      - sql
+      - postgresql
+      - mysql
+      - snowflake
+      - bigquery
+      - oracle
+      - redshift
+      - sqlite
+      # added
+      - teradata
+      - db2
+      - mariadb
+    phrases:
+      - microsoft sql server
+      # added
+      - azure sql
+      - azure synapse
+      - stored procedures
+      - query optimization
+
+  - id: bi
+    names:
+      - tableau
+      - looker
+      # added
+      - qlik
+      - qlikview
+      - microstrategy
+      - cognos
+      - spotfire
+      - domo
+      - sisense
+      - metabase
+      - superset
+      - ssrs
+      - dax
+      - dashboard
+    phrases:
+      - power bi
+      # added
+      - qlik sense
+      - looker studio
+      - sap businessobjects
+      - crystal reports
+      - power query
+      - business intelligence
+      - data visualization
+
+  - id: cloud
+    names:
+      - kubernetes
+      - docker
+      - terraform
+      - aws
+      - gcp
+      - azure
+      # added
+      - jenkins
+      - ansible
+      - helm
+      - devops
+      - circleci
+      - cloudformation
+      - serverless
+      - ec2
+      - s3
+    phrases:
+      - google cloud
+      - amazon web services
+      - continuous integration
+      - continuous delivery
+      # added
+      - ci/cd
+      - github actions
+      - gitlab ci
+      - azure devops
+      - aws lambda
+      - infrastructure as code
+
+  - id: observability
+    names:
+      - prometheus
+      - grafana
+      - datadog
+      - splunk
+    phrases:
+      - incident response
+
+  - id: data-engineering
+    names:
+      # added
+      - etl
+      - elt
+      - airflow
+      - dagster
+      - prefect
+      - dbt
+      - spark
+      - pyspark
+      - hadoop
+      - hive
+      - databricks
+      - kafka
+      - kinesis
+      - flink
+      - trino
+      - presto
+      - fivetran
+      - informatica
+      - talend
+      - ssis
+      - matillion
+      - lakehouse
+    phrases:
+      - data engineering
+      # added
+      - data engineer
+      - data pipeline
+      - data pipelines
+      - etl pipelines
+      - data warehouse
+      - data warehousing
+      - data lake
+      - data modeling
+      - dimensional modeling
+      - star schema
+      - delta lake
+      - azure data factory
+      - aws glue
+      - google dataflow
+      - change data capture
+      - batch processing
+      - stream processing
+      - data ingestion
+
+  # ------------------------------------------------------------------
+  # Data Science
+  # ------------------------------------------------------------------
+
+  - id: data-science
+    names:
+      - mlops
+      - tensorflow
+      - pytorch
+      - keras
+      - scikit-learn
+      - xgboost
+      - lightgbm
+      - catboost
+      - mlflow
+      - sagemaker
+    phrases:
+      - data science
+      - data scientist
+      - machine learning
+      - deep learning
+      - artificial intelligence
+      - generative ai
+      - large language models
+      - natural language processing
+      - computer vision
+      - predictive modeling
+      - predictive analytics
+      - feature engineering
+      - model training
+      - model deployment
+      - neural networks
+      - random forest
+      - gradient boosting
+      - k-means
+      - recommendation systems
+      - recommender systems
+      - prompt engineering
+      - retrieval augmented generation
+      - hugging face
+      - vertex ai
+      - azure machine learning
+
+  - id: statistics
+    names:
+      - statistics
+      - forecasting
+      - spss
+      - sas
+      - stata
+      - minitab
+      - rstudio
+      - r
+      - tidyverse
+      - ggplot2
+      - dplyr
+      - anova
+    phrases:
+      - statistical analysis
+      - statistical modeling
+      - hypothesis testing
+      - a/b testing
+      - regression analysis
+      - linear regression
+      - logistic regression
+      - time series
+      - time series analysis
+      - bayesian statistics
+      - experimental design
+      - design of experiments
+      - survival analysis
+      - chi-square
+      - confidence intervals
+      - r programming
+      - r shiny
+
+  # ------------------------------------------------------------------
+  # Data Engineering (concept cluster is "data-engineering" above)
+  # ------------------------------------------------------------------
+
+  - id: nosql
+    names:
+      - nosql
+      - mongodb
+      - cassandra
+      - dynamodb
+      - redis
+      - couchbase
+      - elasticsearch
+      - neo4j
+    phrases:
+      - cosmos db
+
+  - id: data-governance
+    names:
+      - collibra
+      - alation
+      - gdpr
+      - ccpa
+    phrases:
+      - data governance
+      - data quality
+      - data integrity
+      - data stewardship
+      - data lineage
+      - master data management
+      - metadata management
+      - data catalog
+      - data privacy
+      - data validation
+      - data audit
+      - great expectations
+
+  # ------------------------------------------------------------------
+  # Data Analytics
+  # ------------------------------------------------------------------
+
+  - id: data-analytics
+    names:
+      - analytics
+      - dashboard
+    phrases:
+      - data analytics
+      - data analysis
+      - data analyst
+      - business analytics
+      - ad hoc analysis
+      - ad hoc reporting
+      - trend analysis
+      - exploratory data analysis
+      - data cleaning
+      - data cleansing
+      - data wrangling
+      - data storytelling
+      - key performance indicators
+      - data visualization
+      - business intelligence
+
+  - id: spreadsheets
+    names:
+      - excel
+      - vlookup
+      - xlookup
+      - vba
+    phrases:
+      - google sheets
+      - pivot tables
+      - power query
+      - index match
+
+  - id: web-analytics
+    phrases:
+      - google analytics
+      - adobe analytics
+      - google tag manager
+      - amplitude analytics
+    names:
+      - mixpanel
+
+  # ------------------------------------------------------------------
+  # Information Systems
+  # ------------------------------------------------------------------
+
+  - id: information-systems
+    names: []
+    phrases:
+      - information systems
+      - management information systems
+      - computer information systems
+      - information technology
+      - business systems
+      - enterprise systems
+      - enterprise applications
+      - systems analyst
+      - business systems analyst
+      - systems analysis
+      - system implementation
+      - systems implementation
+      - systems administration
+
+  - id: erp
+    names:
+      - erp
+      - sap
+      - netsuite
+      - peoplesoft
+      - epicor
+    phrases:
+      - sap s/4hana
+      - sap ecc
+      - oracle e-business suite
+      - oracle fusion
+      - jd edwards
+      - microsoft dynamics
+      - dynamics 365
+      - workday financials
+
+  - id: itsm
+    names:
+      - servicenow
+      - zendesk
+      - freshservice
+      - itil
+    phrases:
+      - it service management
+      - jira service management
+      - bmc remedy
+      - bmc helix
+      - help desk
+      - service desk
+      - incident management
+      - problem management
+      - change control
+      - change advisory board
+      - service level agreements
+      - servicenow hrsd
+
+  - id: business-analysis
+    names:
+      - visio
+      - lucidchart
+      - bpmn
+    phrases:
+      - business analysis
+      - business analyst
+      - requirements gathering
+      - business requirements
+      - business requirements document
+      - functional requirements
+      - functional specifications
+      - user stories
+      - use cases
+      - user acceptance testing
+      - process mapping
+      - process improvement
+      - gap analysis
+      - future state
+
+  - id: project-management
+    names:
+      - jira
+      - confluence
+      - asana
+      - smartsheet
+      - trello
+      - agile
+      - scrum
+      - kanban
+      - waterfall
+      - pmp
+    phrases:
+      - project management
+      - program management
+      - microsoft project
+      - monday.com
+      - scrum master
+      - sprint planning
+      - project plan
+
+  - id: identity-access
+    names:
+      - okta
+      - saml
+      - ldap
+      - sox
+    phrases:
+      - active directory
+      - entra id
+      - single sign-on
+      - role-based access control
+      - identity and access management
+      - user access reviews
+      - access provisioning
+
+  - id: integration
+    names:
+      - api
+      - integration
+      - soap
+      - json
+      - xml
+      - xslt
+      - sftp
+      - edi
+      - mulesoft
+      - boomi
+      - workato
+      - postman
+      - middleware
+      - ipaas
+    phrases:
+      - rest api
+      - web services
+      - file transfer
+
+  # ------------------------------------------------------------------
+  # Human Resources
+  # ------------------------------------------------------------------
+
+  - id: human-resources
+    names:
+      - offboarding
+      - shrm
+      - phr
+      - sphr
+      - aphr
+    phrases:
+      - human resources
+      - human resources management
+      - people operations
+      - people and culture
+      - hr generalist
+      - hr business partner
+      - hr operations
+      - hr policies
+      - employee lifecycle
+      - employee onboarding
+      - new hire onboarding
+      - employee handbook
+      - shrm-cp
+      - shrm-scp
+
+  - id: talent-acquisition
+    names:
+      - recruiting
+      - recruitment
+      - recruiter
+      - sourcing
+    phrases:
+      - talent acquisition
+      - full-cycle recruiting
+      - candidate sourcing
+      - candidate experience
+      - interview scheduling
+      - employer branding
+      - campus recruiting
+      - university recruiting
+      - high-volume hiring
+      - boolean search
+      - applicant tracking system
+
+  - id: ats
+    names:
+      - greenhouse
+      - icims
+      - taleo
+      - jobvite
+      - smartrecruiters
+      - avature
+      - beamery
+      - hirevue
+      - bullhorn
+    phrases:
+      - applicant tracking system
+      - workday recruiting
+      - successfactors recruiting
+      - linkedin recruiter
+
+  - id: total-rewards
+    names:
+      - compensation
+      - cobra
+    phrases:
+      - compensation and benefits
+      - total rewards
+      - benefits administration
+      - open enrollment
+      - compensation planning
+      - merit cycle
+      - merit increases
+      - salary benchmarking
+      - salary surveys
+      - pay equity
+      - job architecture
+      - job leveling
+      - incentive compensation
+      - equity compensation
+      - health and welfare
+      - 401(k)
+
+  - id: payroll
+    names:
+      - payroll
+      - garnishments
+      - timekeeping
+      - adp
+      - paychex
+      - ukg
+      - dayforce
+      - paycom
+      - paylocity
+      - paycor
+      - gusto
+    phrases:
+      - payroll processing
+      - payroll administration
+      - multi-state payroll
+      - payroll tax
+      - time and attendance
+      - workday payroll
+      - adp workforce now
+      - w-2
+
+  - id: employee-relations
+    names:
+      - eeo
+      - eeoc
+      - flsa
+      - fmla
+      - osha
+    phrases:
+      - employee relations
+      - labor relations
+      - workplace investigations
+      - employment law
+      - labor law
+      - collective bargaining
+      - hr compliance
+      - eeo-1
+      - affirmative action
+      - i-9
+      - e-verify
+      - leave of absence
+      - leave management
+      - reasonable accommodation
+
+  - id: learning-development
+    names:
+      - docebo
+    phrases:
+      - learning and development
+      - training and development
+      - talent development
+      - leadership development
+      - instructional design
+      - learning management system
+      - cornerstone ondemand
+      - workday learning
+      - successfactors learning
+      - linkedin learning
+      - e-learning
+      - articulate storyline
+      - articulate 360
+      - adobe captivate
+      - training needs analysis
+
+  - id: performance-talent
+    names:
+      - okrs
+    phrases:
+      - performance management
+      - performance reviews
+      - performance appraisals
+      - talent management
+      - talent reviews
+      - succession planning
+      - career development
+      - career pathing
+      - goal setting
+      - 9-box
+      - high potential
+
+  - id: employee-engagement
+    names:
+      - qualtrics
+      - glint
+      - peakon
+    phrases:
+      - employee engagement
+      - engagement surveys
+      - employee surveys
+      - pulse surveys
+      - employee experience
+      - employee recognition
+      - culture amp
+
+  - id: organizational-change
+    names:
+      - prosci
+      - adkar
+    phrases:
+      - organizational change management
+      - change management
+      - change readiness
+      - organizational development
+      - organizational design
+
+  - id: people-analytics
+    names:
+      - headcount
+      - attrition
+      - visier
+    phrases:
+      - people analytics
+      - hr analytics
+      - workforce analytics
+      - workforce planning
+      - headcount reporting
+      - headcount planning
+      - employee turnover
+      - turnover analysis
+      - employee retention
+      - retention analysis
+      - hr metrics
+      - hr reporting
+      - hr dashboard
+      - span of control
+      - workday prism
+
+  # ------------------------------------------------------------------
+  # HRIS
+  # ------------------------------------------------------------------
+
+  - id: hris
+    names:
+      - hris
+      - workday
+      - successfactors
+      - peoplesoft
+      - ukg
+      - adp
+      - bamboohr
+      - dayforce
+      - paycom
+      - paylocity
+      - rippling
+      - hibob
+    phrases:
+      - human capital management
+      - hr systems
+      - hr technology
+      - people systems
+      - hr data
+      - employee data
+      - position management
+      - org chart
+      - workday hcm
+      - oracle hcm
+      - oracle hcm cloud
+      - ukg pro
+      - ukg dimensions
+      - ukg ready
+      - adp workforce now
+      - adp vantage
+      - servicenow hrsd
+      - hr service delivery
+
+  - id: workday
+    names:
+      - workday
+    phrases:
+      - workday hcm
+      - workday studio
+      - report writer
+      - calculated fields
+      - enterprise interface builder
+      - core connector
+      - cloud connect
+      - workday extend
+      - workday prism
+      - workday integration
+      - business process configuration
+      - supervisory organizations
+      - custom reports
+      - advanced reports
+      - matrix reports
+      - composite reports
+      - domain security policies
+      - workday security
+      - workday recruiting
+      - workday payroll
+      - workday learning
+      - workday adaptive planning
+      - workday peakon
+
+  # ------------------------------------------------------------------
+  # Engineering (software)
+  # ------------------------------------------------------------------
+
+  - id: software-engineering
+    names:
+      - frontend
+      - backend
+      - microservices
+    phrases:
+      - software engineering
+      - software development
+      - software engineer
+      - software developer
+      - full-stack
+      - object-oriented programming
+      - system design
+      - design patterns
+      - software development life cycle
+      - code review
+      - distributed systems
+      - web development
+      - web applications
+
+  - id: java
+    names:
+      - java
+      - kotlin
+      - scala
+      - maven
+      - gradle
+      - jvm
+      - hibernate
+    phrases:
+      - spring boot
+      - spring framework
+
+  - id: javascript
+    names:
+      - javascript
+      - js
+      - typescript
+      - react
+      - angular
+      - vue
+      - html
+      - css
+      - jquery
+      - webpack
+      - vite
+      - redux
+    phrases:
+      - node.js
+      - next.js
+      - express.js
+      - tailwind css
+
+  - id: dotnet
+    names:
+      - "c#"
+      - "f#"
+      - dotnet
+      - blazor
+    phrases:
+      - asp.net
+      - entity framework
+
+  - id: systems-languages
+    names:
+      - "c++"
+      - rust
+      - golang
+
+  - id: version-control
+    names:
+      - git
+      - github
+      - gitlab
+      - bitbucket
+      - subversion
+    phrases:
+      - version control
+      - source control
+
+  - id: software-testing
+    names:
+      - pytest
+      - junit
+      - jest
+      - selenium
+      - playwright
+      - cypress
+    phrases:
+      - unit testing
+      - integration testing
+      - regression testing
+      - test automation
+      - automated testing
+      - test-driven development
+      - quality assurance
+
+  # ------------------------------------------------------------------
+  # Engineering (mechanical, electrical, civil, industrial)
+  # ------------------------------------------------------------------
+
+  - id: engineering-disciplines
+    names: []
+    phrases:
+      - mechanical engineering
+      - electrical engineering
+      - civil engineering
+      - industrial engineering
+      - systems engineering
+      - chemical engineering
+      - manufacturing engineering
+      - structural engineering
+      - aerospace engineering
+      - biomedical engineering
+      - computer engineering
+      - engineering design
+      - professional engineer
+      - engineer in training
+
+  - id: cad
+    names:
+      - cad
+      - autocad
+      - solidworks
+      - catia
+      - creo
+      - revit
+      - microstation
+    phrases:
+      - fusion 360
+      - autodesk inventor
+      - siemens nx
+      - civil 3d
+      - 3d modeling
+      - 3d printing
+      - additive manufacturing
+      - gd&t
+      - technical drawings
+      - engineering drawings
+      - tolerance analysis
+      - mechanical design
+
+  - id: simulation
+    names:
+      - matlab
+      - simulink
+      - ansys
+      - comsol
+      - abaqus
+      - labview
+    phrases:
+      - finite element analysis
+      - computational fluid dynamics
+      - thermal analysis
+      - stress analysis
+
+  - id: electrical
+    names:
+      - altium
+      - kicad
+      - arduino
+      - fpga
+      - vhdl
+      - verilog
+      - oscilloscope
+      - scada
+      - microcontroller
+    phrases:
+      - circuit design
+      - printed circuit board
+      - embedded systems
+      - embedded c
+      - raspberry pi
+      - power systems
+      - programmable logic controller
+      - control systems
+      - signal processing
+      - human machine interface
+
+  - id: manufacturing-quality
+    names:
+      - dmaic
+      - kaizen
+      - fmea
+      - minitab
+      - 5s
+      - capa
+    phrases:
+      - lean manufacturing
+      - six sigma
+      - lean six sigma
+      - root cause analysis
+      - statistical process control
+      - iso 9001
+      - quality control
+      - quality assurance
+      - continuous improvement
+      - process improvement
+      - value stream mapping
+      - poka-yoke
+      - corrective action
+
+  # ------------------------------------------------------------------
+  # Cinematography
+  # ------------------------------------------------------------------
+
+  - id: cinematography
+    names:
+      - cinematography
+      - cinematographer
+      - videography
+      - videographer
+    phrases:
+      - director of photography
+      - camera operator
+      - camera operation
+      - b-camera operator
+      - shot composition
+      - shot framing
+      - visual storytelling
+      - camera movement
+      - second unit
+
+  - id: camera-crew
+    names: []
+    phrases:
+      - first assistant camera
+      - second assistant camera
+      - camera assistant
+      - focus puller
+      - focus pulling
+      - digital imaging technician
+      - camera department
+
+  - id: camera-systems
+    names:
+      - camera
+      - arri
+      - panavision
+      - blackmagic
+      - dslr
+      - mirrorless
+      - 16mm
+      - 35mm
+    phrases:
+      - cinema camera
+      - arri alexa
+      - alexa mini
+      - alexa 35
+      - alexa lf
+      - red komodo
+      - red v-raptor
+      - red monstro
+      - red digital cinema
+      - sony venice
+      - sony fx9
+      - sony fx6
+      - sony fx3
+      - canon c300
+      - canon c500
+      - canon c70
+      - canon cinema eos
+      - ursa mini pro
+      - pocket cinema camera
+      - super 35
+      - large format
+
+  - id: lenses
+    names:
+      - lens
+      - anamorphic
+      - cooke
+      - zeiss
+      - panavision
+    phrases:
+      - anamorphic lens
+      - prime lens
+      - zoom lens
+      - master primes
+      - lens selection
+      - depth of field
+      - follow focus
+      - matte box
+      - nd filter
+
+  - id: camera-movement
+    names:
+      - steadicam
+      - gimbal
+      - ronin
+      - dolly
+      - jib
+      - technocrane
+      - easyrig
+    phrases:
+      - dji ronin
+      - movi pro
+      - camera crane
+      - camera slider
+      - handheld camera
+      - dolly track
+      - steadicam operator
+      - gimbal operator
+      - car mount
+      - drone cinematography
+      - aerial cinematography
+      - aerial videography
+      - part 107
+      - dji inspire
+
+  - id: lighting-grip
+    names:
+      - gaffer
+      - grip
+      - aputure
+      - skypanel
+      - litepanels
+    phrases:
+      - best boy
+      - key grip
+      - dolly grip
+      - lighting design
+      - lighting setup
+      - three-point lighting
+      - key light
+      - fill light
+      - practical lights
+      - natural light
+      - hmi lights
+      - led panels
+      - arri skypanel
+      - kino flo
+      - color temperature
+      - c-stand
+
+  - id: color-grading
+    names:
+      - colorist
+      - baselight
+      - lut
+      - dailies
+    phrases:
+      - color grading
+      - color correction
+      - davinci resolve
+      - log footage
+      - log c
+      - s-log
+      - s-log3
+      - v-log
+      - c-log
+      - aces workflow
+      - hdr grading
+      - on-set color
+
+  - id: video-editing
+    phrases:
+      - video editing
+      - film editing
+      - premiere pro
+      - avid media composer
+      - final cut pro
+      - after effects
+      - frame.io
+      - post-production
+      - proxy workflow
+      - assistant editor
+    names: []
+
+  - id: video-production
+    names:
+      - storyboard
+      - storyboarding
+      - documentary
+    phrases:
+      - video production
+      - film production
+      - pre-production
+      - call sheet
+      - shot list
+      - location scouting
+      - tech scout
+      - feature film
+      - short film
+      - music video
+      - commercial production
+      - narrative film
+      - branded content
+      - multi-camera
+      - live production
+
+aliases:
+  # existing
+  k8s: kubernetes
+  postgres: postgresql
+  sklearn: scikit-learn
+  powerbi: power bi
+
+  # ---- data science / statistics ----
+  ml: machine learning
+  ai: artificial intelligence
+  genai: generative artificial intelligence
+  llm: large language models
+  llms: large language models
+  large language model: large language models
+  nlp: natural language processing
+  ab testing: a/b testing
+  ibm spss: spss
+  kmeans: k-means
+  recommender system: recommender systems
+  recommendation system: recommendation systems
+  neural network: neural networks
+
+  # ---- data engineering ----
+  apache spark: spark
+  apache kafka: kafka
+  apache airflow: airflow
+  apache hive: hive
+  apache hadoop: hadoop
+  apache flink: flink
+  adf: azure data factory
+  mssql: microsoft sql server
+  ms sql: microsoft sql server
+  sql server: microsoft sql server
+  t-sql: sql
+  tsql: sql
+  pl/sql: sql
+  plsql: sql
+  mongo: mongodb
+  cosmosdb: cosmos db
+  elastic search: elasticsearch
+  cdc: change data capture
+  data warehouses: data warehouse
+  data lakes: data lake
+  mdm: master data management
+
+  # ---- data analytics ----
+  dashboards: dashboard
+  kpi: key performance indicators
+  kpis: key performance indicators
+  eda: exploratory data analysis
+  ms excel: excel
+  microsoft excel: excel
+  pivot table: pivot tables
+  pivottable: pivot tables
+  pivottables: pivot tables
+  google data studio: looker studio
+  data studio: looker studio
+  ibm cognos: cognos
+  apache superset: superset
+  sql server reporting services: ssrs
+  sql server integration services: ssis
+  ga4: google analytics
+
+  # ---- information systems ----
+  mis: management information systems
+  itsm: it service management
+  helpdesk: help desk
+  slas: service level agreements
+  sla: service level agreements
+  s/4hana: sap s/4hana
+  s4hana: sap s/4hana
+  sap s4hana: sap s/4hana
+  oracle ebs: oracle e-business suite
+  d365: dynamics 365
+  microsoft dynamics 365: dynamics 365
+  jde: jd edwards
+  uat: user acceptance testing
+  brd: business requirements document
+  ms project: microsoft project
+  sso: single sign-on
+  rbac: role-based access control
+  iam: identity and access management
+  azure ad: entra id
+  azure active directory: entra id
+  microsoft entra id: entra id
+  apis: api
+  rest apis: rest api
+  restful api: rest api
+  restful apis: rest api
+  integrations: integration
+  dell boomi: boomi
+
+  # ---- human resources ----
+  hr: human resources
+  hrbp: human resources business partner
+  people ops: people operations
+  "l&d": learning and development
+  "learning & development": learning and development
+  "t&d": training and development
+  "training & development": training and development
+  "compensation & benefits": compensation and benefits
+  lms: learning management system
+  ats: applicant tracking system
+  applicant tracking systems: applicant tracking system
+  ocm: organizational change management
+  org design: organizational design
+  i9: i-9
+  everify: e-verify
+  "401k": 401(k)
+  okr: okrs
+  nine box: 9-box
+  performance review: performance reviews
+
+  # ---- hris / workday ----
+  hrms: hris
+  hcm: human capital management
+  human resources information system: hris
+  human resources information systems: hris
+  hr tech: human resources technology
+  kronos: ukg
+  ultipro: ukg pro
+  ceridian: dayforce
+  ceridian dayforce: dayforce
+  sap successfactors: successfactors
+  bamboo hr: bamboohr
+  adp wfn: adp workforce now
+  eib: enterprise interface builder
+  eibs: enterprise interface builder
+  calculated field: calculated fields
+  core connectors: core connector
+  custom report: custom reports
+  advanced report: advanced reports
+  matrix report: matrix reports
+  composite report: composite reports
+  supervisory organization: supervisory organizations
+  sup orgs: supervisory organizations
+  sup org: supervisory organizations
+  org charts: org chart
+
+  # ---- software engineering ----
+  nodejs: node.js
+  reactjs: react
+  react.js: react
+  vuejs: vue
+  vue.js: vue
+  nextjs: next.js
+  angularjs: angular
+  html5: html
+  css3: css
+  ".net core": dotnet
+  ".net framework": dotnet
+  asp.net core: asp.net
+  c sharp: "c#"
+  cpp: "c++"
+  cicd: ci/cd
+  oop: object-oriented programming
+  sdlc: software development life cycle
+  software development lifecycle: software development life cycle
+  front end: frontend
+  back end: backend
+  microservice: microservices
+  code reviews: code review
+  tdd: test-driven development
+  qa: quality assurance
+  unit tests: unit testing
+  github action: github actions
+  iac: infrastructure as code
+
+  # ---- engineering ----
+  fea: finite element analysis
+  cfd: computational fluid dynamics
+  plc: programmable logic controller
+  plcs: programmable logic controller
+  pcb: printed circuit board
+  pcbs: printed circuit board
+  microcontrollers: microcontroller
+  gdt: gd&t
+  spc: statistical process control
+  rca: root cause analysis
+  pe license: professional engineer
+  eit: engineer in training
+  solid works: solidworks
+
+  # ---- cinematography ----
+  dop: director of photography
+  dit: digital imaging technician
+  1st ac: first assistant camera
+  first ac: first assistant camera
+  1st assistant camera: first assistant camera
+  2nd ac: second assistant camera
+  second ac: second assistant camera
+  2nd assistant camera: second assistant camera
+  cameras: camera
+  lenses: lens
+  cinema cameras: cinema camera
+  luts: lut
+  adobe premiere: premiere pro
+  adobe premiere pro: premiere pro
+  fcp: final cut pro
+  fcpx: final cut pro
+  media composer: avid media composer
+  adobe after effects: after effects
+  postproduction: post-production
+  preproduction: pre-production
+  storyboards: storyboard
+  shot lists: shot list
+  call sheets: call sheet
+  music videos: music video
+  feature films: feature film
+  short films: short film
+  documentaries: documentary
+  multicam: multi-camera
+  3-point lighting: three-point lighting
+  nd filters: nd filter
+  faa part 107: part 107
+
+combinations:
+  # existing
+  - when:
+      - Python
+      - SQL
+    relates_to: data-engineering
+
+  # ---- data engineering ----
+  - when: [Snowflake, Python]
+    relates_to: data-engineering
+  - when: [BigQuery, Python]
+    relates_to: data-engineering
+  - when: [SQL, AWS]
+    relates_to: data-engineering
+  - when: [SQL, Azure]
+    relates_to: data-engineering
+  - when: [SQL, GCP]
+    relates_to: data-engineering
+
+  # ---- data science ----
+  - when: [Python, statistics]
+    relates_to: data-science
+  - when: [Python, A/B testing]
+    relates_to: data-science
+  - when: [Python, forecasting]
+    relates_to: data-science
+  - when: [SQL, statistics]
+    relates_to: data-science
+
+  # ---- data analytics ----
+  - when: [SQL, Excel]
+    relates_to: data-analytics
+  - when: [SQL, Tableau]
+    relates_to: data-analytics
+  - when: [SQL, Power BI]
+    relates_to: data-analytics
+  - when: [SQL, Looker]
+    relates_to: data-analytics
+  - when: [Excel, Power BI]
+    relates_to: data-analytics
+  - when: [Excel, Tableau]
+    relates_to: data-analytics
+
+  # ---- hris ----
+  - when: [HR, SQL]
+    relates_to: hris
+  - when: [HR, integration]
+    relates_to: hris
+  - when: [HR, API]
+    relates_to: hris
+  - when: [HR, reporting]
+    relates_to: hris
+  - when: [HR, configuration]
+    relates_to: hris
+  - when: [HR, data integrity]
+    relates_to: hris
+  - when: [payroll, integration]
+    relates_to: hris
+  - when: [benefits, integration]
+    relates_to: hris
+
+  # ---- people analytics ----
+  - when: [HR, data analysis]
+    relates_to: people-analytics
+  - when: [HR, dashboard]
+    relates_to: people-analytics
+  - when: [HR, Tableau]
+    relates_to: people-analytics
+  - when: [HR, Power BI]
+    relates_to: people-analytics
+  - when: [Workday, Tableau]
+    relates_to: people-analytics
+  - when: [Workday, Power BI]
+    relates_to: people-analytics
+
+  # ---- software engineering ----
+  - when: [Python, API]
+    relates_to: software-engineering
+  - when: [Java, API]
+    relates_to: software-engineering
+  - when: [JavaScript, API]
+    relates_to: software-engineering
+  - when: [Python, Docker]
+    relates_to: software-engineering
+  - when: [Java, Docker]
+    relates_to: software-engineering
+
+  # ---- engineering ----
+  - when: [CAD, manufacturing]
+    relates_to: cad
+
+  # ---- cinematography ----
+  - when: [camera, lighting]
+    relates_to: cinematography
+  - when: [camera, lens]
+    relates_to: cinematography
+  - when: [camera, film]
+    relates_to: cinematography
+  - when: [lighting, film]
+    relates_to: cinematography
+  - when: [drone, footage]
+    relates_to: camera-movement
+  - when: [color, footage]
+    relates_to: color-grading
+  - when: [video, editing]
+    relates_to: video-editing

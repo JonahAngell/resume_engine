@@ -7,8 +7,11 @@ def norm(s):
  d=s.strip()
  if not d: raise ValueError("Tag name cannot be blank")
  return d,d.casefold()
+# Parent entry wins over bullets.section. Inserts that omit section keep the
+# experience default, so leadership and project bullets would otherwise be hidden.
+LIBRARY_SECTION="COALESCE((SELECT CASE ci.kind WHEN 'employment' THEN 'experience' WHEN 'project' THEN 'projects' WHEN 'leadership' THEN 'leadership' END FROM content_items ci WHERE ci.id=b.parent_id),CASE WHEN b.education_item_id IS NOT NULL THEN 'education' WHEN b.tool_group_id IS NOT NULL THEN 'skills' WHEN b.interest_id IS NOT NULL THEN 'interests' WHEN b.custom_entry_id IS NOT NULL THEN 'custom' END,b.section)"
 async def counts(c,u):
- x=await many(c,"SELECT section,count(*) count FROM bullets WHERE user_id=%s AND archived_at IS NULL GROUP BY section",(u,));z={a['section']:a['count'] for a in x};z['all']=sum(z.values());return z
+ x=await many(c,f"SELECT {LIBRARY_SECTION} section,count(*) count FROM bullets b WHERE b.user_id=%s AND b.archived_at IS NULL GROUP BY 1",(u,));z={a['section']:a['count'] for a in x};z['all']=sum(z.values());return z
 async def tags(c,u,q=""):
  return await many(c,"SELECT id,display_name,normalized_name,created_at,updated_at FROM library_tags WHERE user_id=%s AND normalized_name LIKE %s ORDER BY normalized_name,id",(u,f"%{q.strip().casefold()}%"))
 async def upsert_tag(c,u,n):
@@ -17,12 +20,12 @@ async def items(c,u,q,status,section,tag_ids,page,size):
  w=["b.user_id=%s"];p=[u]
  if status=="active":w+=["b.archived_at IS NULL"]
  if status=="archived":w+=["b.archived_at IS NOT NULL"]
- if section:w+=["b.section=%s"];p+=[section]
+ if section:w+=[f"{LIBRARY_SECTION}=%s"];p+=[section]
  if q.strip():
   like=f"%{q.strip()}%";w+=["(d.body ILIKE %s OR b.parent_context ILIKE %s OR EXISTS(SELECT 1 FROM library_bullet_tags bt JOIN library_tags t ON t.id=bt.tag_id WHERE bt.bullet_id=b.id AND t.display_name ILIKE %s))"];p += [like,like,like]
  if tag_ids:w+=["b.id IN(SELECT bullet_id FROM library_bullet_tags WHERE tag_id=ANY(%s) GROUP BY bullet_id HAVING count(DISTINCT tag_id)=%s)"];p += [tag_ids,len(tag_ids)]
  pred=" AND ".join(w);total=(await one(c,f"SELECT count(*) total FROM bullets b LEFT JOIN LATERAL(SELECT body FROM bullet_variants v WHERE v.bullet_id=b.id ORDER BY v.is_default DESC,v.sort_order,v.id LIMIT 1)d ON true WHERE {pred}",p))["total"]
- rows=await many(c,f"""SELECT b.id,b.section,b.parent_id,b.parent_context,b.archived_at,b.created_at,b.updated_at,COALESCE(d.body,'') body,(SELECT count(*) FROM bullet_variants v WHERE v.bullet_id=b.id) variant_count,COALESCE((SELECT json_agg(json_build_object('id',t.id,'display_name',t.display_name) ORDER BY t.normalized_name,t.id) FROM library_bullet_tags bt JOIN library_tags t ON t.id=bt.tag_id WHERE bt.bullet_id=b.id),'[]'::json) tags FROM bullets b LEFT JOIN LATERAL(SELECT body FROM bullet_variants v WHERE v.bullet_id=b.id AND v.archived_at IS NULL ORDER BY v.is_default DESC,v.sort_order,v.id LIMIT 1)d ON true WHERE {pred} ORDER BY lower(COALESCE(d.body,'')),b.updated_at DESC,b.id LIMIT %s OFFSET %s""",p+[size,(page-1)*size])
+ rows=await many(c,f"""SELECT b.id,{LIBRARY_SECTION} section,b.parent_id,b.parent_context,b.archived_at,b.created_at,b.updated_at,COALESCE(d.body,'') body,(SELECT count(*) FROM bullet_variants v WHERE v.bullet_id=b.id) variant_count,COALESCE((SELECT json_agg(json_build_object('id',t.id,'display_name',t.display_name) ORDER BY t.normalized_name,t.id) FROM library_bullet_tags bt JOIN library_tags t ON t.id=bt.tag_id WHERE bt.bullet_id=b.id),'[]'::json) tags FROM bullets b LEFT JOIN LATERAL(SELECT body FROM bullet_variants v WHERE v.bullet_id=b.id AND v.archived_at IS NULL ORDER BY v.is_default DESC,v.sort_order,v.id LIMIT 1)d ON true WHERE {pred} ORDER BY lower(COALESCE(d.body,'')),b.updated_at DESC,b.id LIMIT %s OFFSET %s""",p+[size,(page-1)*size])
  pages=(total+size-1)//size;return dict(items=rows,page=page,page_size=size,total_items=total,total_pages=pages,has_previous=page>1,has_next=page<pages)
 async def create_item(c,u,x):
  async with c.transaction():

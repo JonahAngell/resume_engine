@@ -5,13 +5,30 @@ import { api } from "./api";
 import { RESUME_ENGINE_BUILD, RESUME_ENGINE_VERSION } from "./app-version";
 import { EditorHistory } from "./EditorHistory";
 import StandaloneLibrary from "./StandaloneLibrary";
+import JobMatchPanel, { emptyHighlight, type ResumeHighlight } from "./JobMatchPanel";
+import JobsPage from "./JobsPage";
 import { AppIcon } from "./AppIcon";
 import ModalShell from "./ModalShell";
 import OverflowMenu from "./OverflowMenu";
 import RevisionHistoryPanel from "./RevisionHistoryPanel";
 import { confirmDialog } from "./ConfirmDialog";
-import { RenameResumeDialog, EditDetailsDialog } from "./HomeDialogs";
+import {
+  bulletCoaching,
+  dateFormatCoaching,
+  firstJobCoaching,
+  lastJobCoaching,
+  laterJobCoaching,
+  sectionCoaching,
+} from "./resumeCoaching";
+import { RenameResumeDialog, EditDetailsDialog, JobTargetField } from "./HomeDialogs";
 import MonthYearField from "./MonthYearField";
+import { autoFitSkillRows } from "./skillRows";
+import { SectionHelp } from "./SectionHelp";
+import { EditorLibraryDialogs } from "./editor/EditorLibraryDialogs";
+import { RecordActions } from "./editor/LibraryPickerDialog";
+import { DragHandle, dragRowClass, useRowDrag } from "./editor/useRowDrag";
+import OptionGrid from "./OptionGrid";
+import ImportResumeDialog from "./ImportResumeDialog";
 
 import primaryLogo from "./assets/logo-primary-480.png";
 import compactLogo from "./assets/logo-compact.png";
@@ -24,10 +41,14 @@ type Comp = {
   display_title: string;
   target_company: string;
   target_role: string;
+  job_description_id?: string | null;
   preferred_page_length: number;
   date_format: "year" | "numeric" | "short" | "long";
+  template_style: "classic" | "sheets" | "harvard" | "dais" | "sre";
+  skill_row_max: number;
   section_sort_modes: Record<string, "automatic" | "manual">;
   summary_variant_id?: string | null;
+  profile_id?: string | null;
   revision: number;
   archived_at?: string | null;
   created_at?: string | null;
@@ -52,8 +73,14 @@ type EditorKind =
   | null;
 export default function App() {
   const [lib, setLib] = useState<any>(null);
-  const [screen, setScreen] = useState<"home" | "editor" | "library">(() =>
-    location.hash === "#library" ? "library" : "home",
+  const [screen, setScreen] = useState<
+    "home" | "editor" | "library" | "jobs" | "import"
+  >(() =>
+    location.hash === "#library"
+      ? "library"
+      : location.hash === "#jobs"
+        ? "jobs"
+        : "home",
   );
   const [homeSection, setHomeSection] = useState<"active" | "bin">("active");
   const [homeQuery, setHomeQuery] = useState("");
@@ -83,6 +110,7 @@ export default function App() {
   const [previewCollapsed, setPreviewCollapsed] = useState(
     () => localStorage.getItem("resume-engine-preview-collapsed") === "true",
   );
+  const [editorTab, setEditorTab] = useState<"edit" | "match">("edit");
   const [mobileWorkspace, setMobileWorkspace] = useState<"editor" | "preview">(
     () =>
       localStorage.getItem("resume-engine-mobile-workspace") === "preview"
@@ -99,6 +127,7 @@ export default function App() {
     }
   });
   const [currentPage, setCurrentPage] = useState(1);
+  const [matchHighlight, setMatchHighlight] = useState<ResumeHighlight>(emptyHighlight);
   const [zoom, setZoom] = useState(() => {
     const stored = Number(localStorage.getItem("resume-engine-preview-zoom"));
     return stored >= 50 && stored <= 150 ? stored : 100;
@@ -108,7 +137,7 @@ export default function App() {
   const historyRef = useRef(new EditorHistory());
   const sessionId = useRef(crypto.randomUUID());
   const [, refreshHistory] = useState(0);
-  const timer = useRef<any>();
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     compRef.current = comp;
     if (comp && !toolbarRenameOpen) setToolbarName(comp.name);
@@ -126,7 +155,7 @@ export default function App() {
     if (!next.compositions.length) {
       await api("/api/library/import-seed", {
         method: "POST",
-        body: JSON.stringify({ seed_key: "jonah-resume-v1" }),
+        body: JSON.stringify({ seed_key: "nia-calder-resume-v1" }),
       });
       next = await api<any>("/api/library");
     }
@@ -154,6 +183,7 @@ export default function App() {
   useEffect(() => {
     const route = () => {
       if (location.hash === "#library") setScreen("library");
+      else if (location.hash === "#jobs") setScreen("jobs");
     };
     addEventListener("hashchange", route);
     return () => removeEventListener("hashchange", route);
@@ -192,6 +222,25 @@ export default function App() {
         setError(e.message);
       }
     }, 700);
+  };
+  const chooseProfile = async (profile_id: string) => {
+    if (!comp || !profile_id) return;
+    setStatus("Saving…");
+    try {
+      setComp(
+        await api<Comp>(`/api/compositions/${comp.id}/profile`, {
+          method: "PUT",
+          body: JSON.stringify({
+            revision: comp.revision,
+            profile_id,
+          }),
+        }),
+      );
+      setStatus("Saved");
+    } catch (e: any) {
+      setStatus(e.status === 409 ? "Conflict" : "Save failed");
+      setError(e.message);
+    }
   };
   const chooseSummary = async (summary_variant_id: string) => {
     if (!comp) return;
@@ -361,8 +410,8 @@ export default function App() {
   const saveCompositionPreferences = async (preferences: any) => {
     if (!comp || comp.archived_at) return;
     if (
+      (comp.preferred_page_length || 1) === 1 &&
       preferences.preferred_page_length > 1 &&
-      preferences.preferred_page_length !== comp.preferred_page_length &&
       !(await confirmDialog({
         title: "Use more than one page?",
         message:
@@ -374,6 +423,8 @@ export default function App() {
     const beforePreferences = {
       preferred_page_length: comp.preferred_page_length,
       date_format: comp.date_format,
+      template_style: comp.template_style || "classic",
+      skill_row_max: comp.skill_row_max || 4,
       section_sort_modes: comp.section_sort_modes,
     };
     const preRevision = comp.revision;
@@ -399,22 +450,33 @@ export default function App() {
     name: string;
     description: string;
     display_title: string;
-    target_company: string;
-    target_role: string;
+    target_company?: string;
+    target_role?: string;
+    job_description_id?: string | null;
   }) => {
     if (!comp || comp.archived_at) return;
     const name = metadata.name.trim();
     if (!name) {
-      setError("Internal name is required.");
+      setError("Resume name is required.");
       return;
     }
-    const beforeMetadata = {
+    const beforeMetadata: {
+      name: string;
+      description: string;
+      display_title: string;
+      target_company: string;
+      target_role: string;
+      job_description_id?: string | null;
+    } = {
       name: comp.name,
       description: comp.description || "",
       display_title: comp.display_title || "",
       target_company: comp.target_company || "",
       target_role: comp.target_role || "",
     };
+    if ("job_description_id" in metadata) {
+      beforeMetadata.job_description_id = comp.job_description_id || null;
+    }
     const nextMetadata = { ...metadata, name };
     const preRevision = comp.revision;
     try {
@@ -489,16 +551,28 @@ export default function App() {
     setDialogError: (value: string) => void,
   ) => {
     try {
+      const metadata: {
+        revision: number;
+        name: string;
+        description: string;
+        display_title: string;
+        target_company: string;
+        target_role: string;
+        job_description_id?: string | null;
+      } = {
+        revision: item.revision,
+        name: item.name.trim(),
+        description: item.description || "",
+        display_title: item.display_title || "",
+        target_company: item.target_company || "",
+        target_role: item.target_role || "",
+      };
+      if ("job_description_id" in item) {
+        metadata.job_description_id = item.job_description_id || null;
+      }
       await api(`/api/compositions/${item.id}/metadata`, {
         method: "PUT",
-        body: JSON.stringify({
-          revision: item.revision,
-          name: item.name.trim(),
-          description: item.description || "",
-          display_title: item.display_title || "",
-          target_company: item.target_company || "",
-          target_role: item.target_role || "",
-        }),
+        body: JSON.stringify(metadata),
       });
       setHomeDialog(null);
       await loadLibrary();
@@ -610,7 +684,30 @@ export default function App() {
       { method: "POST" },
     );
     if (!r.ok) {
-      setError((await r.json().catch(() => ({}))).detail || "Export failed");
+      const detail = (await r.json().catch(() => ({}))).detail;
+      // #region agent log
+      fetch("http://127.0.0.1:7353/ingest/d7c1cc8b-c0a3-49b7-960e-6eca5743ef25", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "1b8194",
+        },
+        body: JSON.stringify({
+          sessionId: "1b8194",
+          runId: "pre-fix",
+          hypothesisId: "B",
+          location: "App.tsx:exportPdf",
+          message: "export error detail",
+          data: {
+            detailType: Array.isArray(detail) ? "array" : typeof detail,
+            detailLength: Array.isArray(detail) ? detail.length : null,
+            stringified: String(detail ?? "").slice(0, 240),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      setError(detail || "Export failed");
       return;
     }
     const a = document.createElement("a");
@@ -730,6 +827,24 @@ export default function App() {
         ?.scrollIntoView({ block: "center" });
     });
   };
+  const homeDialogs = (
+    <>
+      {homeDialog?.type === "rename" && (
+        <RenameResumeDialog
+          item={homeDialog.item}
+          close={() => setHomeDialog(null)}
+          save={saveHomeMetadata}
+        />
+      )}
+      {homeDialog?.type === "details" && (
+        <EditDetailsDialog
+          item={homeDialog.item}
+          close={() => setHomeDialog(null)}
+          save={saveHomeMetadata}
+        />
+      )}
+    </>
+  );
   if (!lib) return <main className="loading">{error || "Loading…"}</main>;
   if (screen === "library")
     return (
@@ -750,6 +865,12 @@ export default function App() {
           setHomeSection("bin");
           setScreen("home");
         }}
+        onJobs={() => {
+          sessionStorage.removeItem("resume-engine-return-target");
+          sessionStorage.removeItem("resume-engine-library-target");
+          location.hash = "jobs";
+          setScreen("jobs");
+        }}
         onReturnToResume={returnFromLibrary}
         onOpenResume={async (id: string, usage?: any) => {
           if (usage)
@@ -761,9 +882,50 @@ export default function App() {
         }}
       />
     );
+  const leaveTo = (next: "home" | "library" | "jobs" | "bin") => {
+    history.pushState(null, "", next === "library" || next === "jobs" ? `#${next}` : location.pathname);
+    if (next === "bin") setHomeSection("bin");
+    if (next === "home") setHomeSection("active");
+    setScreen(next === "bin" ? "home" : next);
+  };
+  if (screen === "jobs")
+    return (
+      <JobsPage
+        onHome={() => {
+          void loadLibrary();
+          leaveTo("home");
+        }}
+        onLibrary={() => leaveTo("library")}
+        onBin={() => leaveTo("bin")}
+      />
+    );
+  if (screen === "import")
+    return (
+      <ImportResumeDialog
+        close={() => setScreen("home")}
+        onLibrary={() => {
+          location.hash = "library";
+          setScreen("library");
+        }}
+        onJobs={() => {
+          location.hash = "jobs";
+          setScreen("jobs");
+        }}
+        onBin={() => {
+          setHomeSection("bin");
+          setScreen("home");
+        }}
+        onImported={async (id: string, warnings: string[]) => {
+          setError(warnings.length ? warnings.join(" ") : "");
+          await loadLibrary();
+          await openComposition(id);
+        }}
+      />
+    );
   if (screen === "home")
     return (
-      <HomeScreen
+      <>
+        <HomeScreen
         lib={lib}
         error={error}
         dismissError={() => setError("")}
@@ -782,8 +944,15 @@ export default function App() {
           location.hash = "library";
           setScreen("library");
         }}
+        openJobs={() => {
+          location.hash = "jobs";
+          setScreen("jobs");
+        }}
+        onImport={() => setScreen("import")}
       />
-    );
+      {homeDialogs}
+    </>
+  );
   if (!comp) {
     setScreen("home");
     return null;
@@ -794,12 +963,17 @@ export default function App() {
   return (
     <main className="editing-shell">
       <header className="editing-topbar">
-        <div className="editing-brand">
+        <button
+          type="button"
+          className="editing-brand"
+          aria-label="Home"
+          onClick={() => setScreen("home")}
+        >
           <img src={compactLogo} alt="" />
           <span>
             Resume <strong>Engine</strong>
           </span>
-        </div>
+        </button>
         <div className="editing-document-name">
           {toolbarRenameOpen ? (
             <form
@@ -874,10 +1048,6 @@ export default function App() {
           >
             {status}
           </span>
-          <button onClick={() => setScreen("home")}>
-            <AppIcon name="home" />
-            <span className="action-label">Home</span>
-          </button>
           <button
             onClick={() => {
               location.hash = "library";
@@ -924,6 +1094,11 @@ export default function App() {
           <button
             className="export-action"
             disabled={!fit?.fits || !!previewRevision}
+            title={
+              fit && !fit.fits
+                ? "Export is available when the page count matches the target length."
+                : undefined
+            }
             onClick={exportPdf}
           >
             <span aria-hidden="true">⇩</span>
@@ -972,13 +1147,33 @@ export default function App() {
             <span className="version-marker sr-only">
               {RESUME_ENGINE_VERSION} Build {RESUME_ENGINE_BUILD}
             </span>
-            {error && (
-              <div role="alert" className="error">
-                {error}
-                <button onClick={() => setError("")}>Dismiss</button>
-              </div>
-            )}
-            <>
+            <div className="editor-tabs" role="tablist" aria-label="Editor">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={editorTab === "edit"}
+                className={editorTab === "edit" ? "active" : ""}
+                onClick={() => setEditorTab("edit")}
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={editorTab === "match"}
+                className={editorTab === "match" ? "active" : ""}
+                onClick={() => setEditorTab("match")}
+              >
+                Job match
+              </button>
+            </div>
+            <div className="editor-tab-panel" hidden={editorTab !== "edit"}>
+              {error && (
+                <div role="alert" className="error">
+                  {error}
+                  <button onClick={() => setError("")}>Dismiss</button>
+                </div>
+              )}
               <ResumeDetails
                 comp={comp}
                 save={saveCompositionMetadata}
@@ -1008,12 +1203,24 @@ export default function App() {
                 setCollapsed={setCollapsedSections}
                 saveCompositionPreferences={saveCompositionPreferences}
                 chooseSummary={chooseSummary}
+                chooseProfile={chooseProfile}
+                reloadLibrary={loadLibrary}
                 chooseInterest={chooseInterest}
                 chooseLibraryItem={chooseLibraryItem}
                 included={included}
                 openLibraryFromEditor={openLibraryFromEditor}
               />
-            </>
+            </div>
+            <div className="editor-tab-panel" hidden={editorTab !== "match"}>
+              <JobMatchPanel
+                compositionId={comp.id}
+                revision={comp.revision}
+                linkedJobId={comp.job_description_id || ""}
+                reloadLibrary={loadLibrary}
+                active={editorTab === "match"}
+                onHighlight={setMatchHighlight}
+              />
+            </div>
           </aside>
         )}
         {!editorCollapsed && !previewCollapsed && (
@@ -1042,19 +1249,7 @@ export default function App() {
               }
             }}
           >
-            <button
-              aria-label="Collapse editor pane"
-              onClick={() => setEditorCollapsed(true)}
-            >
-              ‹
-            </button>
             <span aria-hidden="true">⋮</span>
-            <button
-              aria-label="Collapse preview pane"
-              onClick={() => setPreviewCollapsed(true)}
-            >
-              ›
-            </button>
           </div>
         )}
         {previewCollapsed ? (
@@ -1130,6 +1325,8 @@ export default function App() {
                 revisionId={previewRevision?.id || null}
                 currentPage={currentPage}
                 onFit={onFit}
+                highlight={editorTab === "match" ? matchHighlight : emptyHighlight}
+                onHighlightPage={setCurrentPage}
               />
             </div>
           </section>
@@ -1171,54 +1368,12 @@ export default function App() {
           }
         />
       )}
-      {homeDialog?.type === "rename" && (
-        <RenameResumeDialog
-          item={homeDialog.item}
-          close={() => setHomeDialog(null)}
-          save={saveHomeMetadata}
-        />
-      )}
-      {homeDialog?.type === "details" && (
-        <EditDetailsDialog
-          item={homeDialog.item}
-          close={() => setHomeDialog(null)}
-          save={saveHomeMetadata}
-        />
-      )}
+      {homeDialogs}
     </main>
   );
 }
 function ResumeDetails({ comp, save, savePreferences, status }: any) {
   const [collapsed, setCollapsed] = useState(false);
-  const [draft, setDraft] = useState({
-    name: comp.name,
-    description: comp.description || "",
-    display_title: comp.display_title || "",
-    target_company: comp.target_company || "",
-    target_role: comp.target_role || "",
-  });
-  useEffect(() => {
-    setDraft({
-      name: comp.name,
-      description: comp.description || "",
-      display_title: comp.display_title || "",
-      target_company: comp.target_company || "",
-      target_role: comp.target_role || "",
-    });
-  }, [comp.id, comp.revision]);
-  const field = (key: string, label: string, required = false) => (
-    <label>
-      {label}
-      {required ? " *" : ""}
-      <input
-        value={draft[key as keyof typeof draft]}
-        required={required}
-        maxLength={key === "name" ? 120 : 200}
-        onChange={(event) => setDraft({ ...draft, [key]: event.target.value })}
-        onBlur={() => save(draft)}
-      />
-    </label>
-  );
   return (
     <section
       className={`resume-details editor-section ${collapsed ? "collapsed" : "expanded"}`}
@@ -1235,68 +1390,118 @@ function ResumeDetails({ comp, save, savePreferences, status }: any) {
           aria-label={`${collapsed ? "Expand" : "Collapse"} Resume Details`}
           onClick={() => setCollapsed((value) => !value)}
         >
-          <span aria-hidden="true">↓</span>
+          <span aria-hidden="true">
+            <AppIcon name="chevron" />
+          </span>
         </button>
       </div>
       {!collapsed && (
         <div id="resume-details-body" className="resume-details-body">
-          <div className="form-grid">
-            {field("name", "Internal name", true)}
-            {field("display_title", "Display title")}
-            {field("target_company", "Target company")}
-            {field("target_role", "Target role")}
-          </div>
-          <small>
-            Display title and target details are planning metadata and are not
-            printed on the resume.
-          </small>
+          <JobTargetField
+            jobId={comp.job_description_id || ""}
+            company={comp.target_company || ""}
+            role={comp.target_role || ""}
+            onChange={(jobId) =>
+              save({
+                name: comp.name,
+                description: comp.description || "",
+                display_title: comp.display_title || "",
+                target_company: comp.target_company || "",
+                target_role: comp.target_role || "",
+                job_description_id: jobId || null,
+              })
+            }
+          />
           <fieldset className="composition-preferences">
             <legend>Resume preferences</legend>
-            <label>
-              Preferred page length
-              <select
-                value={comp.preferred_page_length || 1}
-                onChange={(e) =>
-                  savePreferences({
-                    preferred_page_length: Number(e.target.value),
-                    date_format: comp.date_format || "long",
-                    section_sort_modes: comp.section_sort_modes || {},
-                  })
-                }
-              >
-                <option value={1}>1 page</option>
-                <option value={2}>2 pages</option>
-                <option value={3}>3 pages</option>
-              </select>
-            </label>
-            <label>
-              Date format{" "}
-              <small aria-live="polite">
-                Example:{" "}
-                {comp.date_format === "year"
-                  ? "2026"
-                  : comp.date_format === "numeric"
-                    ? "10/2026"
-                    : comp.date_format === "short"
-                      ? "Oct 2026"
-                      : "October 2026"}
-              </small>
-              <select
+            <div className="target-length-field">
+              <span id="target-length-label">Target length</span>
+              <div className="target-length" role="group" aria-labelledby="target-length-label">
+                <button
+                  type="button"
+                  aria-label="Decrease target length"
+                  disabled={(comp.preferred_page_length || 1) <= 1}
+                  onClick={() =>
+                    savePreferences({
+                      preferred_page_length: (comp.preferred_page_length || 1) - 1,
+                      date_format: comp.date_format || "long",
+                      template_style: comp.template_style || "classic",
+                      skill_row_max: comp.skill_row_max || 4,
+                      section_sort_modes: comp.section_sort_modes || {},
+                    })
+                  }
+                >
+                  −
+                </button>
+                <output aria-live="polite">
+                  {comp.preferred_page_length || 1}
+                </output>
+                <button
+                  type="button"
+                  aria-label="Increase target length"
+                  disabled={(comp.preferred_page_length || 1) >= 10}
+                  onClick={() =>
+                    savePreferences({
+                      preferred_page_length: (comp.preferred_page_length || 1) + 1,
+                      date_format: comp.date_format || "long",
+                      template_style: comp.template_style || "classic",
+                      skill_row_max: comp.skill_row_max || 4,
+                      section_sort_modes: comp.section_sort_modes || {},
+                    })
+                  }
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <div className="preference-field">
+              <span id="date-format-label">Date format</span>
+              <OptionGrid
+                label="Date format"
+                columns={2}
                 value={comp.date_format || "long"}
-                onChange={(e) =>
+                options={[
+                  { value: "year", label: "2026" },
+                  { value: "numeric", label: "10/2026" },
+                  { value: "short", label: "Oct 2026" },
+                  { value: "long", label: "October 2026" },
+                ]}
+                onChange={(date_format) =>
                   savePreferences({
                     preferred_page_length: comp.preferred_page_length || 1,
-                    date_format: e.target.value,
+                    date_format,
+                    template_style: comp.template_style || "classic",
+                    skill_row_max: comp.skill_row_max || 4,
                     section_sort_modes: comp.section_sort_modes || {},
                   })
                 }
-              >
-                <option value="year">Year only</option>
-                <option value="numeric">Numeric month/year</option>
-                <option value="short">Short month/year</option>
-                <option value="long">Long month/year</option>
-              </select>
-            </label>
+              />
+              <small className="coaching-note">{dateFormatCoaching}</small>
+            </div>
+            <div className="preference-field">
+              <span id="template-style-label">Template</span>
+              <OptionGrid
+                label="Template"
+                columns={3}
+                value={comp.template_style || "classic"}
+                options={[
+                  { value: "classic", label: "Default" },
+                  { value: "sheets", label: "Ruled Serif" },
+                  { value: "harvard", label: "Harvard Style" },
+                  { value: "dais", label: "Times Serif" },
+                  { value: "sre", label: "Skill Table" },
+                ]}
+                onChange={(template_style) =>
+                  savePreferences({
+                    preferred_page_length: comp.preferred_page_length || 1,
+                    date_format: comp.date_format || "long",
+                    template_style,
+                    skill_row_max: comp.skill_row_max || 4,
+                    section_sort_modes: comp.section_sort_modes || {},
+                  })
+                }
+              />
+            </div>
           </fieldset>
         </div>
       )}
@@ -1320,6 +1525,8 @@ function HomeScreen({
   editDetails,
   setArchived,
   openLibrary,
+  openJobs,
+  onImport,
 }: any) {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const archived = section === "bin";
@@ -1399,25 +1606,30 @@ function HomeScreen({
   return (
     <main className="home-shell" onClick={() => openMenu && setOpenMenu(null)}>
       <aside className="home-rail" aria-label="Primary navigation">
-        <img className="rail-logo" src={compactLogo} alt="Resume Engine" />
-        <button
-          className={section === "active" ? "rail-link active" : "rail-link"}
-          onClick={() => setSection("active")}
-        >
-          <AppIcon name="home" />
-          Home
-        </button>
-        <button className="rail-link" onClick={openLibrary}>
-          <AppIcon name="library" />
-          Library
-        </button>
-        <button
-          className={section === "bin" ? "rail-link active" : "rail-link"}
-          onClick={() => setSection("bin")}
-        >
-          <AppIcon name="bin" />
-          Bin
-        </button>
+        <nav className="rail-nav">
+          <button
+            className={section === "active" ? "rail-link active" : "rail-link"}
+            onClick={() => setSection("active")}
+          >
+            <AppIcon name="home" />
+            Home
+          </button>
+          <button className="rail-link" onClick={openLibrary}>
+            <AppIcon name="library" />
+            Library
+          </button>
+          <button className="rail-link" onClick={openJobs}>
+            <AppIcon name="jobs" />
+            Jobs
+          </button>
+          <button
+            className={section === "bin" ? "rail-link active" : "rail-link"}
+            onClick={() => setSection("bin")}
+          >
+            <AppIcon name="bin" />
+            Bin
+          </button>
+        </nav>
       </aside>
       <section className="home-content">
         {error && (
@@ -1427,22 +1639,17 @@ function HomeScreen({
           </div>
         )}
         <header className="home-hero">
-          <img src={primaryLogo} alt="Resume Engine" className="home-logo" />
-          <h1>Resume Engine</h1>
+          <img src={primaryLogo} alt="" className="home-logo" />
+          <h1 className="sr-only">Resume Engine</h1>
           <p>A Really Useful tool for completing job applications</p>
           {section === "active" && (
             <div className="hero-actions">
               <button className="primary-action" onClick={createResume}>
                 + New Resume
               </button>
-              <span className="tooltip-wrap">
-                <button disabled aria-describedby="import-help">
-                  Import Existing Resume
-                </button>
-                <span id="import-help" role="tooltip">
-                  Import from an existing resume is coming soon.
-                </span>
-              </span>
+              <button type="button" onClick={onImport}>
+                Import Existing Resume
+              </button>
             </div>
           )}
         </header>
@@ -1471,7 +1678,24 @@ function HomeScreen({
                 aria-pressed={view === "card"}
                 onClick={() => setView("card")}
               >
-                ▦ Card View
+                <svg
+                  viewBox="0 0 16 16"
+                  width="1em"
+                  height="1em"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  focusable="false"
+                  style={{ verticalAlign: "-0.18em" }}
+                >
+                  <rect x="3" y="1.4" width="10" height="13.2" rx="1.7" />
+                  <path d="M3 5.2h10" />
+                  <path d="M5.2 8h5.6M5.2 10.6h4" />
+                </svg>{" "}
+                Card View
               </button>
             </div>
           </div>
@@ -1643,6 +1867,56 @@ function AddBulletButton() {
       </span>
     </span>
   );
+}
+const LIBRARY_ENTRY_KEYS = [
+  "education",
+  "projects",
+  "work_experience",
+  "leadership",
+];
+const BULLET_TARGET: Record<
+  string,
+  { section: string; parent: string; library: string }
+> = {
+  education: {
+    section: "education",
+    parent: "education_item",
+    library: "education",
+  },
+  projects: {
+    section: "projects",
+    parent: "content_item",
+    library: "projects",
+  },
+  work_experience: {
+    section: "work_experience",
+    parent: "content_item",
+    library: "experience",
+  },
+  leadership: {
+    section: "leadership",
+    parent: "content_item",
+    library: "leadership",
+  },
+};
+function moveIndex<T>(items: T[], from: number, to: number) {
+  const next = items.slice();
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+function orderedSkills(items: any[], toolOrder: Record<string, number>) {
+  return items
+    .filter((skill) => !skill.archived_at)
+    .slice()
+    .sort((a, b) => {
+      const left = toolOrder[String(a.id)];
+      const right = toolOrder[String(b.id)];
+      if (left != null && right != null && left !== right) return left - right;
+      if (left != null && right == null) return -1;
+      if (left == null && right != null) return 1;
+      return (a.sort_order || 0) - (b.sort_order || 0);
+    });
 }
 const ENTRY_LABELS: any = {
   projects: "Project",
@@ -1899,6 +2173,16 @@ function chronologicalKey(x: any) {
     String(x.id),
   ];
 }
+function compareChronological(a: any, b: any) {
+  const left = chronologicalKey(a),
+    right = chronologicalKey(b);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    if (left[i] < right[i]) return -1;
+    if (left[i] > right[i]) return 1;
+  }
+  return 0;
+}
+const DATED_ENTRY_KEYS = ["projects", "work_experience", "leadership"];
 function SectionsPanel({
   comp,
   lib,
@@ -1909,13 +2193,15 @@ function SectionsPanel({
   setCollapsed,
   begin,
   saveCompositionPreferences,
-  chooseSummary,
+  reloadLibrary,
   chooseInterest,
   chooseLibraryItem,
   openLibraryFromEditor,
 }: any) {
   const [compositionItems, setCompositionItems] = useState<any[]>([]),
     [placements, setPlacements] = useState<any[]>([]),
+    [hiddenToolIds, setHiddenToolIds] = useState<string[]>([]),
+    [toolOrder, setToolOrder] = useState<Record<string, number>>({}),
     [entryExpanded, setEntryExpanded] = useState<Record<string, boolean>>(
       () => {
         try {
@@ -1928,16 +2214,31 @@ function SectionsPanel({
       },
     ),
     [entryDialog, setEntryDialog] = useState<any>(null),
+    [libraryDialog, setLibraryDialog] = useState<any>(null),
     [menu, setMenu] = useState<string | null>(null),
-    [announcement, setAnnouncement] = useState("");
+    [announcement, setAnnouncement] = useState(""),
+    [orderedRows, setOrderedRows] = useState<any[] | null>(null),
+    [sectionDrag, setSectionDrag] = useState<{
+      key: string;
+      from: number;
+      over: number;
+    } | null>(null);
   const reload = () =>
     Promise.all([
       api<any[]>(`/api/compositions/${comp.id}/items`),
       api<any[]>(`/api/compositions/${comp.id}/bullet-placements`),
+      api<any[]>(`/api/compositions/${comp.id}/hidden-tools`),
+      api<any[]>(`/api/compositions/${comp.id}/tool-order`),
     ])
-      .then(([i, b]) => {
+      .then(([i, b, hidden, order]) => {
         setCompositionItems(i);
         setPlacements(b);
+        setHiddenToolIds(hidden.map((row) => String(row.tool_id)));
+        setToolOrder(
+          Object.fromEntries(
+            order.map((row) => [String(row.tool_id), row.sort_order]),
+          ),
+        );
       })
       .catch((e: any) => setError(e.message));
   useEffect(() => {
@@ -1973,15 +2274,45 @@ function SectionsPanel({
       return base ? [...base, !stored.startsWith("hidden:")] : null;
     })
     .filter(Boolean) as any[];
-  const save = async (next: any[]) => {
-    try {
-      setStatus("Saving…");
-      const section_order = next.map((x) => (x[3] ? x[0] : `hidden:${x[0]}`));
-      setComp(
-        await api(`/api/compositions/${comp.id}/sections`, {
+  const shownRows = orderedRows ?? rows;
+  const rowsRef = useRef(shownRows);
+  const revisionRef = useRef(comp.revision);
+  const saveQueue = useRef(Promise.resolve());
+  const orderGen = useRef(0);
+  const sectionDragRef = useRef<{
+    pointerId: number;
+    key: string;
+    from: number;
+    over: number;
+    startY: number;
+    moved: boolean;
+  } | null>(null);
+  const reorderRowsRef = useRef<
+    (listId: string, from: number, to: number) => void
+  >(() => {});
+  const rowDrag = useRowDrag((listId, from, to) =>
+    reorderRowsRef.current(listId, from, to),
+  );
+  rowsRef.current = shownRows;
+  if (comp.revision > revisionRef.current) revisionRef.current = comp.revision;
+  useEffect(
+    () => () => document.body.classList.remove("section-reordering"),
+    [],
+  );
+  const save = (next: any[]) => {
+    const gen = ++orderGen.current;
+    setOrderedRows(next.map((x) => [...x]));
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        setStatus("Saving…");
+        const section_order = next.map((x) =>
+          x[3] ? x[0] : `hidden:${x[0]}`,
+        );
+        const saved = await api<any>(`/api/compositions/${comp.id}/sections`, {
           method: "PUT",
           body: JSON.stringify({
-            revision: comp.revision,
+            revision: revisionRef.current,
             section_order,
             interest_layout: comp.resume.interest_layout || "compact",
             included_builtin: next
@@ -1991,24 +2322,94 @@ function SectionsPanel({
               .filter((x) => x[0].startsWith("custom:") && x[3])
               .map((x) => x[0].slice(7)),
           }),
-        }),
-      );
-      setStatus("Saved");
-    } catch (e: any) {
-      setError(e.message);
-      setStatus(e.status === 409 ? "Conflict" : "Save failed");
-    }
+        });
+        revisionRef.current = saved.revision;
+        setComp(saved);
+        if (gen === orderGen.current) setOrderedRows(null);
+        setStatus("Saved");
+      })
+      .catch((e: any) => {
+        if (gen === orderGen.current) setOrderedRows(null);
+        setError(e.message);
+        setStatus(e.status === 409 ? "Conflict" : "Save failed");
+      });
   };
   const moveSection = (i: number, d: number) => {
+    const list = rowsRef.current;
     const t = i + d;
-    if (t < 0 || t >= rows.length) return;
-    const n = rows.map((x) => [...x]);
+    if (t < 0 || t >= list.length) return;
+    const n = list.map((x) => [...x]);
     [n[i], n[t]] = [n[t], n[i]];
     save(n);
+    setAnnouncement(`${list[i][1]} moved to position ${t + 1} of ${list.length}.`);
+  };
+  const sectionDropIndex = (clientY: number, from: number) => {
+    const cards = [
+      ...document.querySelectorAll<HTMLElement>(
+        ".resume-sections article.section-card[data-section-key]",
+      ),
+    ];
+    let target = from;
+    for (let i = 0; i < cards.length; i++) {
+      if (i === from) continue;
+      const rect = cards[i].getBoundingClientRect();
+      const mid = rect.top + Math.min(rect.height, 52) / 2;
+      if (i < from && clientY < mid) return i;
+      if (i > from && clientY > mid) target = i;
+    }
+    return target;
+  };
+  const startSectionDrag = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    key: string,
+    index: number,
+  ) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    sectionDragRef.current = {
+      pointerId: event.pointerId,
+      key,
+      from: index,
+      over: index,
+      startY: event.clientY,
+      moved: false,
+    };
+  };
+  const moveSectionDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const session = sectionDragRef.current;
+    if (!session || event.pointerId !== session.pointerId) return;
+    if (!session.moved && Math.abs(event.clientY - session.startY) < 4) return;
+    session.moved = true;
+    document.body.classList.add("section-reordering");
+    const scroller = document.querySelector<HTMLElement>(".editor");
+    if (scroller) {
+      const bounds = scroller.getBoundingClientRect();
+      if (event.clientY > bounds.bottom - 48) scroller.scrollTop += 14;
+      else if (event.clientY < bounds.top + 48) scroller.scrollTop -= 14;
+    }
+    const over = sectionDropIndex(event.clientY, session.from);
+    if (over === session.over && sectionDrag?.key === session.key) return;
+    session.over = over;
+    setSectionDrag({ key: session.key, from: session.from, over });
+  };
+  const endSectionDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const session = sectionDragRef.current;
+    if (!session || event.pointerId !== session.pointerId) return;
+    sectionDragRef.current = null;
+    document.body.classList.remove("section-reordering");
+    setSectionDrag(null);
+    if (!session.moved || session.over === session.from) return;
+    const list = rowsRef.current.map((x) => [...x]);
+    const [item] = list.splice(session.from, 1);
+    list.splice(session.over, 0, item);
+    save(list);
     setAnnouncement(
-      `${rows[i][1]} moved to position ${t + 1} of ${rows.length}.`,
+      `${item[1]} moved to position ${session.over + 1} of ${list.length}.`,
     );
   };
+  const storageSection = (key: string) =>
+    key === "tools" ? "tool_groups" : key;
   const sources: any = {
     education: lib.education,
     tool_groups: lib.tool_groups,
@@ -2018,28 +2419,21 @@ function SectionsPanel({
     personal_interests: lib.interests,
   };
   const sectionEntries = (key: string) => {
+    const stored = storageSection(key);
     let a = compositionItems
-      .filter((x) => x.section === key)
+      .filter((x) => x.section === stored)
       .sort((a, b) => a.sort_order - b.sort_order)
       .map((x) =>
-        (sources[key] || []).find(
+        (sources[stored] || []).find(
           (r: any) => String(r.id) === String(x.item_id),
         ),
       )
       .filter(Boolean);
     if (
       (comp.section_sort_modes?.[key] || "automatic") === "automatic" &&
-      ["projects", "work_experience", "leadership"].includes(key)
+      DATED_ENTRY_KEYS.includes(key)
     )
-      a = [...a].sort((a, b) => {
-        const left = chronologicalKey(a),
-          right = chronologicalKey(b);
-        for (let i = 0; i < Math.max(left.length, right.length); i++) {
-          if (left[i] < right[i]) return -1;
-          if (left[i] > right[i]) return 1;
-        }
-        return 0;
-      });
+      a = [...a].sort(compareChronological);
     return a;
   };
   const reorder = async (key: string, items: any[], i: number, d: number) => {
@@ -2061,6 +2455,602 @@ function SectionsPanel({
       setError(e.message);
     }
   };
+  const persistOrder = (task: () => Promise<any>) => {
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        setStatus("Saving…");
+        const saved = await task();
+        revisionRef.current = saved.revision;
+        setComp(saved);
+        setStatus("Saved");
+      })
+      .catch((e: any) => {
+        setError(e.message);
+        setStatus(e.status === 409 ? "Conflict" : "Save failed");
+        reload();
+      });
+  };
+  const moveItems = (section: string, items: any[], from: number, to: number) => {
+    if (to < 0 || to >= items.length || from === to) return;
+    const next = moveIndex(items, from, to);
+    const ids = next.map((item) => item.id);
+    setCompositionItems((current) => [
+      ...current.filter((row) => row.section !== section),
+      ...ids.map((id, index) => ({ section, item_id: id, sort_order: index })),
+    ]);
+    persistOrder(() =>
+      api(`/api/compositions/${comp.id}/items/order`, {
+        method: "PUT",
+        body: JSON.stringify({
+          revision: revisionRef.current,
+          section,
+          ids,
+        }),
+      }),
+    );
+    setAnnouncement(
+      `${ENTRY_LABELS[section] || "Item"} moved to position ${to + 1} of ${next.length}.`,
+    );
+  };
+  const writeEntryOrder = (
+    key: string,
+    ids: string[],
+    mode: "automatic" | "manual",
+  ) => {
+    const storedIds = compositionItems
+      .filter((row) => row.section === key)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((row) => String(row.item_id));
+    const orderChanged =
+      ids.length !== storedIds.length ||
+      ids.some((id, index) => id !== storedIds[index]);
+    const modeChanged =
+      (comp.section_sort_modes?.[key] || "automatic") !== mode;
+    if (!orderChanged && !modeChanged) return;
+    const modes = { ...(comp.section_sort_modes || {}), [key]: mode };
+    if (orderChanged) {
+      setCompositionItems((current) => [
+        ...current.filter((row) => row.section !== key),
+        ...ids.map((id, index) => ({
+          section: key,
+          item_id: id,
+          sort_order: index,
+        })),
+      ]);
+    }
+    if (modeChanged) {
+      setComp((current: Comp | null) =>
+        current ? { ...current, section_sort_modes: modes } : current,
+      );
+    }
+    const preferences = {
+      preferred_page_length: comp.preferred_page_length || 1,
+      date_format: comp.date_format || "long",
+      template_style: comp.template_style || "classic",
+      skill_row_max: comp.skill_row_max || 4,
+      section_sort_modes: modes,
+    };
+    if (!orderChanged) {
+      saveCompositionPreferences(preferences);
+      return;
+    }
+    persistOrder(async () => {
+      const ordered = await api<any>(`/api/compositions/${comp.id}/items/order`, {
+        method: "PUT",
+        body: JSON.stringify({
+          revision: revisionRef.current,
+          section: key,
+          ids,
+        }),
+      });
+      revisionRef.current = ordered.revision;
+      if ((ordered.section_sort_modes?.[key] || "automatic") === mode)
+        return ordered;
+      return api(`/api/compositions/${comp.id}/preferences`, {
+        method: "PUT",
+        body: JSON.stringify({
+          revision: ordered.revision,
+          preferred_page_length: ordered.preferred_page_length || 1,
+          date_format: ordered.date_format || "long",
+          template_style: ordered.template_style || "classic",
+          skill_row_max: ordered.skill_row_max || 4,
+          section_sort_modes: {
+            ...(ordered.section_sort_modes || {}),
+            [key]: mode,
+          },
+        }),
+      });
+    });
+  };
+  const moveBullets = (rows: any[], from: number, to: number) => {
+    if (to < 0 || to >= rows.length || from === to) return;
+    const next = moveIndex(rows, from, to);
+    const sample = next[0];
+    setPlacements((current) => {
+      const moving = new Set(next.map((row) => String(row.id)));
+      return [
+        ...current.filter((row) => !moving.has(String(row.id))),
+        ...next.map((row, index) => ({ ...row, sort_order: index })),
+      ];
+    });
+    persistOrder(() =>
+      api(`/api/compositions/${comp.id}/bullet-placements/order`, {
+        method: "PUT",
+        body: JSON.stringify({
+          revision: revisionRef.current,
+          destination_section: sample.destination_section,
+          destination_parent_type: sample.destination_parent_type,
+          destination_parent_id: sample.destination_parent_id,
+          ids: next.map((row) => row.id),
+        }),
+      }),
+    );
+    setAnnouncement(`Bullet moved to position ${to + 1} of ${next.length}.`);
+  };
+  const moveSkills = (groupId: string, skills: any[], from: number, to: number) => {
+    if (to < 0 || to >= skills.length || from === to) return;
+    const next = moveIndex(skills, from, to);
+    setToolOrder((current) => {
+      const copy = { ...current };
+      next.forEach((skill, index) => {
+        copy[String(skill.id)] = index;
+      });
+      return copy;
+    });
+    persistOrder(() =>
+      api(`/api/compositions/${comp.id}/tool-groups/${groupId}/tools/order`, {
+        method: "PUT",
+        body: JSON.stringify({
+          revision: revisionRef.current,
+          ids: next.map((skill) => skill.id),
+        }),
+      }),
+    );
+    setAnnouncement(`Skill moved to position ${to + 1} of ${next.length}.`);
+  };
+  const parentPlacements = (parentId: string) =>
+    placements
+      .filter((row) => String(row.destination_parent_id) === String(parentId))
+      .sort((a, b) => a.sort_order - b.sort_order);
+  reorderRowsRef.current = (listId, from, to) => {
+    if (listId.startsWith("entries:")) {
+      const key = listId.slice("entries:".length);
+      const rows = sectionEntries(key);
+      if (to < 0 || to >= rows.length || from === to) return;
+      writeEntryOrder(
+        key,
+        moveIndex(rows, from, to).map((row) => String(row.id)),
+        "manual",
+      );
+      setAnnouncement(
+        `${ENTRY_LABELS[key] || "Item"} moved to position ${to + 1} of ${rows.length}.`,
+      );
+      return;
+    }
+    if (listId === "interests") {
+      moveItems("personal_interests", sectionEntries("personal_interests"), from, to);
+      return;
+    }
+    if (listId === "skill-groups") {
+      moveItems("tool_groups", sectionEntries("tools"), from, to);
+      return;
+    }
+    if (listId.startsWith("skills:")) {
+      const groupId = listId.slice("skills:".length);
+      const group = (lib.tool_groups || []).find(
+        (item: any) => String(item.id) === groupId,
+      );
+      moveSkills(groupId, orderedSkills(group?.items || [], toolOrder), from, to);
+      return;
+    }
+    if (listId.startsWith("bullets:")) {
+      moveBullets(parentPlacements(listId.slice("bullets:".length)), from, to);
+    }
+  };
+  const refreshResume = async () => {
+    await reloadLibrary();
+    setComp(await api(`/api/compositions/${comp.id}`));
+    setStatus("Saved");
+  };
+  const selectStoredItem = async (
+    section: string,
+    itemId: string,
+    included: boolean,
+    revision: number,
+  ) => {
+    if (section === "personal_interests") {
+      return api<any>(`/api/compositions/${comp.id}/interests`, {
+        method: "PUT",
+        body: JSON.stringify({ revision, interest_id: itemId, included }),
+      });
+    }
+    const endpoint =
+      section === "tool_groups"
+        ? "tool-groups"
+        : section === "education"
+          ? "education"
+          : `historical/${section}`;
+    return api<any>(`/api/compositions/${comp.id}/${endpoint}`, {
+      method: "PUT",
+      body: JSON.stringify({ revision, item_id: itemId, included }),
+    });
+  };
+  const libraryActions = {
+    pickProfile: async (profileId: string) => {
+      setComp(
+        await api(`/api/compositions/${comp.id}/profile`, {
+          method: "PUT",
+          body: JSON.stringify({ revision: comp.revision, profile_id: profileId }),
+        }),
+      );
+      setStatus("Saved");
+    },
+    createProfile: async (draft: any) => {
+      const row = await api<any>("/api/library/profiles", {
+        method: "POST",
+        body: JSON.stringify(draft),
+      });
+      await reloadLibrary();
+      setComp(
+        await api(`/api/compositions/${comp.id}/profile`, {
+          method: "PUT",
+          body: JSON.stringify({ revision: comp.revision, profile_id: row.id }),
+        }),
+      );
+      setStatus("Saved");
+    },
+    saveProfile: async (id: string, draft: any) => {
+      await api(`/api/library/profiles/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(draft),
+      });
+      await refreshResume();
+    },
+    pickSummary: async (summaryId: string | null) => {
+      setComp(
+        await api(`/api/compositions/${comp.id}/summary`, {
+          method: "PUT",
+          body: JSON.stringify({
+            revision: comp.revision,
+            summary_variant_id: summaryId,
+          }),
+        }),
+      );
+      setStatus("Saved");
+    },
+    createSummary: async (draft: any) => {
+      const row = await api<any>("/api/library/summaries", {
+        method: "POST",
+        body: JSON.stringify(draft),
+      });
+      await reloadLibrary();
+      setComp(
+        await api(`/api/compositions/${comp.id}/summary`, {
+          method: "PUT",
+          body: JSON.stringify({
+            revision: comp.revision,
+            summary_variant_id: row.id,
+          }),
+        }),
+      );
+      setStatus("Saved");
+    },
+    saveSummary: async (id: string, draft: any) => {
+      await api(`/api/library/summaries/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(draft),
+      });
+      await refreshResume();
+    },
+    pickEntry: async (section: string, item: any, replaceId?: string) => {
+      if (!replaceId) {
+        setComp(
+          await selectStoredItem(section, item.id, true, comp.revision),
+        );
+        setStatus("Saved");
+        return;
+      }
+      const ordered = sectionEntries(
+        section === "tool_groups" ? "tools" : section,
+      ).map((entry: any) => String(entry.id));
+      let next = await selectStoredItem(section, item.id, true, comp.revision);
+      next = await selectStoredItem(section, replaceId, false, next.revision);
+      setComp(next);
+      const ids = ordered.map((entryId) =>
+        entryId === String(replaceId) ? String(item.id) : entryId,
+      );
+      setComp(
+        await api(`/api/compositions/${comp.id}/items/order`, {
+          method: "PUT",
+          body: JSON.stringify({ revision: next.revision, section, ids }),
+        }),
+      );
+      setStatus("Saved");
+    },
+    createEntry: async (section: string, draft: any) => {
+      const fields = { ...draft };
+      for (const key of [
+        "kind",
+        "bullets",
+        "id",
+        "archived_at",
+        "sort_order",
+        "items",
+        "created_at",
+        "updated_at",
+      ])
+        delete fields[key];
+      if (section === "education" && !(fields.institution || "").trim())
+        throw new Error("Institution is required.");
+      if (section === "projects" && !(fields.name || "").trim())
+        throw new Error("Project name is required.");
+      if (
+        (section === "work_experience" || section === "leadership") &&
+        (!(fields.organization || "").trim() || !(fields.title || "").trim())
+      )
+        throw new Error("Organization and title are required.");
+      if (section === "tool_groups" && !(fields.name || "").trim())
+        throw new Error("Group name is required.");
+      setComp(
+        await api(`/api/compositions/${comp.id}/entries/create`, {
+          method: "POST",
+          body: JSON.stringify({
+            revision: comp.revision,
+            section,
+            fields,
+          }),
+        }),
+      );
+      await reloadLibrary();
+      setStatus("Saved");
+    },
+    saveEntry: async (section: string, id: string, draft: any) => {
+      if (section === "education") {
+        await api(`/api/library/education/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            institution: (draft.institution || "").trim(),
+            college_school: draft.college_school || "",
+            location: draft.location || "",
+            degree_type: draft.degree_type || "",
+            degree_major: draft.degree_major || "",
+            graduation_year: draft.graduation_year ?? null,
+            graduation_month: draft.graduation_month ?? null,
+            display_date: draft.display_date || "",
+          }),
+        });
+      } else if (section === "tool_groups") {
+        await api(`/api/library/tool-groups/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ name: (draft.name || "").trim() }),
+        });
+      } else {
+        const kind =
+          section === "projects"
+            ? "project"
+            : section === "leadership"
+              ? "leadership"
+              : "employment";
+        await api(`/api/library/items/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            kind,
+            name: draft.name || null,
+            subtitle: draft.subtitle || null,
+            organization: draft.organization || null,
+            location: draft.location || "",
+            title: draft.title || null,
+            date_label: draft.date_label || "",
+            start_year: draft.start_year ?? null,
+            start_month: draft.start_month ?? null,
+            end_year: draft.end_year ?? null,
+            end_month: draft.end_month ?? null,
+            is_current: !!draft.is_current,
+            bullets: [],
+          }),
+        });
+      }
+      await refreshResume();
+    },
+    pickBullet: async (
+      section: string,
+      parentId: string,
+      choice: any,
+      placementId?: string,
+    ) => {
+      const target = BULLET_TARGET[section];
+      const next = placementId
+        ? await api(
+            `/api/compositions/${comp.id}/bullet-placements/${placementId}`,
+            {
+              method: "PUT",
+              body: JSON.stringify({
+                revision: comp.revision,
+                bullet_id: choice.bullet_id,
+                variant_id: choice.variant_id,
+              }),
+            },
+          )
+        : await api(`/api/compositions/${comp.id}/bullet-placements`, {
+            method: "POST",
+            body: JSON.stringify({
+              revision: comp.revision,
+              bullet_id: choice.bullet_id,
+              variant_id: choice.variant_id,
+              destination_section: target.section,
+              destination_parent_type: target.parent,
+              destination_parent_id: parentId,
+            }),
+          });
+      setComp(next);
+      await reloadLibrary();
+      setStatus("Saved");
+    },
+    createBullet: async (section: string, parentId: string, body: string) => {
+      const target = BULLET_TARGET[section];
+      setComp(
+        await api(`/api/compositions/${comp.id}/bullet-placements/create`, {
+          method: "POST",
+          body: JSON.stringify({
+            revision: comp.revision,
+            body,
+            variant_name: "Default",
+            library_section: target.library,
+            destination_section: target.section,
+            destination_parent_type: target.parent,
+            destination_parent_id: parentId,
+          }),
+        }),
+      );
+      await reloadLibrary();
+      setStatus("Saved");
+    },
+    saveBullet: async (placement: any, body: string) => {
+      await api(`/api/library/variants/${placement.variant_id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          name: placement.variant_name || "Default",
+          body,
+        }),
+      });
+      setComp(
+        await api(
+          `/api/compositions/${comp.id}/bullet-placements/${placement.id}/update-usage`,
+          {
+            method: "POST",
+            body: JSON.stringify({ revision: comp.revision }),
+          },
+        ),
+      );
+      await reloadLibrary();
+      setStatus("Saved");
+    },
+    pickInterest: async (item: any, replaceId?: string) => {
+      if (!replaceId) {
+        setComp(
+          await selectStoredItem(
+            "personal_interests",
+            item.id,
+            true,
+            comp.revision,
+          ),
+        );
+        setStatus("Saved");
+        return;
+      }
+      const ordered = sectionEntries("personal_interests").map((entry: any) =>
+        String(entry.id),
+      );
+      let next = await selectStoredItem(
+        "personal_interests",
+        item.id,
+        true,
+        comp.revision,
+      );
+      next = await selectStoredItem(
+        "personal_interests",
+        replaceId,
+        false,
+        next.revision,
+      );
+      setComp(next);
+      const ids = ordered.map((entryId) =>
+        entryId === String(replaceId) ? String(item.id) : entryId,
+      );
+      setComp(
+        await api(`/api/compositions/${comp.id}/items/order`, {
+          method: "PUT",
+          body: JSON.stringify({
+            revision: next.revision,
+            section: "personal_interests",
+            ids,
+          }),
+        }),
+      );
+      setStatus("Saved");
+    },
+    createInterest: async (draft: any) => {
+      if (!(draft.body || "").trim())
+        throw new Error("Interest text is required.");
+      setComp(
+        await api(`/api/compositions/${comp.id}/entries/create`, {
+          method: "POST",
+          body: JSON.stringify({
+            revision: comp.revision,
+            section: "personal_interests",
+            fields: { body: draft.body.trim() },
+          }),
+        }),
+      );
+      await reloadLibrary();
+      setStatus("Saved");
+    },
+    saveInterest: async (id: string, draft: any) => {
+      if (!(draft.body || "").trim())
+        throw new Error("Interest text is required.");
+      await api(`/api/library/interests/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ body: draft.body.trim() }),
+      });
+      await refreshResume();
+    },
+    addSkill: async (groupId: string, name: string) => {
+      await api("/api/library/tools", {
+        method: "POST",
+        body: JSON.stringify({ name, group_id: groupId }),
+      });
+      await refreshResume();
+    },
+    renameSkill: async (groupId: string, id: string, name: string) => {
+      if (!name.trim()) throw new Error("Skill name is required.");
+      await api(`/api/library/tools/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: name.trim(), group_id: groupId }),
+      });
+      await refreshResume();
+    },
+    archiveSkill: async (id: string) => {
+      await api(`/api/library/tools/${id}/archive`, { method: "POST" });
+      await refreshResume();
+    },
+  };
+  const parentBullets = (section: string, parentId: string) => {
+    const source =
+      section === "education"
+        ? lib.education
+        : section === "projects"
+          ? lib.projects
+          : section === "leadership"
+            ? lib.leadership
+            : lib.employment;
+    return (
+      (source || []).find((item: any) => String(item.id) === String(parentId))
+        ?.bullets || []
+    );
+  };
+  const toggleSkill = async (toolId: string, included: boolean) => {
+    const previous = hiddenToolIds;
+    setHiddenToolIds(
+      included
+        ? previous.filter((id) => id !== String(toolId))
+        : [...previous, String(toolId)],
+    );
+    try {
+      setStatus("Saving…");
+      setComp(
+        await api(`/api/compositions/${comp.id}/tools/${toolId}`, {
+          method: "PUT",
+          body: JSON.stringify({ revision: comp.revision, included }),
+        }),
+      );
+      setStatus("Saved");
+    } catch (e: any) {
+      setHiddenToolIds(previous);
+      setError(e.message);
+      setStatus(e.status === 409 ? "Conflict" : "Save failed");
+    }
+  };
   const card = (key: string, x: any, i: number, items: any[]) => {
     const id = String(x.id),
       expanded = entryExpanded[id] ?? i === 0,
@@ -2069,69 +3059,130 @@ function SectionsPanel({
         .sort((a, b) => a.sort_order - b.sort_order),
       title = x.organization || x.name || x.institution || x.body,
       subtitle = x.title || x.subtitle || x.degree_major || x.date_label || "",
-      manual = (comp.section_sort_modes?.[key] || "automatic") === "manual";
+      manual = (comp.section_sort_modes?.[key] || "automatic") === "manual",
+      entryListId = `entries:${key}`,
+      entryDrag = DATED_ENTRY_KEYS.includes(key) && items.length > 1;
     return (
-      <article className="entry-card" key={id}>
+      <article
+        className={`entry-card${entryDrag ? ` ${dragRowClass(rowDrag.drag, entryListId, i)}` : ""}`.trim()}
+        data-drag-list={entryDrag ? entryListId : undefined}
+        data-drag-index={entryDrag ? i : undefined}
+        key={id}
+      >
         <div className="entry-card-header">
-          <button className="item-drag-handle" aria-label={`Drag ${title}`}>
+          <button
+            type="button"
+            className={`item-drag-handle${DATED_ENTRY_KEYS.includes(key) ? " drag-handle" : ""}`}
+            aria-label={`Drag ${title}`}
+            onPointerDown={(event) =>
+              entryDrag && rowDrag.start(event, entryListId, i)
+            }
+            onPointerMove={rowDrag.move}
+            onPointerUp={rowDrag.end}
+            onPointerCancel={rowDrag.end}
+            onKeyDown={(event) => {
+              if (!entryDrag) return;
+              if (event.key === "ArrowUp" && i > 0) {
+                event.preventDefault();
+                rowDrag.nudge(entryListId, i, i - 1);
+              }
+              if (event.key === "ArrowDown" && i < items.length - 1) {
+                event.preventDefault();
+                rowDrag.nudge(entryListId, i, i + 1);
+              }
+            }}
+          >
             ⠿
           </button>
           <span className="section-icon">
             <AppIcon name={editorSectionIcon(key)} />
           </span>
           <div>
-            <strong>{title}</strong>
+            <div className="entry-title-row">
+              <strong>{title}</strong>
+              {key === "work_experience" && (
+                <SectionHelp
+                  name={title}
+                  notes={[
+                    ...(i === 0 ? firstJobCoaching : [laterJobCoaching]),
+                    ...(i > 0 && i === items.length - 1 ? [lastJobCoaching] : []),
+                    ...bulletCoaching,
+                  ]}
+                />
+              )}
+            </div>
             <div className="entry-meta">
               <span>{subtitle}</span>
               <span>{x.location}</span>
               <span>{x.date_label || x.display_date}</span>
             </div>
           </div>
-          <span className="entry-menu-wrap">
-            <button
-              aria-label={`Actions for ${title}`}
-              onClick={() => setMenu(menu === id ? null : id)}
-            >
-              ⋮
-            </button>
-            {menu === id && (
-              <span className="entry-menu" role="menu">
-                <button
-                  role="menuitem"
-                  onClick={() => openLibraryFromEditor(key, id)}
-                >
-                  Edit in Library
-                </button>
-                <button
-                  role="menuitem"
-                  disabled={!manual || i === 0}
-                  title={
-                    !manual ? "Choose Manual order to move entries." : undefined
-                  }
-                  onClick={() => reorder(key, items, i, -1)}
-                >
-                  Move up
-                </button>
-                <button
-                  role="menuitem"
-                  disabled={!manual || i === items.length - 1}
-                  onClick={() => reorder(key, items, i, 1)}
-                >
-                  Move down
-                </button>
-                <button
-                  role="menuitem"
-                  onClick={() =>
-                    key === "personal_interests"
-                      ? chooseInterest(x, false)
-                      : chooseLibraryItem(key, x, false)
-                  }
-                >
-                  Remove from this resume
-                </button>
-              </span>
-            )}
-          </span>
+          {LIBRARY_ENTRY_KEYS.includes(key) ? (
+            <span className="record-actions">
+              <RecordActions
+                name={title}
+                onEdit={() =>
+                  setLibraryDialog({ mode: "edit-entry", section: key, item: x })
+                }
+                onReplace={() =>
+                  setLibraryDialog({
+                    mode: "pick-entry",
+                    section: key,
+                    replaceId: id,
+                  })
+                }
+                onRemove={() => chooseLibraryItem(storageSection(key), x, false)}
+              />
+            </span>
+          ) : (
+            <span className="entry-menu-wrap">
+              <button
+                aria-label={`Actions for ${title}`}
+                onClick={() => setMenu(menu === id ? null : id)}
+              >
+                ⋮
+              </button>
+              {menu === id && (
+                <span className="entry-menu" role="menu">
+                  <button
+                    role="menuitem"
+                    onClick={() => openLibraryFromEditor(key, id)}
+                  >
+                    Edit in Library
+                  </button>
+                  <button
+                    role="menuitem"
+                    disabled={!manual || i === 0}
+                    title={
+                      !manual
+                        ? "Choose Manual order to move entries."
+                        : undefined
+                    }
+                    onClick={() => reorder(key, items, i, -1)}
+                  >
+                    Move up
+                  </button>
+                  <button
+                    role="menuitem"
+                    disabled={!manual || i === items.length - 1}
+                    onClick={() => reorder(key, items, i, 1)}
+                  >
+                    Move down
+                  </button>
+                  <button
+                    role="menuitem"
+                    onClick={() =>
+                      key === "personal_interests"
+                        ? chooseInterest(x, false)
+                        : chooseLibraryItem(key, x, false)
+                    }
+                  >
+                    Remove from this resume
+                  </button>
+                </span>
+              )}
+            </span>
+          )}
           <button
             className="section-chevron"
             aria-expanded={expanded}
@@ -2139,30 +3190,31 @@ function SectionsPanel({
               setEntryExpanded({ ...entryExpanded, [id]: !expanded })
             }
           >
-            ↓
+            <span aria-hidden="true">
+              <AppIcon name="chevron" />
+            </span>
           </button>
         </div>
         {expanded && (
           <div className="entry-card-body">
-            {key === "tool_groups" && (
-              <div className="tool-chips">
-                {(x.items || []).map((t: any) => (
-                  <span className="tool-chip" key={t.id}>
-                    {t.name}
-                  </span>
-                ))}
-              </div>
-            )}
             <h4>Bullet Points</h4>
             <div className="bullet-list">
-              {bullets.map((b: any, bi: number) => (
-                <div className="bullet-row" key={b.id}>
-                  <button
-                    className="item-drag-handle"
-                    aria-label={`Drag bullet ${bi + 1}`}
-                  >
-                    ⠿
-                  </button>
+              {bullets.map((b: any, bulletIndex: number) => (
+                <div
+                  className={`bullet-row ${bullets.length > 1 ? "has-drag" : ""} ${dragRowClass(rowDrag.drag, `bullets:${id}`, bulletIndex)}`}
+                  data-drag-list={bullets.length > 1 ? `bullets:${id}` : undefined}
+                  data-drag-index={bullets.length > 1 ? bulletIndex : undefined}
+                  key={b.id}
+                >
+                  {bullets.length > 1 && (
+                    <DragHandle
+                      label={(b.wording_snapshot || "bullet").slice(0, 80)}
+                      listId={`bullets:${id}`}
+                      index={bulletIndex}
+                      count={bullets.length}
+                      drag={rowDrag}
+                    />
+                  )}
                   <span>
                     {b.wording_snapshot}
                     {b.active_variant_count > 1 && (
@@ -2172,17 +3224,31 @@ function SectionsPanel({
                       <span className="bullet-status">{b.usage_status}</span>
                     )}
                   </span>
-                  <button
-                    aria-label="Bullet actions"
-                    onClick={async () => {
-                      if (
-                        await confirmDialog({
-                          title: "Remove bullet",
-                          message: "Remove this bullet from this resume?",
-                          confirmLabel: "Remove",
-                          danger: true,
+                  {LIBRARY_ENTRY_KEYS.includes(key) ? (
+                    <RecordActions
+                      name="bullet"
+                      onEdit={() =>
+                        setLibraryDialog({ mode: "edit-bullet", placement: b })
+                      }
+                      onReplace={() =>
+                        setLibraryDialog({
+                          mode: "pick-bullet",
+                          section: key,
+                          parentId: id,
+                          placementId: b.id,
+                          currentBulletId: b.bullet_id,
                         })
-                      ) {
+                      }
+                      onRemove={async () => {
+                        if (
+                          !(await confirmDialog({
+                            title: "Remove bullet",
+                            message: "Remove this bullet from this resume?",
+                            confirmLabel: "Remove",
+                            danger: true,
+                          }))
+                        )
+                          return;
                         try {
                           setComp(
                             await api(
@@ -2193,42 +3259,105 @@ function SectionsPanel({
                         } catch (e: any) {
                           setError(e.message);
                         }
-                      }
-                    }}
-                  >
-                    ⋮
-                  </button>
+                      }}
+                    />
+                  ) : (
+                    <button
+                      aria-label="Bullet actions"
+                      onClick={async () => {
+                        if (
+                          await confirmDialog({
+                            title: "Remove bullet",
+                            message: "Remove this bullet from this resume?",
+                            confirmLabel: "Remove",
+                            danger: true,
+                          })
+                        ) {
+                          try {
+                            setComp(
+                              await api(
+                                `/api/compositions/${comp.id}/bullet-placements/${b.id}?revision=${comp.revision}`,
+                                { method: "DELETE" },
+                              ),
+                            );
+                          } catch (e: any) {
+                            setError(e.message);
+                          }
+                        }
+                      }}
+                    >
+                      ⋮
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
-            <AddBulletButton />
+            {LIBRARY_ENTRY_KEYS.includes(key) ? (
+              <button
+                type="button"
+                className="add-bullet-inline"
+                onClick={() =>
+                  setLibraryDialog({
+                    mode: "pick-bullet",
+                    section: key,
+                    parentId: id,
+                  })
+                }
+              >
+                + Add Bullet
+              </button>
+            ) : (
+              <AddBulletButton />
+            )}
           </div>
         )}
       </article>
     );
   };
+  const setSkillRows = (next: number) => {
+    const rows = Math.min(20, Math.max(1, next));
+    if (rows === (comp.skill_row_max || 4)) return;
+    saveCompositionPreferences({
+      preferred_page_length: comp.preferred_page_length || 1,
+      date_format: comp.date_format || "long",
+      template_style: comp.template_style || "classic",
+      skill_row_max: rows,
+      section_sort_modes: comp.section_sort_modes || {},
+    });
+  };
   const content = (key: string) => {
-    if (key === "summary")
+    if (key === "summary") {
+      const summary = (lib.summary_variants || []).find(
+        (item: any) => item.id === comp.summary_variant_id,
+      );
       return (
-        <div className="entry-card">
-          <label>
-            Summary variant
-            <select
-              value={comp.summary_variant_id || ""}
-              onChange={(e) => chooseSummary(e.target.value)}
-            >
-              <option value="">No summary</option>
-              {lib.summary_variants
-                .filter((x: any) => !x.archived_at)
-                .map((x: any) => (
-                  <option key={x.id} value={x.id}>
-                    {x.name}
-                  </option>
-                ))}
-            </select>
-          </label>
+        <div className="entry-card library-record">
+          {summary ? (
+            <>
+              <div>
+                <strong>{summary.name}</strong>
+                <p className="summary-preview">{summary.body}</p>
+              </div>
+              <RecordActions
+                name={summary.name}
+                onEdit={() =>
+                  setLibraryDialog({ mode: "edit-summary", item: summary })
+                }
+                onReplace={() => setLibraryDialog({ mode: "pick-summary" })}
+              />
+            </>
+          ) : (
+            <>
+              <p className="library-note">No summary on this resume.</p>
+              <RecordActions
+                name="summary"
+                onReplace={() => setLibraryDialog({ mode: "pick-summary" })}
+              />
+            </>
+          )}
         </div>
       );
+    }
     if (key.startsWith("custom:")) {
       const sec = lib.custom_sections.find(
         (x: any) => `custom:${x.id}` === key,
@@ -2247,42 +3376,285 @@ function SectionsPanel({
         </div>
       );
     }
+    const stored = storageSection(key);
     const items = sectionEntries(key);
+    const skillRows = comp.skill_row_max || 4;
+    if (key === "tools") {
+      return (
+        <div className="entry-list">
+          {(comp.template_style || "classic") === "sre" && (
+            <div className="target-length-field">
+              <span id="skill-rows-label">Skill rows</span>
+              <div className="skill-rows-controls">
+                <div
+                  className="target-length"
+                  role="group"
+                  aria-labelledby="skill-rows-label"
+                >
+                  <button
+                    type="button"
+                    aria-label="Decrease skill rows"
+                    disabled={skillRows <= 1}
+                    onClick={() => setSkillRows(skillRows - 1)}
+                  >
+                    −
+                  </button>
+                  <output aria-live="polite">{skillRows}</output>
+                  <button
+                    type="button"
+                    aria-label="Increase skill rows"
+                    disabled={skillRows >= 20}
+                    onClick={() => setSkillRows(skillRows + 1)}
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSkillRows(autoFitSkillRows(comp.resume?.tool_groups))
+                  }
+                >
+                  Auto-fit
+                </button>
+              </div>
+              <small className="coaching-note">
+                Skills fill down this many rows, then wrap into the next column.
+              </small>
+            </div>
+          )}
+          {items.map((group: any, groupIndex: number) => {
+            const skills = orderedSkills(group.items || [], toolOrder);
+            const expansionKey = `skill:${group.id}`;
+            const expanded = entryExpanded[expansionKey] ?? true;
+            return (
+            <article
+              className={`entry-card skill-group-card ${dragRowClass(rowDrag.drag, "skill-groups", groupIndex)}`}
+              data-drag-list={items.length > 1 ? "skill-groups" : undefined}
+              data-drag-index={items.length > 1 ? groupIndex : undefined}
+              key={group.id}
+            >
+              <div className={`library-record ${items.length > 1 ? "has-drag" : ""}`}>
+                {items.length > 1 && (
+                  <DragHandle
+                    label={group.name}
+                    listId="skill-groups"
+                    index={groupIndex}
+                    count={items.length}
+                    drag={rowDrag}
+                  />
+                )}
+                <strong>{group.name}</strong>
+                <span className="skill-group-tools">
+                  <RecordActions
+                    name={group.name}
+                    onEdit={() =>
+                      setLibraryDialog({
+                        mode: "edit-entry",
+                        section: "tool_groups",
+                        item: group,
+                      })
+                    }
+                    onReplace={() =>
+                      setLibraryDialog({
+                        mode: "pick-entry",
+                        section: "tool_groups",
+                        replaceId: group.id,
+                      })
+                    }
+                    onRemove={() => chooseLibraryItem("tool_groups", group, false)}
+                  />
+                  <button
+                    type="button"
+                    className="section-chevron"
+                    aria-expanded={expanded}
+                    aria-label={`${expanded ? "Collapse" : "Expand"} ${group.name}`}
+                    onClick={() =>
+                      setEntryExpanded({
+                        ...entryExpanded,
+                        [expansionKey]: !expanded,
+                      })
+                    }
+                  >
+                    <span aria-hidden="true">
+                      <AppIcon name="chevron" />
+                    </span>
+                  </button>
+                </span>
+              </div>
+              {expanded && (
+              <div className="entry-card-body">
+                {skills.map((skill: any, skillIndex: number) => (
+                    <div
+                      className={`skill-line ${skills.length > 1 ? "has-drag" : ""} ${dragRowClass(rowDrag.drag, `skills:${group.id}`, skillIndex)}`}
+                      data-drag-list={
+                        skills.length > 1 ? `skills:${group.id}` : undefined
+                      }
+                      data-drag-index={skills.length > 1 ? skillIndex : undefined}
+                      key={skill.id}
+                    >
+                      {skills.length > 1 && (
+                        <DragHandle
+                          label={skill.name}
+                          listId={`skills:${group.id}`}
+                          index={skillIndex}
+                          count={skills.length}
+                          drag={rowDrag}
+                        />
+                      )}
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={!hiddenToolIds.includes(String(skill.id))}
+                          aria-label={`Show ${skill.name} on this resume`}
+                          onChange={(event) =>
+                            toggleSkill(skill.id, event.target.checked)
+                          }
+                        />
+                        {skill.name}
+                      </label>
+                    </div>
+                  ))}
+                <button
+                  type="button"
+                  className="add-bullet-inline"
+                  onClick={() =>
+                    setLibraryDialog({
+                      mode: "manage-skills",
+                      groupId: group.id,
+                    })
+                  }
+                >
+                  Manage skills
+                </button>
+              </div>
+              )}
+            </article>
+            );
+          })}
+          <button
+            className="add-entry-button"
+            onClick={() =>
+              setLibraryDialog({ mode: "pick-entry", section: "tool_groups" })
+            }
+          >
+            + Add Skill Group
+          </button>
+        </div>
+      );
+    }
+    if (key === "personal_interests") {
+      return (
+        <div className="entry-list interest-list">
+          {items.map((item: any, interestIndex: number) => (
+            <div
+              className={`bullet-row ${items.length > 1 ? "has-drag" : ""} ${dragRowClass(rowDrag.drag, "interests", interestIndex)}`}
+              data-drag-list={items.length > 1 ? "interests" : undefined}
+              data-drag-index={items.length > 1 ? interestIndex : undefined}
+              key={item.id}
+            >
+              {items.length > 1 && (
+                <DragHandle
+                  label={item.body}
+                  listId="interests"
+                  index={interestIndex}
+                  count={items.length}
+                  drag={rowDrag}
+                />
+              )}
+              <span>{item.body}</span>
+              <RecordActions
+                name={item.body}
+                onEdit={() =>
+                  setLibraryDialog({ mode: "edit-interest", item })
+                }
+                onReplace={() =>
+                  setLibraryDialog({
+                    mode: "pick-interest",
+                    replaceId: item.id,
+                  })
+                }
+                onRemove={() => chooseInterest(item, false)}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            className="add-entry-button"
+            onClick={() => setLibraryDialog({ mode: "pick-interest" })}
+          >
+            + Add Interest
+          </button>
+        </div>
+      );
+    }
     return (
       <div className="entry-list">
         {["projects", "work_experience", "leadership"].includes(key) && (
-          <label className="order-mode">
-            Order:
-            <select
-              value={comp.section_sort_modes?.[key] || "automatic"}
-              onChange={(e) =>
-                saveCompositionPreferences({
-                  preferred_page_length: comp.preferred_page_length || 1,
-                  date_format: comp.date_format || "long",
-                  section_sort_modes: {
-                    ...comp.section_sort_modes,
-                    [key]: e.target.value,
-                  },
-                })
-              }
+          <div className="order-mode">
+            <span id={`${key}-order-label`}>Order</span>
+            <div
+              className="view-toggle"
+              role="group"
+              aria-labelledby={`${key}-order-label`}
             >
-              <option value="automatic">By date</option>
-              <option value="manual">Manual</option>
-            </select>
-          </label>
+              {(
+                [
+                  ["automatic", "By date"],
+                  ["manual", "Manual"],
+                ] as const
+              ).map(([mode, label]) => (
+                <button
+                  type="button"
+                  key={mode}
+                  aria-pressed={
+                    (comp.section_sort_modes?.[key] || "automatic") === mode
+                  }
+                  onClick={() => {
+                    if ((comp.section_sort_modes?.[key] || "automatic") === mode)
+                      return;
+                    if (mode === "automatic") {
+                      const ids = [...items]
+                        .sort(compareChronological)
+                        .map((row) => String(row.id));
+                      const shown = items.map((row) => String(row.id));
+                      if (ids.some((id, index) => id !== shown[index])) {
+                        writeEntryOrder(key, ids, "automatic");
+                        return;
+                      }
+                    }
+                    saveCompositionPreferences({
+                      preferred_page_length: comp.preferred_page_length || 1,
+                      date_format: comp.date_format || "long",
+                      template_style: comp.template_style || "classic",
+                      skill_row_max: comp.skill_row_max || 4,
+                      section_sort_modes: {
+                        ...comp.section_sort_modes,
+                        [key]: mode,
+                      },
+                    })
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {items.map((x: any, i: number) => card(key, x, i, items))}
         <button
           className="add-entry-button"
           onClick={() =>
-            setEntryDialog({
-              section: key,
-              items: sources[key] || [],
-              includedIds: items.map((x: any) => String(x.id)),
-            })
+            LIBRARY_ENTRY_KEYS.includes(key)
+              ? setLibraryDialog({ mode: "pick-entry", section: stored })
+              : setEntryDialog({
+                  section: stored,
+                  items: sources[stored] || [],
+                  includedIds: items.map((x: any) => String(x.id)),
+                })
           }
         >
-          + Add {ENTRY_LABELS[key]}
+          + Add {ENTRY_LABELS[stored]}
         </button>
       </div>
     );
@@ -2295,8 +3667,9 @@ function SectionsPanel({
           <span className="tooltip-wrap">
             <button aria-describedby="sections-help">?</button>
             <span id="sections-help" role="tooltip">
-              Remove entries from this resume from each card menu. Archive
-              reusable records in Library.
+              Use the icons on each record to edit it, replace it from the
+              library, or remove it from this resume. Drag a handle to reorder
+              entries, bullets, skills, or interests on this resume.
             </span>
           </span>
         </h2>
@@ -2311,7 +3684,9 @@ function SectionsPanel({
       <div className="sr-only" aria-live="polite">
         {announcement}
       </div>
-      <article className="section-card profile-section">
+      <article
+        className={`section-card profile-section ${collapsed.includes("profile") ? "collapsed" : "expanded"}`}
+      >
         <div className="section-card-header">
           <span className="section-icon">
             <AppIcon name="profile" />
@@ -2328,25 +3703,87 @@ function SectionsPanel({
               )
             }
           >
-            ↓
+            <span aria-hidden="true">
+              <AppIcon name="chevron" />
+            </span>
           </button>
         </div>
+        {!collapsed.includes("profile") && (
+          <div className="section-card-body">
+            {(() => {
+              const profile = (lib.profiles || []).find(
+                (item: any) => item.id === comp.profile_id,
+              );
+              return (
+                <div className="entry-card library-record">
+                  {profile ? (
+                    <>
+                      <div>
+                        <strong>{profile.name}</strong>
+                        <div className="entry-meta">
+                          <span>{profile.label}</span>
+                        </div>
+                      </div>
+                      <RecordActions
+                        name={profile.name}
+                        onEdit={() =>
+                          setLibraryDialog({
+                            mode: "edit-profile",
+                            item: profile,
+                          })
+                        }
+                        onReplace={() =>
+                          setLibraryDialog({ mode: "pick-profile" })
+                        }
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <p className="library-note">No profile on this resume.</p>
+                      <RecordActions
+                        name="profile"
+                        onReplace={() =>
+                          setLibraryDialog({ mode: "pick-profile" })
+                        }
+                      />
+                    </>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </article>
-      {rows.map((r: any, i: number) => {
+      {shownRows.map((r: any, i: number) => {
         const closed = collapsed.includes(r[0]);
+        const dragging = sectionDrag?.key === r[0];
+        const dropClass =
+          sectionDrag && sectionDrag.over !== sectionDrag.from
+            ? sectionDrag.over === i && sectionDrag.over < sectionDrag.from
+              ? "drop-before"
+              : sectionDrag.over === i && sectionDrag.over > sectionDrag.from
+                ? "drop-after"
+                : ""
+            : "";
         return (
           <article
-            className={`section-card ${closed ? "collapsed" : "expanded"}`}
+            className={`section-card ${closed ? "collapsed" : "expanded"} ${dragging ? "is-dragging" : ""} ${dropClass}`}
             data-section-key={r[0]}
             key={r[0]}
           >
             <div className="section-card-header">
               <button
+                type="button"
                 className="drag-handle"
                 aria-label={`Move ${r[1]}`}
+                onPointerDown={(e) => startSectionDrag(e, r[0], i)}
+                onPointerMove={moveSectionDrag}
+                onPointerUp={endSectionDrag}
+                onPointerCancel={endSectionDrag}
                 onKeyDown={(e) => {
-                  if (e.key === "ArrowUp") moveSection(i, -1);
-                  if (e.key === "ArrowDown") moveSection(i, 1);
+                  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+                  e.preventDefault();
+                  moveSection(i, e.key === "ArrowUp" ? -1 : 1);
                 }}
               >
                 ⠿
@@ -2354,7 +3791,12 @@ function SectionsPanel({
               <span className="section-icon">
                 <AppIcon name={editorSectionIcon(r[0])} />
               </span>
-              <strong>{r[1]}</strong>
+              <span className="section-title-row">
+                <strong>{r[1]}</strong>
+                {sectionCoaching[r[0]] && (
+                  <SectionHelp name={r[1]} notes={sectionCoaching[r[0]]} />
+                )}
+              </span>
               <span className="item-count">
                 {r[0] === "summary" ? "" : sectionEntries(r[0]).length || ""}
               </span>
@@ -2365,7 +3807,7 @@ function SectionsPanel({
                   aria-checked={r[3]}
                   checked={r[3]}
                   onChange={(e) => {
-                    const n = rows.map((x) => [...x]);
+                    const n = shownRows.map((x) => [...x]);
                     n[i][3] = e.target.checked;
                     save(n);
                   }}
@@ -2385,7 +3827,9 @@ function SectionsPanel({
                   )
                 }
               >
-                ↓
+                <span aria-hidden="true">
+                  <AppIcon name="chevron" />
+                </span>
               </button>
             </div>
             {!closed && (
@@ -2394,6 +3838,23 @@ function SectionsPanel({
           </article>
         );
       })}
+      {libraryDialog && (
+        <EditorLibraryDialogs
+          dialog={libraryDialog}
+          close={() => setLibraryDialog(null)}
+          lib={lib}
+          includedIds={(section) =>
+            sectionEntries(section === "tool_groups" ? "tools" : section).map(
+              (item: any) => String(item.id),
+            )
+          }
+          parentBullets={parentBullets}
+          placedBulletIds={
+            new Set(placements.map((row) => String(row.bullet_id)))
+          }
+          actions={libraryActions}
+        />
+      )}
       {entryDialog && (
         <AddEntryDialog
           comp={comp}

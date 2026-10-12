@@ -28,19 +28,35 @@ def test_server_generates_unique_default_names_and_metadata_is_owner_scoped():
     assert "target_role" in repository
 
 
+def test_generated_default_names_adopt_display_title_within_limit():
+    sql = (
+        ROOT / "backend/migrations/018_resume_name_from_display_title.sql"
+    ).read_text(encoding="utf-8")
+    assert "DROP " not in sql.upper() and "display_title =" not in sql
+    assert "left(rec.title, 120)" in sql
+    assert "''s Resume" in sql
+    assert "char_length(' (' || suffix::text || ')')" in sql
+    assert "INSERT INTO composition_revisions" in sql
+
+
 def test_phase2g_api_and_ui_contracts():
     main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
     ui = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     assert "body: JSON.stringify({})" in ui
     assert 'prompt("Composition name")' not in ui
+    dialogs = (ROOT / "frontend/src/HomeDialogs.tsx").read_text(encoding="utf-8")
+    surfaces = ui + dialogs
     for text in (
         "Resume Details",
-        "Internal name",
-        "Display title",
+        "Resume name",
         "Target company",
         "Target role",
     ):
-        assert text in ui
-    for field in ("display_title", "target_company", "target_role"):
+        assert text in surfaces
+    assert "Internal name" not in ui and "Display title" not in ui
+    assert "Resume Name" in dialogs
+    assert "Internal Name" not in dialogs and "Display Title" not in dialogs
+    assert "Job description" in dialogs
+    for field in ("display_title", "target_company", "target_role", "job_description_id"):
         assert field in main
-        assert field in ui
+        assert field in surfaces

@@ -35,7 +35,7 @@ async def _relationships(conn,cid):
 
 async def _snapshot(conn,row,resume=None):
     rels=await _relationships(conn,row["id"])
-    return {"name":row["name"],"description":row.get("description","") ,"display_title":row.get("display_title","") ,"target_company":row.get("target_company","") ,"target_role":row.get("target_role","") ,"preferred_page_length":row.get("preferred_page_length",1),"date_format":row.get("date_format","long"),"section_sort_modes":row.get("section_sort_modes",{}),"resume":resume or row["render_payload"],"interest_layout":row.get("interest_layout","compact"),"section_order":row.get("section_order",[]),"bullet_placements":[{k:(str(v) if k.endswith("_id") and v is not None else v) for k,v in x.items() if k in {"id","bullet_id","variant_id","destination_section","destination_parent_type","destination_parent_id","sort_order","wording_snapshot","snapshot_source_updated_at"}} for x in rels]}
+    return {"name":row["name"],"description":row.get("description","") ,"display_title":row.get("display_title","") ,"target_company":row.get("target_company","") ,"target_role":row.get("target_role",""),"job_description_id":str(row["job_description_id"]) if row.get("job_description_id") else None ,"preferred_page_length":row.get("preferred_page_length",1),"date_format":row.get("date_format","long"),"template_style":row.get("template_style","classic"),"skill_row_max":row.get("skill_row_max",4),"section_sort_modes":row.get("section_sort_modes",{}),"resume":resume or row["render_payload"],"interest_layout":row.get("interest_layout","compact"),"section_order":row.get("section_order",[]),"bullet_placements":[{k:(str(v) if k.endswith("_id") and v is not None else v) for k,v in x.items() if k in {"id","bullet_id","variant_id","destination_section","destination_parent_type","destination_parent_id","sort_order","wording_snapshot","snapshot_source_updated_at"}} for x in rels]}
 
 async def apply_placements(conn,user_id,cid,resume):
     rels=await _relationships(conn,cid)
@@ -57,7 +57,12 @@ async def apply_placements(conn,user_id,cid,resume):
                     if str(entry.get("id"))==pid: entry["bullets"]=bodies
     return resume
 async def _commit(conn,user_id,locked,source):
-    resume=await apply_placements(conn,user_id,locked["id"],locked["render_payload"])
+    resume=dict(locked["render_payload"])
+    education=await _many(conn,"SELECT e.* FROM composition_items i JOIN education_items e ON e.id=i.item_id WHERE i.composition_id=%s AND i.section='education' ORDER BY i.sort_order,i.id",(locked["id"],))
+    if education:
+        from .library_repository import _education_render
+        resume["education"]=[_education_render(x) for x in education]
+    resume=await apply_placements(conn,user_id,locked["id"],resume)
     row=await _one(conn,"UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",(json.dumps(resume),locked["id"],user_id))
     snap=await _snapshot(conn,row,resume)
     await conn.execute("INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,%s,%s::jsonb)",(row["id"],user_id,row["revision"],source,json.dumps(snap,default=str)))
@@ -89,7 +94,7 @@ async def create_and_place(conn,user_id,cid,payload):
         if not await _destination(conn,user_id,payload.destination_parent_type,payload.destination_parent_id):return None,"missing"
         parent_col={"content_item":"parent_id","education_item":"education_item_id","tool_group":"tool_group_id","interest":"interest_id","custom_entry":"custom_entry_id"}[payload.destination_parent_type]
         label=(await _one(conn,"SELECT phase3c1_parent_label(%s,%s,%s) label",(user_id,payload.destination_parent_type,payload.destination_parent_id)))["label"]
-        bullet=await _one(conn,f"INSERT INTO bullets(user_id,{parent_col},section,parent_context,sort_order) VALUES(%s,NULL,%s,%s,(SELECT COALESCE(max(sort_order)+1,0) FROM bullets WHERE user_id=%s AND section=%s)) RETURNING id",(user_id,payload.library_section,label,user_id,payload.library_section))
+        bullet=await _one(conn,f"INSERT INTO bullets(user_id,{parent_col},section,parent_context,sort_order) VALUES(%s,%s,%s,%s,(SELECT COALESCE(max(sort_order)+1,0) FROM bullets WHERE user_id=%s AND {parent_col}=%s)) RETURNING id",(user_id,payload.destination_parent_id,payload.library_section,label,user_id,payload.destination_parent_id))
         variant=await _one(conn,"INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order) VALUES(%s,%s,%s,%s,true,0) RETURNING id,body,updated_at",(user_id,bullet["id"],payload.variant_name.strip(),payload.body.strip()))
         order=(await _one(conn,"SELECT COALESCE(max(sort_order)+1,0) n FROM composition_bullets WHERE composition_id=%s AND destination_parent_type=%s AND destination_parent_id=%s",(cid,payload.destination_parent_type,payload.destination_parent_id)))["n"]
         await conn.execute("INSERT INTO composition_bullets(composition_id,bullet_id,variant_id,destination_section,destination_parent_type,destination_parent_id,sort_order,wording_snapshot,snapshot_source_updated_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",(cid,bullet["id"],variant["id"],payload.destination_section,payload.destination_parent_type,payload.destination_parent_id,order,variant["body"],variant["updated_at"]))

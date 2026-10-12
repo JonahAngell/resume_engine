@@ -56,6 +56,7 @@ def _education_render(row: dict) -> dict:
     if row.get("college_school"):
         institution = f"{institution}, {row['college_school']}"
     return {
+        "id": str(row["id"]) if row.get("id") else None,
         "institution": institution,
         "location": row.get("location") or "",
         "degree": degree,
@@ -63,7 +64,14 @@ def _education_render(row: dict) -> dict:
         "graduation_year": row.get("graduation_year"),
         "graduation_month": row.get("graduation_month"),
         "display_date": row.get("display_date") or "",
+        "bullets": [],
     }
+
+
+async def _apply_resume_placements(conn, user_id, composition_id, resume):
+    from .phase2j_repository import apply_placements
+
+    return await apply_placements(conn, user_id, composition_id, resume)
 
 
 async def _save_library_refresh(conn, user_id, composition_id, payload, source):
@@ -94,9 +102,9 @@ async def ensure_user(conn, user):
 
 
 async def fetch_library(conn, user_id):
-    profile = await _one(
+    profiles = await _many(
         conn,
-        "SELECT name,phone,email,linkedin_label,linkedin_url FROM profiles WHERE user_id=%s AND archived_at IS NULL",
+        "SELECT id,label,name,phone,email,linkedin_label,linkedin_url,sort_order,archived_at,created_at,updated_at FROM profiles WHERE user_id=%s ORDER BY sort_order,id",
         (user_id,),
     )
     summaries = await _many(
@@ -109,6 +117,12 @@ async def fetch_library(conn, user_id):
         "SELECT id,institution,college_school,location,degree_type,degree_major,degree,graduation_year,graduation_month,display_date,graduation_date,sort_order,archived_at,created_at,updated_at FROM education_items WHERE user_id=%s ORDER BY sort_order,id",
         (user_id,),
     )
+    for item in education:
+        item["bullets"] = await _many(
+            conn,
+            "SELECT b.id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.education_item_id=%s ORDER BY b.sort_order,v.sort_order,v.id",
+            (user_id, item["id"]),
+        )
     groups = await _many(
         conn,
         "SELECT id,name,sort_order,archived_at,created_at,updated_at FROM tool_groups WHERE user_id=%s ORDER BY sort_order,id",
@@ -130,7 +144,7 @@ async def fetch_library(conn, user_id):
         for row in rows:
             row["bullets"] = await _many(
                 conn,
-                "SELECT b.id,b.parent_id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.parent_id=%s ORDER BY b.sort_order,v.sort_order,v.id",
+                "SELECT b.id,b.parent_id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at,v.updated_at variant_updated_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.parent_id=%s ORDER BY b.sort_order,v.sort_order,v.id",
                 (user_id, row["id"]),
             )
         return rows
@@ -153,7 +167,7 @@ async def fetch_library(conn, user_id):
     )
     compositions = await _many(
         conn,
-        "SELECT id,name,description,display_title,target_company,target_role,preferred_page_length,date_format,section_sort_modes,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s ORDER BY updated_at DESC,id",
+        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,profile_id,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s ORDER BY updated_at DESC,id",
         (user_id,),
     )
     composition_bullets = await _many(
@@ -161,8 +175,18 @@ async def fetch_library(conn, user_id):
         "SELECT cb.composition_id,cb.bullet_id,cb.variant_id FROM composition_bullets cb JOIN resume_compositions c ON c.id=cb.composition_id WHERE c.user_id=%s",
         (user_id,),
     )
+    composition_items = await _many(
+        conn,
+        "SELECT i.composition_id,i.section,i.item_id FROM composition_items i JOIN resume_compositions c ON c.id=i.composition_id WHERE c.user_id=%s",
+        (user_id,),
+    )
+    composition_custom_sections = await _many(
+        conn,
+        "SELECT s.composition_id,s.section_id FROM composition_custom_sections s JOIN resume_compositions c ON c.id=s.composition_id WHERE c.user_id=%s",
+        (user_id,),
+    )
     return {
-        "profile": profile,
+        "profiles": profiles,
         "summary_variants": summaries,
         "education": education,
         "tool_groups": groups,
@@ -173,44 +197,170 @@ async def fetch_library(conn, user_id):
         "custom_sections": custom,
         "compositions": compositions,
         "composition_bullets": composition_bullets,
+        "composition_items": composition_items,
+        "composition_custom_sections": composition_custom_sections,
     }
 
 
 async def load_composition(conn, user_id, composition_id, include_archived=False):
     return await _one(
         conn,
-        "SELECT id,name,description,display_title,target_company,target_role,preferred_page_length,date_format,section_sort_modes,summary_variant_id,revision,render_payload,interest_layout,section_order,archived_at,created_at,updated_at,autosaved_at FROM resume_compositions WHERE id=%s AND user_id=%s"
+        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,summary_variant_id,profile_id,revision,render_payload,interest_layout,section_order,archived_at,created_at,updated_at,autosaved_at FROM resume_compositions WHERE id=%s AND user_id=%s"
         + ("" if include_archived else " AND archived_at IS NULL"),
         (composition_id, user_id),
     )
 
 
-async def save_profile(conn, user_id, payload):
-    async with conn.transaction():
+_PROFILE_FIELDS = ("name", "phone", "email", "linkedin_label", "linkedin_url")
+_PROFILE_ROW = "id,label,name,phone,email,linkedin_label,linkedin_url,sort_order,archived_at,created_at,updated_at"
+
+
+def _profile_header(row):
+    return {key: row.get(key) or "" for key in _PROFILE_FIELDS}
+
+
+async def _profile_label_taken(conn, user_id, label, except_id=None):
+    if except_id:
         row = await _one(
             conn,
-            "INSERT INTO profiles(user_id,name,phone,email,linkedin_label,linkedin_url) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(user_id) DO UPDATE SET name=excluded.name,phone=excluded.phone,email=excluded.email,linkedin_label=excluded.linkedin_label,linkedin_url=excluded.linkedin_url,updated_at=now() RETURNING name,phone,email,linkedin_label,linkedin_url",
+            "SELECT id FROM profiles WHERE user_id=%s AND label=%s AND id<>%s",
+            (user_id, label, except_id),
+        )
+    else:
+        row = await _one(
+            conn,
+            "SELECT id FROM profiles WHERE user_id=%s AND label=%s",
+            (user_id, label),
+        )
+    return row is not None
+
+
+async def _refresh_profile_headers(conn, user_id, profile_id, header):
+    compositions = await _many(
+        conn,
+        "SELECT id,render_payload FROM resume_compositions WHERE user_id=%s AND profile_id=%s FOR UPDATE",
+        (user_id, profile_id),
+    )
+    for composition in compositions:
+        resume = composition["render_payload"]
+        resume["header"] = header
+        await _save_library_refresh(
+            conn, user_id, composition["id"], resume, "profile-library-update"
+        )
+
+
+async def create_profile(conn, user_id, payload):
+    label = payload.label.strip()
+    async with conn.transaction():
+        if await _profile_label_taken(conn, user_id, label):
+            return None, "duplicate"
+        row = await _one(
+            conn,
+            f"INSERT INTO profiles(user_id,label,name,phone,email,linkedin_label,linkedin_url,sort_order) VALUES(%s,%s,%s,%s,%s,%s,%s,(SELECT COALESCE(max(sort_order)+1,0) FROM profiles WHERE user_id=%s)) RETURNING {_PROFILE_ROW}",
             (
                 user_id,
+                label,
                 payload.name.strip(),
                 payload.phone.strip(),
                 payload.email,
                 payload.linkedin_label.strip(),
                 payload.linkedin_url,
+                user_id,
             ),
         )
-        compositions = await _many(
+        return row, None
+
+
+async def update_profile(conn, user_id, resource_id, payload):
+    label = payload.label.strip()
+    async with conn.transaction():
+        if await _profile_label_taken(conn, user_id, label, resource_id):
+            return None, "duplicate"
+        row = await _one(
             conn,
-            "SELECT id,render_payload FROM resume_compositions WHERE user_id=%s AND archived_at IS NULL FOR UPDATE",
-            (user_id,),
+            f"UPDATE profiles SET label=%s,name=%s,phone=%s,email=%s,linkedin_label=%s,linkedin_url=%s,updated_at=now() WHERE id=%s AND user_id=%s RETURNING {_PROFILE_ROW}",
+            (
+                label,
+                payload.name.strip(),
+                payload.phone.strip(),
+                payload.email,
+                payload.linkedin_label.strip(),
+                payload.linkedin_url,
+                resource_id,
+                user_id,
+            ),
         )
-        for composition in compositions:
-            resume = composition["render_payload"]
-            resume["header"] = dict(row)
-            await _save_library_refresh(
-                conn, user_id, composition["id"], resume, "profile-update"
+        if row:
+            await _refresh_profile_headers(conn, user_id, resource_id, _profile_header(row))
+        return row, None if row else "missing"
+
+
+async def duplicate_profile(conn, user_id, resource_id, label):
+    label = label.strip()
+    async with conn.transaction():
+        source = await _one(
+            conn,
+            f"SELECT {_PROFILE_ROW} FROM profiles WHERE id=%s AND user_id=%s",
+            (resource_id, user_id),
+        )
+        if not source:
+            return None, "missing"
+        if await _profile_label_taken(conn, user_id, label):
+            return None, "duplicate"
+        row = await _one(
+            conn,
+            f"INSERT INTO profiles(user_id,label,name,phone,email,linkedin_label,linkedin_url,sort_order) VALUES(%s,%s,%s,%s,%s,%s,%s,(SELECT COALESCE(max(sort_order)+1,0) FROM profiles WHERE user_id=%s)) RETURNING {_PROFILE_ROW}",
+            (
+                user_id,
+                label,
+                source["name"],
+                source["phone"],
+                source["email"],
+                source["linkedin_label"],
+                source["linkedin_url"],
+                user_id,
+            ),
+        )
+        return row, None
+
+
+async def select_profile(conn, user_id, composition_id, expected_revision, profile_id):
+    async with conn.transaction():
+        profile = await _one(
+            conn,
+            f"SELECT {_PROFILE_ROW} FROM profiles WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+            (profile_id, user_id),
+        )
+        if not profile:
+            return None, "missing"
+        row = await _one(
+            conn,
+            "UPDATE resume_compositions SET profile_id=%s,render_payload=jsonb_set(render_payload,'{header}',%s::jsonb),revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s AND archived_at IS NULL AND revision=%s RETURNING *",
+            (
+                profile_id,
+                json.dumps(_profile_header(profile)),
+                composition_id,
+                user_id,
+                expected_revision,
+            ),
+        )
+        if row:
+            await conn.execute(
+                "INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,'profile-selection',%s::jsonb)",
+                (
+                    composition_id,
+                    user_id,
+                    row["revision"],
+                    json.dumps({"resume": row["render_payload"]}),
+                ),
             )
-        return row
+            return row, None
+        exists = await _one(
+            conn,
+            "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+            (composition_id, user_id),
+        )
+        return None, "stale" if exists else "missing"
 
 
 async def create_summary(conn, user_id, payload):
@@ -316,6 +466,9 @@ async def update_education(conn, user_id, resource_id, payload):
                 items = [_education_render(item) for item in selected]
                 resume = comp["render_payload"]
                 resume["education"] = items
+                resume = await _apply_resume_placements(
+                    conn, user_id, comp["id"], resume
+                )
                 await _save_library_refresh(
                     conn, user_id, comp["id"], resume, "education-library-update"
                 )
@@ -490,6 +643,9 @@ async def search(conn, user_id, query, status, limit, offset):
       SELECT s.id,'summary' type,s.name label,NULL::text context,(s.archived_at IS NOT NULL) archived,s.tags
       FROM summary_variants s WHERE s.user_id=%s AND (s.name||' '||s.body ILIKE %s OR EXISTS(SELECT 1 FROM unnest(s.tags) tag WHERE tag ILIKE %s))
       UNION ALL
+      SELECT p.id,'profile',p.label,concat_ws(' · ',p.name,p.email),(p.archived_at IS NOT NULL),'{}'::text[]
+      FROM profiles p WHERE p.user_id=%s AND concat_ws(' ',p.label,p.name,p.phone,p.email,p.linkedin_label,p.linkedin_url) ILIKE %s
+      UNION ALL
       SELECT e.id,'education',e.institution,concat_ws(' · ',e.college_school,e.degree_type,e.degree_major,e.location,e.display_date),(e.archived_at IS NOT NULL),'{}'::text[]
       FROM education_items e WHERE e.user_id=%s AND concat_ws(' ',e.institution,e.college_school,e.degree_type,e.degree_major,e.degree,e.location,e.display_date,e.graduation_date) ILIKE %s
       UNION ALL
@@ -517,6 +673,7 @@ async def search(conn, user_id, query, status, limit, offset):
         user_id, like, like,
         user_id, like,
         user_id, like,
+        user_id, like,
         user_id, like, like,
         user_id, like,
         user_id, like, like,
@@ -531,6 +688,7 @@ async def search(conn, user_id, query, status, limit, offset):
 async def set_archive(conn, user_id, table, resource_id, archived):
     allowed = {
         "summary_variants",
+        "profiles",
         "education_items",
         "tool_groups",
         "tools",
@@ -544,6 +702,29 @@ async def set_archive(conn, user_id, table, resource_id, archived):
     }
     if table not in allowed:
         return None
+    if table == "tools":
+        tool = await _one(
+            conn,
+            "SELECT group_id FROM tools WHERE id=%s AND user_id=%s",
+            (resource_id, user_id),
+        )
+        if not tool:
+            return None
+        row = await _one(
+            conn,
+            "UPDATE tools SET archived_at="
+            + ("now()" if archived else "NULL")
+            + ",updated_at=now() WHERE id=%s AND user_id=%s RETURNING id",
+            (resource_id, user_id),
+        )
+        if row:
+            await _refresh_tool_compositions(
+                conn,
+                user_id,
+                tool["group_id"],
+                "tool-archive" if archived else "tool-restore",
+            )
+        return row
     return await _one(
         conn,
         f"UPDATE {table} SET archived_at="
@@ -707,17 +888,35 @@ async def restore_tool(conn, user_id, rid, outcome, group_id=None):
         return {"id": rid}, None
 
 
-async def _tool_group_render(conn, user_id, group_id):
+async def _tool_group_render(conn, user_id, group_id, composition_id=None):
     group = await _one(
         conn,
         "SELECT name FROM tool_groups WHERE id=%s AND user_id=%s",
         (group_id, user_id),
     )
-    items = await _many(
-        conn,
-        "SELECT name FROM tools WHERE user_id=%s AND group_id=%s AND archived_at IS NULL ORDER BY sort_order,id",
-        (user_id, group_id),
-    )
+    if composition_id:
+        items = await _many(
+            conn,
+            """SELECT t.id,t.name FROM tools t
+               LEFT JOIN composition_tool_order o ON o.tool_id=t.id AND o.composition_id=%s
+               WHERE t.user_id=%s AND t.group_id=%s AND t.archived_at IS NULL
+               ORDER BY o.sort_order NULLS LAST, t.sort_order, t.id""",
+            (composition_id, user_id, group_id),
+        )
+    else:
+        items = await _many(
+            conn,
+            "SELECT id,name FROM tools WHERE user_id=%s AND group_id=%s AND archived_at IS NULL ORDER BY sort_order,id",
+            (user_id, group_id),
+        )
+    if composition_id and items:
+        hidden = await _many(
+            conn,
+            "SELECT tool_id FROM composition_hidden_tools WHERE composition_id=%s",
+            (composition_id,),
+        )
+        hidden_ids = {str(x["tool_id"]) for x in hidden}
+        items = [x for x in items if str(x["id"]) not in hidden_ids]
     return (
         {"name": group["name"], "items": [x["name"] for x in items]} if group else None
     )
@@ -737,7 +936,8 @@ async def _refresh_tool_compositions(conn, user_id, group_id, source):
         )
         resume = comp["render_payload"]
         resume["tool_groups"] = [
-            await _tool_group_render(conn, user_id, x["item_id"]) for x in selected
+            await _tool_group_render(conn, user_id, x["item_id"], comp["id"])
+            for x in selected
         ]
         await _save_library_refresh(conn, user_id, comp["id"], resume, source)
 
@@ -783,7 +983,7 @@ async def select_tool_group(conn, user_id, cid, expected, group_id, included):
         )
         resume = locked["render_payload"]
         resume["tool_groups"] = [
-            await _tool_group_render(conn, user_id, x["item_id"]) for x in selected
+            await _tool_group_render(conn, user_id, x["item_id"], cid) for x in selected
         ]
         row = await _one(
             conn,
@@ -792,6 +992,165 @@ async def select_tool_group(conn, user_id, cid, expected, group_id, included):
         )
         await conn.execute(
             "INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,'tool-selection',%s::jsonb)",
+            (cid, user_id, row["revision"], json.dumps({"resume": resume})),
+        )
+        return row, None
+
+
+async def tool_order(conn, user_id, composition_id):
+    exists = await _one(
+        conn,
+        "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s",
+        (composition_id, user_id),
+    )
+    if not exists:
+        return None
+    return await _many(
+        conn,
+        "SELECT tool_id,sort_order FROM composition_tool_order WHERE composition_id=%s ORDER BY sort_order,tool_id",
+        (composition_id,),
+    )
+
+
+async def set_tool_order(conn, user_id, cid, expected, group_id, ids):
+    async with conn.transaction():
+        group = await _one(
+            conn,
+            "SELECT id FROM tool_groups WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+            (group_id, user_id),
+        )
+        if not group:
+            return None, "missing"
+        locked = await _one(
+            conn,
+            "SELECT render_payload FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL AND revision=%s FOR UPDATE",
+            (cid, user_id, expected),
+        )
+        if not locked:
+            return None, (
+                "stale"
+                if await _one(
+                    conn,
+                    "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+                    (cid, user_id),
+                )
+                else "missing"
+            )
+        member = await _one(
+            conn,
+            "SELECT 1 FROM composition_items WHERE composition_id=%s AND section='tool_groups' AND item_id=%s",
+            (cid, group_id),
+        )
+        active = await _many(
+            conn,
+            "SELECT id FROM tools WHERE user_id=%s AND group_id=%s AND archived_at IS NULL",
+            (user_id, group_id),
+        )
+        if not member or {str(x["id"]) for x in active} != {str(x) for x in ids}:
+            return None, "invalid"
+        await conn.execute(
+            """DELETE FROM composition_tool_order o USING tools t
+               WHERE o.composition_id=%s AND o.tool_id=t.id AND t.group_id=%s""",
+            (cid, group_id),
+        )
+        for index, tool_id in enumerate(ids):
+            await conn.execute(
+                "INSERT INTO composition_tool_order(composition_id,tool_id,sort_order) VALUES(%s,%s,%s)",
+                (cid, tool_id, index),
+            )
+        selected = await _many(
+            conn,
+            "SELECT item_id FROM composition_items WHERE composition_id=%s AND section='tool_groups' ORDER BY sort_order,id",
+            (cid,),
+        )
+        resume = locked["render_payload"]
+        resume["tool_groups"] = [
+            await _tool_group_render(conn, user_id, x["item_id"], cid) for x in selected
+        ]
+        row = await _one(
+            conn,
+            "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",
+            (json.dumps(resume), cid, user_id),
+        )
+        await conn.execute(
+            "INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,'tool-order',%s::jsonb)",
+            (cid, user_id, row["revision"], json.dumps({"resume": resume})),
+        )
+        return row, None
+
+
+async def hidden_tools(conn, user_id, composition_id):
+    exists = await _one(
+        conn,
+        "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s",
+        (composition_id, user_id),
+    )
+    if not exists:
+        return None
+    return await _many(
+        conn,
+        "SELECT h.tool_id FROM composition_hidden_tools h WHERE h.composition_id=%s ORDER BY h.tool_id",
+        (composition_id,),
+    )
+
+
+async def set_tool_visibility(conn, user_id, cid, expected, tool_id, included):
+    async with conn.transaction():
+        tool = await _one(
+            conn,
+            "SELECT id,group_id FROM tools WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+            (tool_id, user_id),
+        )
+        if not tool:
+            return None, "missing"
+        locked = await _one(
+            conn,
+            "SELECT render_payload FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL AND revision=%s FOR UPDATE",
+            (cid, user_id, expected),
+        )
+        if not locked:
+            return None, (
+                "stale"
+                if await _one(
+                    conn,
+                    "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+                    (cid, user_id),
+                )
+                else "missing"
+            )
+        member = await _one(
+            conn,
+            "SELECT 1 FROM composition_items WHERE composition_id=%s AND section='tool_groups' AND item_id=%s",
+            (cid, tool["group_id"]),
+        )
+        if not member:
+            return None, "missing"
+        if included:
+            await conn.execute(
+                "DELETE FROM composition_hidden_tools WHERE composition_id=%s AND tool_id=%s",
+                (cid, tool_id),
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO composition_hidden_tools(composition_id,tool_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
+                (cid, tool_id),
+            )
+        selected = await _many(
+            conn,
+            "SELECT item_id FROM composition_items WHERE composition_id=%s AND section='tool_groups' ORDER BY sort_order,id",
+            (cid,),
+        )
+        resume = locked["render_payload"]
+        resume["tool_groups"] = [
+            await _tool_group_render(conn, user_id, x["item_id"], cid) for x in selected
+        ]
+        row = await _one(
+            conn,
+            "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",
+            (json.dumps(resume), cid, user_id),
+        )
+        await conn.execute(
+            "INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,'tool-visibility',%s::jsonb)",
             (cid, user_id, row["revision"], json.dumps({"resume": resume})),
         )
         return row, None
@@ -1096,13 +1455,15 @@ async def reorder_composition_items(conn, user_id, cid, payload):
         if payload.section == "education":
             ordered = await _many(conn, "SELECT e.* FROM composition_items i JOIN education_items e ON e.id=i.item_id WHERE i.composition_id=%s AND i.section='education' ORDER BY i.sort_order,i.id", (cid,))
             resume["education"] = [_education_render(x) for x in ordered]
+            resume = await _apply_resume_placements(conn, user_id, cid, resume)
         elif payload.section == "tool_groups":
-            resume["tool_groups"] = [await _tool_group_render(conn, user_id, rid) for rid in payload.ids]
+            resume["tool_groups"] = [await _tool_group_render(conn, user_id, rid, cid) for rid in payload.ids]
         elif payload.section == "personal_interests":
             ordered = await _many(conn, "SELECT x.body FROM composition_items i JOIN interests x ON x.id=i.item_id WHERE i.composition_id=%s AND i.section='personal_interests' ORDER BY i.sort_order,i.id", (cid,))
             resume["personal_interests"] = [x["body"] for x in ordered]
         else:
             resume[payload.section] = [await render_historical_for_order(conn, user_id, rid, cid) for rid in payload.ids]
+            resume = await _apply_resume_placements(conn, user_id, cid, resume)
         row = await _one(conn, "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *", (json.dumps(resume), cid, user_id))
         await conn.execute("INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,'composition-item-reorder',%s::jsonb)", (cid,user_id,row["revision"],json.dumps({"resume":resume})))
         return row, None
@@ -1125,6 +1486,7 @@ async def select_education(conn, user_id, cid, expected, education_id, included)
             await conn.execute("DELETE FROM composition_items WHERE composition_id=%s AND section='education' AND item_id=%s",(cid,education_id))
         selected=await _many(conn,"SELECT e.* FROM composition_items i JOIN education_items e ON e.id=i.item_id WHERE i.composition_id=%s AND i.section='education' ORDER BY i.sort_order,i.id",(cid,))
         resume=locked["render_payload"]; resume["education"]=[_education_render(x) for x in selected]
+        resume=await _apply_resume_placements(conn, user_id, cid, resume)
         row=await _one(conn,"UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",(json.dumps(resume),cid,user_id))
         await conn.execute("INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,'education-selection',%s::jsonb)",(cid,user_id,row["revision"],json.dumps({"resume":resume})))
         return row,None

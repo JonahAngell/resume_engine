@@ -28,9 +28,12 @@ export default function FitIndicator({
     );
   const a = fit.actualPageCount || 1,
     p = fit.preferredPageCount || 1,
+    pages = (n: number) => `${n} ${n === 1 ? "page" : "pages"}`,
     label = fit.fits
-      ? `Fits preferred length (${a} of ${p} ${p === 1 ? "page" : "pages"}).`
-      : `Exceeds preferred length by ${Math.max(1, a - p)} ${a - p === 1 ? "page" : "pages"}. Export is blocked.`;
+      ? `Matches target length (${pages(a)}).`
+      : a > p
+        ? `Exceeds target length by ${pages(a - p)}. Export is blocked.`
+        : `Shorter than target length (${a} of ${pages(p)}). Export is blocked.`;
   return (
     <div
       className={`fit ${fit.fits ? "ok" : "bad"} ${compact ? "compact" : ""}`}
@@ -40,7 +43,7 @@ export default function FitIndicator({
       {fit.fits ? "✓" : "⚠"}{" "}
       {compact
         ? fit.fits
-          ? `Fits ${p} ${p === 1 ? "page" : "pages"}`
+          ? `Matches ${p} ${p === 1 ? "page" : "pages"}`
           : `${a} of ${p} pages`
         : label}
     </div>

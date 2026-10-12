@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from .database import (
@@ -52,6 +52,8 @@ from .editing_schemas import (
     BulletRestore,
     CompositionCreate,
     CompositionItemSelection,
+    ToolVisibilityWrite,
+    ToolOrderWrite,
     CompositionSave,
     CompositionState,
     DuplicateComposition,
@@ -69,16 +71,19 @@ from .identity import CurrentUser, resolve_current_user
 from .library_repository import (
     create_education,
     create_interest,
+    create_profile,
     create_summary,
+    duplicate_profile,
     duplicate_summary,
     ensure_user,
     fetch_library,
     load_composition,
     reorder,
-    save_profile,
     search,
     select_interest,
+    select_profile,
     select_summary,
+    update_profile,
     set_archive,
     update_education,
     update_interest,
@@ -91,6 +96,10 @@ from .library_repository import (
     move_tool,
     restore_tool,
     select_tool_group,
+    hidden_tools,
+    set_tool_visibility,
+    tool_order,
+    set_tool_order,
     create_custom_section,
     update_custom_section,
     create_custom_entry,
@@ -105,11 +114,13 @@ from .library_repository import (
 )
 from .library_schemas import (
     CompositionInterestSelection,
+    CompositionProfileSelection,
     CompositionSummarySelection,
     CurrentUserResponse,
     EducationWrite,
     InterestWrite,
     LibraryResponse,
+    ProfileDuplicate,
     ProfileWrite,
     ReorderRequest,
     SeedImportRequest,
@@ -126,6 +137,24 @@ from .library_schemas import (
     LibraryItemCreate, LibraryTagsWrite, LibraryBulkWrite, LibraryParentWrite,
 )
 from .library_service import import_seed
+from .resume_import import ImportDraft, parse_upload
+from .resume_import_commit import commit_import
+from .job_repository import (
+    analyze_job_description,
+    archive_job_description,
+    compare_job_description,
+    create_job_description,
+    get_job_description,
+    list_job_descriptions,
+    update_job_description,
+)
+from .job_schemas import (
+    JobAnalysis,
+    JobDescriptionRecord,
+    JobDescriptionWrite,
+    JobMatch,
+    JobMatchRequest,
+)
 from .phase2j_repository import (
     picker as phase2j_picker,
     insert_placement,
@@ -143,7 +172,7 @@ from .render import render_resume
 from .schemas import Resume
 
 ROOT = Path(__file__).resolve().parents[2]
-SEED = ROOT / "seed" / "jonah-resume.json"
+SEED = ROOT / "seed" / "nia-calder-resume.json"
 FRONTEND = ROOT / "frontend" / "dist"
 
 
@@ -170,10 +199,14 @@ def state(row):
         "display_title": row.get("display_title", ""),
         "target_company": row.get("target_company", ""),
         "target_role": row.get("target_role", ""),
+        "job_description_id": row.get("job_description_id"),
         "preferred_page_length": row.get("preferred_page_length", 1),
         "date_format": row.get("date_format", "long"),
+        "template_style": row.get("template_style", "classic"),
+        "skill_row_max": row.get("skill_row_max", 4),
         "section_sort_modes": row.get("section_sort_modes", {}),
         "summary_variant_id": row.get("summary_variant_id"),
+        "profile_id": row.get("profile_id"),
         "revision": row["revision"],
         "archived_at": row.get("archived_at"),
         "resume": Resume.model_validate(row["render_payload"]),
@@ -205,13 +238,74 @@ async def library(identity: CurrentUser = Depends(resolve_current_user)):
         return await fetch_library(c, u["id"])
 
 
-@app.put("/api/profile")
-async def profile(
+MAX_IMPORT_BYTES = 10 * 1024 * 1024
+
+
+@app.post("/api/library/import/preview", response_model=ImportDraft)
+async def preview_import(
+    file: UploadFile = File(...),
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    data = await file.read(MAX_IMPORT_BYTES + 1)
+    if len(data) > MAX_IMPORT_BYTES:
+        raise HTTPException(413, "File is larger than 10 MB.")
+    try:
+        draft = parse_upload(file.filename or "", data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    async with connection() as c:
+        await owner(identity, c)
+    return draft
+
+
+@app.post("/api/library/import/commit")
+async def commit_reviewed_import(
+    draft: ImportDraft, identity: CurrentUser = Depends(resolve_current_user)
+):
+    try:
+        async with connection() as c:
+            user = await owner(identity, c)
+            return await commit_import(c, user["id"], draft, user["display_name"])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/library/profiles", status_code=201)
+async def add_profile(
     req: ProfileWrite, identity: CurrentUser = Depends(resolve_current_user)
 ):
     async with connection() as c:
         u = await owner(identity, c)
-        return await save_profile(c, u["id"], req)
+        row, error = await create_profile(c, u["id"], req)
+        if error == "duplicate":
+            raise HTTPException(409, "A profile with that name already exists")
+        return row
+
+
+@app.put("/api/library/profiles/{rid}")
+async def edit_profile(
+    rid: UUID, req: ProfileWrite, identity: CurrentUser = Depends(resolve_current_user)
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await update_profile(c, u["id"], rid, req)
+        if error == "duplicate":
+            raise HTTPException(409, "A profile with that name already exists")
+        return row or (_ for _ in ()).throw(HTTPException(404, "Profile not found"))
+
+
+@app.post("/api/library/profiles/{rid}/duplicate", status_code=201)
+async def copy_profile(
+    rid: UUID,
+    req: ProfileDuplicate,
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await duplicate_profile(c, u["id"], rid, req.label)
+        if error == "duplicate":
+            raise HTTPException(409, "A profile with that name already exists")
+        return row or (_ for _ in ()).throw(HTTPException(404, "Profile not found"))
 
 
 @app.post("/api/library/summaries", status_code=201)
@@ -414,6 +508,76 @@ async def restore_one_tool(
                 409, "Restore the parent group or choose an active destination group"
             )
         return row or (_ for _ in ()).throw(HTTPException(404, "Tool not found"))
+
+
+@app.get("/api/compositions/{cid}/tool-order")
+async def composition_tool_order(
+    cid: UUID, identity: CurrentUser = Depends(resolve_current_user)
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        rows = await tool_order(c, u["id"], cid)
+        if rows is None:
+            raise HTTPException(404, "Composition not found")
+        return [
+            {"tool_id": str(row["tool_id"]), "sort_order": row["sort_order"]}
+            for row in rows
+        ]
+
+
+@app.put(
+    "/api/compositions/{cid}/tool-groups/{group_id}/tools/order",
+    response_model=CompositionState,
+)
+async def order_composition_tools(
+    cid: UUID,
+    group_id: UUID,
+    req: ToolOrderWrite,
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await set_tool_order(
+            c, u["id"], cid, req.revision, group_id, req.ids
+        )
+        if error == "missing":
+            raise HTTPException(404, "Composition or skill group not found")
+        if error == "invalid":
+            raise HTTPException(400, "Skill order must include every skill in the group")
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        return state(row)
+
+
+@app.get("/api/compositions/{cid}/hidden-tools")
+async def composition_hidden_tools(
+    cid: UUID, identity: CurrentUser = Depends(resolve_current_user)
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        rows = await hidden_tools(c, u["id"], cid)
+        if rows is None:
+            raise HTTPException(404, "Composition not found")
+        return [{"tool_id": str(row["tool_id"])} for row in rows]
+
+
+@app.put("/api/compositions/{cid}/tools/{tool_id}", response_model=CompositionState)
+async def choose_tool_visibility(
+    cid: UUID,
+    tool_id: UUID,
+    req: ToolVisibilityWrite,
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await set_tool_visibility(
+            c, u["id"], cid, req.revision, tool_id, req.included
+        )
+        if error == "missing":
+            raise HTTPException(404, "Composition or skill not found")
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        return state(row)
 
 
 @app.put("/api/compositions/{cid}/education", response_model=CompositionState)
@@ -858,9 +1022,12 @@ async def edit_composition_metadata(cid: UUID, req: CompositionMetadataWrite, id
         async with connection() as c:
             u=await owner(identity,c);row,error=await update_composition_metadata(
                 c,u["id"],cid,req.revision,req.name,req.description,
-                req.display_title,req.target_company,req.target_role
+                req.display_title,req.target_company,req.target_role,
+                job_description_id=req.job_description_id,
+                link_job="job_description_id" in req.model_fields_set,
             )
             if error=="missing": raise HTTPException(404,"Composition not found")
+            if error=="job": raise HTTPException(404,"Job description not found")
             if error=="stale": raise HTTPException(409,"Composition changed; reload before saving")
             return state(row)
     except HTTPException: raise
@@ -907,6 +1074,24 @@ async def composition_preferences(cid: UUID, req: CompositionPreferencesWrite, i
         if error=="missing": raise HTTPException(404,"Composition not found")
         if error=="stale": raise HTTPException(409,"Composition changed; reload before saving")
         return state(row)
+
+@app.put("/api/compositions/{cid}/profile", response_model=CompositionState)
+async def choose_profile(
+    cid: UUID,
+    req: CompositionProfileSelection,
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await select_profile(
+            c, u["id"], cid, req.revision, req.profile_id
+        )
+        if error == "missing":
+            raise HTTPException(404, "Composition or profile not found")
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        return state(row)
+
 
 @app.put("/api/compositions/{cid}/summary", response_model=CompositionState)
 async def choose_summary(
@@ -1016,7 +1201,7 @@ async def render_revision(cid:UUID,rid:UUID,identity:CurrentUser=Depends(resolve
     async with connection() as c:
         u=await owner(identity,c);materialized,error=await materialize_revision(c,u["id"],cid,rid)
         if error:raise HTTPException(404,"Revision not found")
-        return HTMLResponse(render_resume(materialized["resume"],True,materialized["renderer_contract_version"],materialized["section_sort_modes"],materialized["date_format"]))
+        return HTMLResponse(render_resume(materialized["resume"],True,materialized["renderer_contract_version"],materialized["section_sort_modes"],materialized["date_format"],materialized.get("template_style","classic"),materialized.get("skill_row_max",4)))
 
 @app.get("/api/library/bullet-picker")
 async def bullet_picker(q: str = "", section: str = "", limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0), identity: CurrentUser = Depends(resolve_current_user)):
@@ -1087,7 +1272,7 @@ async def render_composition(cid: UUID, revision: int | None = None, identity: C
         materialized,error=await materialize_composition(c,u["id"],cid,revision)
         if error=="stale": raise HTTPException(409,"Composition changed; reload before rendering")
         if error: raise HTTPException(404,"Composition not found")
-        return HTMLResponse(render_resume(materialized["resume"],True,materialized["renderer_contract_version"],materialized.get("section_sort_modes",{}),materialized.get("date_format","long")))
+        return HTMLResponse(render_resume(materialized["resume"],True,materialized["renderer_contract_version"],materialized.get("section_sort_modes",{}),materialized.get("date_format","long"),materialized.get("template_style","classic"),materialized.get("skill_row_max",4)))
 
 def _pdf_page_count(content: bytes) -> int:
     import re
@@ -1105,7 +1290,7 @@ async def export_composition_pdf(cid: UUID, revision: int | None = Query(default
         materialized,error=await materialize_composition(c,u["id"],cid,revision)
     if error=="stale": raise HTTPException(409,"Composition changed; save or reload before exporting")
     if error: raise HTTPException(404,"Composition not found")
-    html=render_resume(materialized["resume"],False,materialized["renderer_contract_version"],materialized.get("section_sort_modes",{}),materialized.get("date_format","long"))
+    html=render_resume(materialized["resume"],False,materialized["renderer_contract_version"],materialized.get("section_sort_modes",{}),materialized.get("date_format","long"),materialized.get("template_style","classic"),materialized.get("skill_row_max",4))
     url=os.getenv("GOTENBERG_URL","http://gotenberg:3000").rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=45) as client:
@@ -1116,8 +1301,8 @@ async def export_composition_pdf(cid: UUID, revision: int | None = Query(default
     actual=_pdf_page_count(rendered.content)
     preferred=materialized["preferred_page_count"]
     if actual < 1: raise HTTPException(502,"PDF renderer returned an invalid document")
-    if actual > preferred:
-        raise HTTPException(409,f"Export blocked: resume uses {actual} pages; preferred length is {preferred}.")
+    if actual != preferred:
+        raise HTTPException(409,f"Export blocked: resume is {actual} pages; target length is {preferred}.")
     filename=_safe_filename(materialized["name"])
     return Response(rendered.content,media_type="application/pdf",headers={"Content-Disposition":f'attachment; filename="{filename}"',"X-Resume-Page-Count":str(actual),"X-Renderer-Contract":materialized["renderer_contract_version"]})
 
@@ -1162,6 +1347,100 @@ async def library_management_parent(bullet_id: UUID, req: LibraryParentWrite, id
 async def library_management_usage(bullet_id: UUID, identity: CurrentUser=Depends(resolve_current_user)):
     async with connection() as c:
         u=await owner(identity,c); return await phase2k_usages(c,u["id"],bullet_id)
+
+@app.get("/api/job-descriptions", response_model=list[JobDescriptionRecord])
+async def job_descriptions(identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        return await list_job_descriptions(c, u["id"])
+
+
+@app.post("/api/job-descriptions", response_model=JobDescriptionRecord, status_code=201)
+async def add_job_description(
+    req: JobDescriptionWrite, identity: CurrentUser = Depends(resolve_current_user)
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await create_job_description(c, u["id"], req)
+        if error == "resume":
+            raise HTTPException(404, "Resume not found")
+        return row
+
+
+@app.get("/api/job-descriptions/{job_id}", response_model=JobDescriptionRecord)
+async def job_description(job_id: UUID, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row = await get_job_description(c, u["id"], job_id)
+        if not row:
+            raise HTTPException(404, "Job description not found")
+        return row
+
+
+@app.put("/api/job-descriptions/{job_id}", response_model=JobDescriptionRecord)
+async def edit_job_description(
+    job_id: UUID,
+    req: JobDescriptionWrite,
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await update_job_description(c, u["id"], job_id, req)
+        if error == "resume":
+            raise HTTPException(404, "Resume not found")
+        if error:
+            raise HTTPException(404, "Job description not found")
+        return row
+
+
+@app.post("/api/job-descriptions/{job_id}/archive", response_model=JobDescriptionRecord)
+async def archive_job(job_id: UUID, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row = await archive_job_description(c, u["id"], job_id)
+        if not row:
+            raise HTTPException(404, "Job description not found")
+        return row
+
+
+async def _compare_job(job_id: UUID, composition_id: UUID, identity: CurrentUser):
+    async with connection() as c:
+        u = await owner(identity, c)
+        result, error = await compare_job_description(c, u["id"], job_id, composition_id)
+        if error == "resume":
+            raise HTTPException(404, "Resume not found")
+        if error:
+            raise HTTPException(404, "Job description not found")
+        return result
+
+
+@app.get("/api/job-descriptions/{job_id}/analysis", response_model=JobAnalysis)
+async def job_description_analysis(job_id: UUID, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        result = await analyze_job_description(c, u["id"], job_id)
+        if not result:
+            raise HTTPException(404, "Job description not found")
+        return result
+
+
+@app.get("/api/job-descriptions/{job_id}/match", response_model=JobMatch)
+async def match_job_description(
+    job_id: UUID,
+    composition_id: UUID = Query(),
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    return await _compare_job(job_id, composition_id, identity)
+
+
+@app.post("/api/job-descriptions/{job_id}/match", response_model=JobMatch)
+async def match_job_description_post(
+    job_id: UUID,
+    req: JobMatchRequest,
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    return await _compare_job(job_id, req.composition_id, identity)
+
 
 if FRONTEND.exists():
     app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="frontend")

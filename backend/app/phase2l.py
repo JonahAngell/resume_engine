@@ -44,7 +44,10 @@ def preprocess_resume(resume,sort_modes=None,date_format="long"):
     row["date"]=rendered
   if modes.get(key,"automatic")=="automatic":rows=sorted(rows,key=chronological_key)
   if key=="work_experience":
-   for i,row in enumerate(rows):row["suppress_organization"]=i>0 and continuous(rows[i-1],row)
+   for i,row in enumerate(rows):
+    previous=rows[i-1] if i else None
+    same=bool(previous) and normalize_company(previous.get("organization"))==normalize_company(row.get("organization")) and bool(normalize_company(row.get("organization")))
+    row["suppress_organization"]=same
   data[key]=rows
  education=[]
  for item in data.get("education",[]):
