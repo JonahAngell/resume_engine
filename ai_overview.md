@@ -15,7 +15,7 @@ The match score is deterministic. AI never changes `required_matched`, `preferre
 | `backend/app/job_repository.py` | `load_ai_review_inputs`, `link_job_composition`. |
 | `backend/app/job_schemas.py` | `JobMatch`, `JobMatchRequest`, `KeywordReview`. |
 | `backend/app/main.py` | `POST /api/job-descriptions/{job_id}/ai-review`. |
-| `frontend/src/JobMatchPanel.tsx` | **Review with AI** button and `AiReviewBody`. |
+| `frontend/src/match/` | Job match dashboard (the old `JobMatchPanel.tsx` and its Review with AI button are removed). |
 | `tests/test_ai_review.py` | Redaction, grounding, cache, partial failure, client retries, paid-model and missing-key refusal. |
 | `tests/test_ai_providers.py` | Provider order, gateway fallback on 401/403/5xx, model list, OIDC token minting and caching. |
 | `tests/conftest.py` | Clears `STUDIOSHARE_*` gateway vars so a developer shell cannot leak into tests. |
@@ -130,11 +130,7 @@ Module dict `_CACHE`, max 32, insertion order. Key is a SHA-256 of redacted job,
 
 ## UI
 
-State is local to `JobMatchPanel`. It is not written to the database.
-
-**Mark as a match** on a semantic candidate calls `markRequirement`, which toggles that requirement text in `keyword_review.matched` and saves the job. The next deterministic match treats it as matched. AI does not set `matched` itself.
-
-Rewrite suggestions and bullet tags are display only.
+The review endpoint is no longer called from the UI; the Job match dashboard uses the AI coach instead (see the dashboard section below). **Mark as a match** still goes through `markRequirement`, which toggles that requirement text in `keyword_review.matched` and saves the job. AI does not set `matched` itself.
 
 ## Invariants for later changes
 
@@ -160,7 +156,7 @@ Design notes and the review behind these features are in `docs/ai_suggestions_bl
 | `backend/app/job_repository.py` | `load_variant_inputs` (placement wording and job text). |
 | `backend/app/resume_variants.py` | `save_bullet_edit(..., name=, ai=)` writes the accepted variant. |
 | `backend/migrations/024_bullet_variant_ai_provenance.sql` | `ai_generated`, `ai_model`, `ai_job_id` and the body-change trigger. |
-| `frontend/src/SuggestVariantDialog.tsx`, `frontend/src/AddSkillDialog.tsx` | The two dialogs, opened from `JobMatchPanel`. |
+| `frontend/src/SuggestVariantDialog.tsx`, `frontend/src/AddSkillDialog.tsx` | The two dialogs, opened from the dashboard and the highlight popover (state in `App.tsx`). |
 | `backend/app/templates/resume.html` | Preview chip (Suggest / Add to Skills), inside `{% if measure %}` only. |
 | `tests/test_ai_variants*.py`, `tests/test_skill_*.py`, `tests/test_ai_suggestions_contract.py` | Unit, database and contract tests. |
 
@@ -197,3 +193,56 @@ A draft is dropped when it adds a number (digits or spelled), a dictionary term 
 - Skill group choice uses library, related-skills and hint data first. The model sees only group and tool names and can only pick a listed group or propose a new name.
 - Skill group names are never hardcoded.
 - Adding a skill writes to the library and the current resume only. Other resumes that include the group get a `composition_hidden_tools` row for a new or restored tool, so their payload, revision and history are untouched. A group newly added to the current resume shows only the added skill.
+
+# Job match dashboard, AI coach and ATS score
+
+The Job match tab is a dashboard rail beside the job description and the resume preview. The old "Review with AI" text block (`AiReviewBody`) is gone from the UI; `POST /ai-review` and its tests remain for compatibility.
+
+## Files
+
+| Path | Role |
+|---|---|
+| `frontend/src/match/useJobMatch.ts` | Jobs, selected job, deterministic match, `markRequirement`, `dismissRequirement`, `addTag`. Called once in `App.tsx`. |
+| `frontend/src/match/MatchDashboard.tsx` | Sticky header (job, match score ring, counters, tabs) and the Overview tab. |
+| `frontend/src/match/RequirementsTab.tsx`, `CoachTab.tsx`, `AtsTab.tsx` | The other three tabs. All panels stay mounted so results survive tab switches. |
+| `frontend/src/match/MarkPopover.tsx` | Popover for a clicked highlight; a bottom sheet below 600px. |
+| `frontend/src/matchMarks.ts` | Each mark carries `items`: keyword, group, matched or suggested, requirement, rewrite targets, Add to Skills. |
+| `backend/app/ai_coach.py` | Whole-resume review: prompt, `filter_coach`, cache. |
+| `backend/app/ats_score.py` | Deterministic ATS score, methodology and disclaimer. |
+
+## Clickable highlights
+
+Job description highlights (`JobDocument.tsx`) and resume highlights (`resume.html`, inside `{% if measure %}` only) are focusable buttons. The preview posts `resume-mark-click` with the match ids, the clicked line id and the element rect; `ResumePreview.tsx` maps the rect through the preview zoom. The popover shows Required / Preferred / Responsibility, Matched / Marked / Suggested, the requirement, and actions: Generate AI revision (opens the Suggest wording dialog on that bullet), Add to Skills, Show in dashboard, Show in the other document. A click on one resume line offers that line's revision first.
+
+## Endpoints
+
+| Route | Saves | Notes |
+|---|---|---|
+| `POST /api/job-descriptions/{job_id}/ai-coach` | nothing | Body `{composition_id}`. Returns `suggestions` (`rewrite`, `summary`, `add_skill`), `equivalents`, `revision`, `dropped`. |
+| `POST /api/job-descriptions/{job_id}/ats-score` | nothing | Body `{composition_id, page_count}`. Returns `score`, `band`, `components`, `methodology`, `disclaimer`. |
+
+Coach cards are accepted through existing endpoints: rewrites through `.../ai-variants/accept` (`draft` or `edited`), summaries through `/summaries/{id}/save` in `new` mode, skills through Add to Skills, equivalents through `markRequirement`.
+
+## Coach filtering
+
+The model sees the redacted posting, every requirement with its group and match state, the summary, and numbered placed bullets. The server keeps a suggestion only when its requirement matches a row exactly; rewrites and summaries pass `ai_variants.drop_reason` against the original text; `add_skill` names an unmatched keyword that `is_skill_keyword` accepts; bullet numbers are in range. At most 12 suggestions, required before preferred, then by priority; at most 8 equivalents, unmatched requirements only. Kept rewrites are registered with `remember_issued`, so accepting one unchanged sets `ai_generated`. Gated by `ai_available()` like the other AI modules. Cache: `ai_coach._CACHE` (16), keyed by posting, bullets, summary, requirements, revision, `COACH_PROMPT_VERSION` and model.
+
+## ATS score
+
+| Component | Points | Rule |
+|---|---|---|
+| Keyword match | 35 | Found keywords over all keywords; required count 2×, preferred 1×. |
+| Required qualifications | 20 | Required-row coverage 60% + degree/years/certification gates 40% (pass 1, unknown 0.5, fail 0). |
+| Job title alignment | 10 | Job title words found in display title, target role, or most recent job title. |
+| Keyword context | 10 | Matched keywords evidenced in Experience, Projects or Leadership bullets. |
+| Parseability | 15 | Experience, Education and Skills sections; email and phone; dated roles; −5 for the `sre` table template. |
+| Length and bullets | 10 | ≤2 pages; bullets of 8–35 words; share of bullets with a number (full credit at 50%). |
+
+Bands: Strong ≥ 75, Fair ≥ 55, otherwise Needs work. The UI always shows the disclaimer and re-scores when the revision or page count changes.
+
+## Invariants
+
+- The match score ring is 70% required coverage + 30% preferred coverage from the deterministic matcher. AI never changes it.
+- The ATS score is deterministic and never uses AI.
+- Coach suggestions save nothing until a card is accepted, and pass the same fabrication guard as single-bullet drafts.
+- Nothing from the clickable-highlight code reaches the PDF render.

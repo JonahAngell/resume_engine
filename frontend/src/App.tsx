@@ -1,13 +1,18 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FitIndicator, { Fit } from "./FitIndicator";
-import ResumePreview, { type PreviewSuggest } from "./ResumePreview";
+import ResumePreview, { type PreviewMarkClick } from "./ResumePreview";
 import { api } from "./api";
 import { RESUME_ENGINE_BUILD, RESUME_ENGINE_VERSION } from "./app-version";
 import { EditorHistory } from "./EditorHistory";
 import StandaloneLibrary from "./StandaloneLibrary";
-import JobMatchPanel from "./JobMatchPanel";
 import JobDocument from "./JobDocument";
-import { type CompareJob, type MatchMark } from "./matchMarks";
+import { activeIdsForTerms, buildMatchMarks, type MarkItem } from "./matchMarks";
+import AddSkillDialog from "./AddSkillDialog";
+import SuggestVariantDialog from "./SuggestVariantDialog";
+import MatchDashboard from "./match/MatchDashboard";
+import MarkPopover, { type PopoverAnchor } from "./match/MarkPopover";
+import { useJobMatch } from "./match/useJobMatch";
+import type { AssistRequest, DashboardTab } from "./match/types";
 import JobsPage from "./JobsPage";
 import { AppIcon } from "./AppIcon";
 import ModalShell from "./ModalShell";
@@ -134,12 +139,16 @@ export default function App() {
     }
   });
   const [currentPage, setCurrentPage] = useState(1);
-  const [compareJob, setCompareJob] = useState<CompareJob | null>(null);
-  const [matchMarks, setMatchMarks] = useState<MatchMark[]>([]);
   const [activeMatchIds, setActiveMatchIds] = useState<string[]>([]);
-  const [previewSuggest, setPreviewSuggest] = useState<
-    (PreviewSuggest & { nonce: number }) | null
-  >(null);
+  const [dashTab, setDashTab] = useState<DashboardTab>("overview");
+  const [dashFocus, setDashFocus] = useState<{ key: string; nonce: number } | null>(null);
+  const [assist, setAssist] = useState<AssistRequest | null>(null);
+  const [popover, setPopover] = useState<{
+    anchor: PopoverAnchor;
+    ids: string[];
+    lineId: string;
+    source: "job" | "resume";
+  } | null>(null);
   const [matchRailOpen, setMatchRailOpen] = useState(true);
   const [zoom, setZoom] = useState(() => {
     const stored = Number(localStorage.getItem("resume-engine-preview-zoom"));
@@ -150,6 +159,7 @@ export default function App() {
   const historyRef = useRef(new EditorHistory());
   const sessionId = useRef(crypto.randomUUID());
   const [, refreshHistory] = useState(0);
+  const compactTopbar = useMediaQuery(COMPACT_TOPBAR_QUERY);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     compRef.current = comp;
@@ -175,6 +185,24 @@ export default function App() {
     setLib(next);
     return next;
   };
+  const matchState = useJobMatch({
+    compositionId: comp?.id || "",
+    revision: comp?.revision || 0,
+    linkedJobId: comp?.job_description_id || "",
+    active: editorTab === "match" && !!comp,
+    reloadLibrary: loadLibrary,
+  });
+  const compareJob = editorTab === "match" ? matchState.compareJob : null;
+  const matchMarks = useMemo(() => {
+    const match = matchState.match;
+    if (editorTab !== "match" || !match) return [];
+    return buildMatchMarks([
+      ...match.required,
+      ...match.preferred,
+      ...(match.responsibilities || []),
+      ...(match.eligibility_rows || []),
+    ]);
+  }, [editorTab, matchState.match]);
   const loadComposition = async (id: string) => {
     const selected = lib?.compositions?.find?.((x: any) => x.id === id);
     const next = await api<Comp>(
@@ -734,13 +762,23 @@ export default function App() {
       Math.min(Math.max(1, page), x.actualPageCount || 1),
     );
   }, []);
-  const onCompare = useCallback((view: { job: CompareJob | null; marks: MatchMark[] }) => {
-    setCompareJob(view.job);
-    setMatchMarks(view.marks);
+  const onPreviewMarkClick = useCallback((click: PreviewMarkClick) => {
+    setPopover({ anchor: click.anchor, ids: click.matchIds, lineId: click.lineId, source: "resume" });
   }, []);
-  const onPreviewSuggest = useCallback((request: PreviewSuggest) => {
-    setPreviewSuggest({ ...request, nonce: Date.now() });
+  const onJobMarkClick = useCallback((markId: string, anchor: PopoverAnchor) => {
+    setPopover({ anchor, ids: [markId], lineId: "", source: "job" });
   }, []);
+  const closePopover = useCallback(() => setPopover(null), []);
+  const popoverItems = useMemo<MarkItem[]>(() => {
+    if (!popover) return [];
+    const items = matchMarks.filter((mark) => popover.ids.includes(mark.id)).flatMap((mark) => mark.items || []);
+    if (!popover.lineId) return items;
+    // A click on one resume line offers revisions of that line first.
+    return items.map((item) => {
+      const here = item.rewrites.filter((target) => target.lineId === popover.lineId);
+      return here.length ? { ...item, rewrites: here } : item;
+    });
+  }, [popover, matchMarks]);
   const onActiveMatch = useCallback((ids: string[]) => {
     setActiveMatchIds((current) =>
       current.length === ids.length && current.every((id, index) => id === ids[index])
@@ -750,9 +788,8 @@ export default function App() {
   }, []);
   useEffect(() => {
     if (editorTab !== "match") {
-      setCompareJob(null);
-      setMatchMarks([]);
       setActiveMatchIds([]);
+      setPopover(null);
     }
   }, [editorTab]);
   useEffect(() => {
@@ -1086,7 +1123,7 @@ export default function App() {
           }
           onHighlightPage={setCurrentPage}
           onHighlightHover={onActiveMatch}
-          onSuggest={editorTab === "match" ? onPreviewSuggest : undefined}
+          onMarkClick={editorTab === "match" ? onPreviewMarkClick : undefined}
         />
       </div>
     </section>
@@ -1200,42 +1237,71 @@ export default function App() {
           >
             {status}
           </span>
-          <button
-            onClick={() => {
-              location.hash = "library";
-              setScreen("library");
-            }}
-          >
-            <AppIcon name="library" />
-            <span className="action-label">Library</span>
-          </button>
-          <button
-            onClick={() => runHistoryAction("undo")}
-            disabled={
-              !historyRef.current.snapshot.canUndo || status === "Conflict"
-            }
-            aria-busy={historyRef.current.snapshot.busy}
-            aria-keyshortcuts="Control+Z Meta+Z"
-            title="Undo last committed editor command"
-          >
-            <span aria-hidden="true">↶</span>
-            <span className="action-label">Undo</span>
-          </button>
-          <button
-            onClick={() => runHistoryAction("redo")}
-            disabled={
-              !historyRef.current.snapshot.canRedo || status === "Conflict"
-            }
-            aria-busy={historyRef.current.snapshot.busy}
-            aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y"
-            title="Redo last undone editor command"
-          >
-            <span aria-hidden="true">↷</span>
-            <span className="action-label">Redo</span>
-          </button>
+          {!compactTopbar && (
+            <>
+              <button
+                onClick={() => {
+                  location.hash = "library";
+                  setScreen("library");
+                }}
+              >
+                <AppIcon name="library" />
+                <span className="action-label">Library</span>
+              </button>
+              <button
+                onClick={() => runHistoryAction("undo")}
+                disabled={
+                  !historyRef.current.snapshot.canUndo || status === "Conflict"
+                }
+                aria-busy={historyRef.current.snapshot.busy}
+                aria-keyshortcuts="Control+Z Meta+Z"
+                title="Undo last committed editor command"
+              >
+                <span aria-hidden="true">↶</span>
+                <span className="action-label">Undo</span>
+              </button>
+              <button
+                onClick={() => runHistoryAction("redo")}
+                disabled={
+                  !historyRef.current.snapshot.canRedo || status === "Conflict"
+                }
+                aria-busy={historyRef.current.snapshot.busy}
+                aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y"
+                title="Redo last undone editor command"
+              >
+                <span aria-hidden="true">↷</span>
+                <span className="action-label">Redo</span>
+              </button>
+            </>
+          )}
           <OverflowMenu
             label="More actions"
             items={[
+              ...(compactTopbar
+                ? [
+                    {
+                      label: "Library",
+                      onSelect: () => {
+                        location.hash = "library";
+                        setScreen("library");
+                      },
+                    },
+                    {
+                      label: "Undo",
+                      onSelect: () => runHistoryAction("undo"),
+                      disabled:
+                        !historyRef.current.snapshot.canUndo ||
+                        status === "Conflict",
+                    },
+                    {
+                      label: "Redo",
+                      onSelect: () => runHistoryAction("redo"),
+                      disabled:
+                        !historyRef.current.snapshot.canRedo ||
+                        status === "Conflict",
+                    },
+                  ]
+                : []),
               { label: "Duplicate…", onSelect: () => setDuplicateOpen(true) },
               {
                 label: "Revision History…",
@@ -1291,15 +1357,21 @@ export default function App() {
                   Hide match details
                 </button>
               )}
-              <JobMatchPanel
+              <MatchDashboard
+                state={matchState}
                 compositionId={comp.id}
                 revision={comp.revision}
-                linkedJobId={comp.job_description_id || ""}
-                reloadLibrary={loadLibrary}
-                active={editorTab === "match"}
-                onCompare={onCompare}
+                summaryVariantId={comp.summary_variant_id || null}
+                pageCount={fit?.actualPageCount || null}
+                tab={dashTab}
+                onTab={setDashTab}
+                focus={dashFocus}
+                onFocus={(key) => {
+                  setDashTab("requirements");
+                  setDashFocus({ key, nonce: Date.now() });
+                }}
                 onActive={onActiveMatch}
-                previewRequest={previewSuggest}
+                onAssist={setAssist}
                 onApplied={(next) => setComp(next)}
               />
             </div>
@@ -1320,10 +1392,60 @@ export default function App() {
                 marks={matchMarks}
                 activeIds={activeMatchIds}
                 onActive={onActiveMatch}
+                onMarkClick={onJobMarkClick}
               />
             </div>
             {resumePane}
           </div>
+          {popover && popoverItems.length > 0 && (
+            <MarkPopover
+              anchor={popover.anchor}
+              items={popoverItems}
+              source={popover.source}
+              onClose={closePopover}
+              onAssist={(request) => {
+                setPopover(null);
+                setAssist(request);
+              }}
+              onShowInDashboard={(item) => {
+                setPopover(null);
+                setMatchRailOpen(true);
+                setMobileWorkspace("editor");
+                setDashTab("requirements");
+                setDashFocus({ key: `${item.group}:${item.requirement}`, nonce: Date.now() });
+              }}
+              onShowOther={(item) => {
+                setPopover(null);
+                onActiveMatch(activeIdsForTerms([item.keyword]));
+              }}
+            />
+          )}
+          {assist?.kind === "skill" && (
+            <AddSkillDialog
+              compositionId={comp.id}
+              revision={comp.revision}
+              keyword={assist.keyword}
+              onApplied={async (next) => {
+                setComp(next);
+                await loadLibrary();
+              }}
+              close={() => setAssist(null)}
+            />
+          )}
+          {assist?.kind === "rewrite" && compareJob && (
+            <SuggestVariantDialog
+              compositionId={comp.id}
+              revision={comp.revision}
+              job={compareJob}
+              target={assist.target}
+              onApplied={async (next) => {
+                setComp(next);
+                await loadLibrary();
+              }}
+              onAddSkill={(keyword) => setAssist({ kind: "skill", keyword })}
+              close={() => setAssist(null)}
+            />
+          )}
         </div>
       ) : (
       <div
@@ -2016,6 +2138,21 @@ function HomeScreen({
       </section>
     </main>
   );
+}
+
+// Matches the phone breakpoint in resume-print.css where the top bar moves
+// Library, Undo and Redo into its overflow menu.
+const COMPACT_TOPBAR_QUERY = "(max-width: 560px)";
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const list = matchMedia(query);
+    const onChange = () => setMatches(list.matches);
+    onChange();
+    list.addEventListener("change", onChange);
+    return () => list.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
 }
 
 function groupBullets(rows: any[]) {

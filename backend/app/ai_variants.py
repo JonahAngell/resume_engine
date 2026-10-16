@@ -11,6 +11,7 @@ import re
 
 from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job, scrub
+from .job_match import extract_keywords
 from .related_skills import DICTIONARY, category_for_term
 
 logger = logging.getLogger("resume_engine.ai")
@@ -134,9 +135,10 @@ def drop_reason(body: str, original: str, keyword: str, category: str, job_terms
     for term in DICTIONARY.match_terms(text):
         if DICTIONARY.mentions(term, original) or _contains(original, term):
             continue
-        if allowed and (_fold(term) == _fold(keyword) or DICTIONARY.canonical(term) == DICTIONARY.canonical(keyword)):
-            if category_for_term(term) != "tool":
-                continue
+        # The allowed keyword, or a word of it ("forecasting" in "Financial Forecasting"), may shape wording.
+        part_of_keyword = _contains(keyword, term) or DICTIONARY.canonical(term) == DICTIONARY.canonical(keyword)
+        if allowed and part_of_keyword and category_for_term(term) != "tool":
+            continue
         return "tool"
     for term in job_terms:
         if not _contains(text, term) or _contains(original, term):
@@ -180,7 +182,18 @@ def _cache_key(original, job, requirement, keyword, category, goal, model) -> st
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _remember_issued(placement_id: str, drafts: list[dict], model: str, job_id: str) -> None:
+def job_tool_terms(description: str) -> list[str]:
+    """Job keywords a draft may not claim: dictionary tools and capitalised unknown terms."""
+    terms = []
+    for item in extract_keywords(description or ""):
+        keyword = item["keyword"]
+        category = category_for_term(keyword)
+        if category == "tool" or (category is None and any(char.isupper() for char in keyword)):
+            terms.append(keyword)
+    return terms
+
+
+def remember_issued(placement_id: str, drafts: list[dict], model: str, job_id: str) -> None:
     if not placement_id:
         return
     issued = _ISSUED.pop(placement_id, {})
@@ -234,7 +247,7 @@ async def suggest_variants(
     key = _cache_key(bullet, job, requirement, keyword, category, goal, model)
     cached = _CACHE.get(key)
     if cached is not None:
-        _remember_issued(placement_id, cached["drafts"], cached["model"], job_id)
+        remember_issued(placement_id, cached["drafts"], cached["model"], job_id)
         return json.loads(json.dumps(cached))
 
     guard = (
@@ -277,7 +290,7 @@ async def suggest_variants(
     _CACHE[key] = payload
     while len(_CACHE) > _CACHE_MAX:
         _CACHE.pop(next(iter(_CACHE)))
-    _remember_issued(placement_id, drafts, served, job_id)
+    remember_issued(placement_id, drafts, served, job_id)
     return json.loads(json.dumps(payload))
 
 

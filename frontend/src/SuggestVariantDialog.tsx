@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, ApiError } from "./api";
 import ModalShell from "./ModalShell";
 import type { CompareJob } from "./matchMarks";
+import type { VariantTarget } from "./match/types";
 
 type Draft = { name: string; body: string; rationale: string };
 type Suggestions = {
@@ -25,13 +26,6 @@ const GOALS: [Goal, string][] = [
 const GUARDED = new Set(["tool", "credential", "degree", "experience_duration"]);
 const OWN = -1;
 
-export type VariantTarget = {
-  placementId: string;
-  excerpt: string;
-  keyword: string;
-  requirement: string;
-  category: string;
-};
 
 export default function SuggestVariantDialog({
   compositionId,
