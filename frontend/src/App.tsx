@@ -150,6 +150,7 @@ export default function App() {
   const historyRef = useRef(new EditorHistory());
   const sessionId = useRef(crypto.randomUUID());
   const [, refreshHistory] = useState(0);
+  const compactTopbar = useMediaQuery(COMPACT_TOPBAR_QUERY);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
     compRef.current = comp;
@@ -1200,42 +1201,71 @@ export default function App() {
           >
             {status}
           </span>
-          <button
-            onClick={() => {
-              location.hash = "library";
-              setScreen("library");
-            }}
-          >
-            <AppIcon name="library" />
-            <span className="action-label">Library</span>
-          </button>
-          <button
-            onClick={() => runHistoryAction("undo")}
-            disabled={
-              !historyRef.current.snapshot.canUndo || status === "Conflict"
-            }
-            aria-busy={historyRef.current.snapshot.busy}
-            aria-keyshortcuts="Control+Z Meta+Z"
-            title="Undo last committed editor command"
-          >
-            <span aria-hidden="true">↶</span>
-            <span className="action-label">Undo</span>
-          </button>
-          <button
-            onClick={() => runHistoryAction("redo")}
-            disabled={
-              !historyRef.current.snapshot.canRedo || status === "Conflict"
-            }
-            aria-busy={historyRef.current.snapshot.busy}
-            aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y"
-            title="Redo last undone editor command"
-          >
-            <span aria-hidden="true">↷</span>
-            <span className="action-label">Redo</span>
-          </button>
+          {!compactTopbar && (
+            <>
+              <button
+                onClick={() => {
+                  location.hash = "library";
+                  setScreen("library");
+                }}
+              >
+                <AppIcon name="library" />
+                <span className="action-label">Library</span>
+              </button>
+              <button
+                onClick={() => runHistoryAction("undo")}
+                disabled={
+                  !historyRef.current.snapshot.canUndo || status === "Conflict"
+                }
+                aria-busy={historyRef.current.snapshot.busy}
+                aria-keyshortcuts="Control+Z Meta+Z"
+                title="Undo last committed editor command"
+              >
+                <span aria-hidden="true">↶</span>
+                <span className="action-label">Undo</span>
+              </button>
+              <button
+                onClick={() => runHistoryAction("redo")}
+                disabled={
+                  !historyRef.current.snapshot.canRedo || status === "Conflict"
+                }
+                aria-busy={historyRef.current.snapshot.busy}
+                aria-keyshortcuts="Control+Shift+Z Meta+Shift+Z Control+Y"
+                title="Redo last undone editor command"
+              >
+                <span aria-hidden="true">↷</span>
+                <span className="action-label">Redo</span>
+              </button>
+            </>
+          )}
           <OverflowMenu
             label="More actions"
             items={[
+              ...(compactTopbar
+                ? [
+                    {
+                      label: "Library",
+                      onSelect: () => {
+                        location.hash = "library";
+                        setScreen("library");
+                      },
+                    },
+                    {
+                      label: "Undo",
+                      onSelect: () => runHistoryAction("undo"),
+                      disabled:
+                        !historyRef.current.snapshot.canUndo ||
+                        status === "Conflict",
+                    },
+                    {
+                      label: "Redo",
+                      onSelect: () => runHistoryAction("redo"),
+                      disabled:
+                        !historyRef.current.snapshot.canRedo ||
+                        status === "Conflict",
+                    },
+                  ]
+                : []),
               { label: "Duplicate…", onSelect: () => setDuplicateOpen(true) },
               {
                 label: "Revision History…",
@@ -2016,6 +2046,21 @@ function HomeScreen({
       </section>
     </main>
   );
+}
+
+// Matches the phone breakpoint in resume-print.css where the top bar moves
+// Library, Undo and Redo into its overflow menu.
+const COMPACT_TOPBAR_QUERY = "(max-width: 560px)";
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => matchMedia(query).matches);
+  useEffect(() => {
+    const list = matchMedia(query);
+    const onChange = () => setMatches(list.matches);
+    onChange();
+    list.addEventListener("change", onChange);
+    return () => list.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
 }
 
 function groupBullets(rows: any[]) {
