@@ -2553,6 +2553,21 @@ textarea:focus-visible {
   color: var(--primary-navy);
   border-color: white;
 }
+@media (max-width: 900px) {
+  .editing-topbar .header-tabs {
+    width: auto;
+  }
+}
+/* Library, Undo and Redo move into the overflow menu at this width (App.tsx). */
+@media (max-width: 560px) {
+  .editing-topbar {
+    padding: 0 16px;
+    gap: 8px;
+  }
+  .editing-topbar .header-tabs {
+    margin-left: 0;
+  }
+}
 .compare-workspace {
   height: calc(100vh - 64px);
   min-height: 0;
