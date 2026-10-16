@@ -195,6 +195,37 @@ async def compare_job_description(conn, user_id, job_id, composition_id: UUID):
     return result, None
 
 
+async def load_ai_review_inputs(conn, user_id, job_id, composition_id: UUID):
+    job = await get_job_description(conn, user_id, job_id)
+    if not job:
+        return None, "missing"
+    composition = await load_composition(conn, user_id, composition_id, include_archived=False)
+    if not composition:
+        return None, "resume"
+    payload = composition["render_payload"] or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    review = job.get("keyword_review") or {}
+    if isinstance(review, str):
+        review = json.loads(review)
+    bullets = await _placed_bullets(conn, user_id, composition_id)
+    return {
+        "description": job["body"],
+        "resume": payload,
+        "bullets": bullets,
+        "review": review,
+        "revision": int(composition.get("revision") or 0),
+    }, None
+
+
+async def link_job_composition(conn, user_id, job_id, composition_id: UUID):
+    await _one(
+        conn,
+        "UPDATE job_descriptions SET composition_id=%s WHERE id=%s AND user_id=%s RETURNING id",
+        (composition_id, job_id, user_id),
+    )
+
+
 async def _placed_bullets(conn, user_id, composition_id: UUID):
     rows = await _many(
         conn,

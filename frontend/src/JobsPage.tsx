@@ -22,12 +22,15 @@ type AnalysisRow = {
   text: string;
   kind?: string;
   label?: string;
+  match_mode?: "any" | "all";
   keywords: string[];
 };
 
 type JobAnalysis = {
   required: AnalysisRow[];
   preferred: AnalysisRow[];
+  responsibilities?: AnalysisRow[];
+  eligibility?: AnalysisRow[];
 };
 
 type Draft = {
@@ -294,13 +297,27 @@ function KeywordGroups({ analysis }: { analysis: JobAnalysis }) {
     [
       ["Required", analysis.required],
       ["Preferred", analysis.preferred],
+      ["Responsibilities", analysis.responsibilities || []],
     ] as const
   ).filter(([, rows]) => rows.length > 0);
-  if (groups.length === 0) {
+  const eligibility = analysis.eligibility || [];
+  if (groups.length === 0 && eligibility.length === 0) {
     return <p>No qualifications were found in this description.</p>;
   }
   return (
     <div className="keyword-groups">
+      {eligibility.length > 0 && (
+        <section aria-label="Eligibility">
+          <h3>Eligibility</h3>
+          <ul className="requirement-list">
+            {eligibility.map((row) => (
+              <li className="requirement-row" key={`${row.kind || "gate"}:${row.text}`}>
+                <span className="qual-label">{row.label || row.text}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {groups.map(([title, rows]) => (
         <section key={title} aria-label={title}>
           <h3>{title}</h3>
@@ -308,6 +325,9 @@ function KeywordGroups({ analysis }: { analysis: JobAnalysis }) {
             {rows.map((row) => (
               <li className="requirement-row" key={`${row.kind || "skill"}:${row.text}`}>
                 <span className="qual-keywords">
+                  {row.match_mode === "any" && row.keywords.length > 1 && (
+                    <span className="qual-any">Any of</span>
+                  )}
                   {row.keywords.length > 0 ? (
                     row.keywords.map((keyword) => (
                       <span className="keyword-chip plain" key={keyword}>

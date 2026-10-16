@@ -6,6 +6,9 @@ services:
       APP_ENV: local
       DATABASE_URL: postgresql://resume_engine:resume_engine@db:5432/resume_engine
       GOTENBERG_URL: http://gotenberg:3000
+      # Values below are read from the .env file next to this compose file.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
     depends_on:
       db: { condition: service_healthy }
       gotenberg: { condition: service_started }

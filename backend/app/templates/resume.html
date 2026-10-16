@@ -252,6 +252,14 @@
         background: #ffe08a;
         box-shadow: inset 3px 0 0 #e2b100;
       }
+      mark.resume-keyword-hit.hit-paired {
+        outline: 2px solid #0f7a3a;
+        outline-offset: 1px;
+      }
+      .resume-line-suggestion.hit-paired {
+        outline: 2px solid #b8860b;
+        outline-offset: 1px;
+      }
       {% if measure %}
       body.paginated .resume-page:not([data-active-page="true"]) { display: none; }
       {% endif %}
@@ -712,40 +720,65 @@
           };
           const clearLineSuggestions = () => {
             document.querySelectorAll(".resume-line-suggestion").forEach((line) => {
-              line.classList.remove("resume-line-suggestion");
+              line.classList.remove("resume-line-suggestion", "hit-paired");
+              delete line.dataset.matchIds;
             });
           };
           const quoteAttr = (value) => String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
           const normLine = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
-          const highlightLines = (lines, excerpts) => {
+          const matchIdList = (value) => String(value || "").split("\u001f").filter(Boolean);
+          const rememberMatch = (line, id) => {
+            if (!line || !id) return;
+            line.classList.add("resume-line-suggestion");
+            const ids = new Set(matchIdList(line.dataset.matchIds));
+            ids.add(id);
+            line.dataset.matchIds = [...ids].join("\u001f");
+          };
+          const highlightLines = (marks) => {
             const root = document.getElementById("pages");
             clearLineSuggestions();
             if (!root) return;
-            for (const id of [...new Set((lines || []).map((line) => String(line).trim()).filter(Boolean))]) {
-              const value = quoteAttr(id);
-              const line = root.querySelector(`[data-bullet-id="${value}"]`)
-                || root.querySelector(`[data-item-id="${value}"]`)
-                || root.querySelector(`[data-section-id="${value}"]`);
-              line?.classList.add("resume-line-suggestion");
-            }
             const bullets = [...root.querySelectorAll("li")];
-            for (const excerpt of [...new Set((excerpts || []).map((line) => normLine(line)).filter((line) => line.length >= 12))]) {
-              const hit = bullets.find((bullet) => {
-                const text = normLine(bullet.textContent);
-                if (text.length < 12) return false;
-                return text.startsWith(excerpt) || excerpt.startsWith(text);
-              });
-              hit?.classList.add("resume-line-suggestion");
+            for (const mark of marks || []) {
+              if (mark.kind === "match") continue;
+              const id = String(mark.id || "");
+              for (const lineId of [...new Set((mark.lineIds || []).map((line) => String(line).trim()).filter(Boolean))]) {
+                const value = quoteAttr(lineId);
+                rememberMatch(
+                  root.querySelector(`[data-bullet-id="${value}"]`)
+                    || root.querySelector(`[data-item-id="${value}"]`)
+                    || root.querySelector(`[data-section-id="${value}"]`),
+                  id,
+                );
+              }
+              for (const excerpt of [...new Set((mark.excerpts || []).map((line) => normLine(line)).filter((line) => line.length >= 12))]) {
+                const hit = bullets.find((bullet) => {
+                  const text = normLine(bullet.textContent);
+                  if (text.length < 12) return false;
+                  return text.startsWith(excerpt) || excerpt.startsWith(text);
+                });
+                rememberMatch(hit, id);
+              }
             }
           };
-          const highlightKeywords = (terms) => {
+          const highlightKeywords = (marks) => {
             const root = document.getElementById("pages");
             clearKeywordHits();
-            const cleaned = [...new Set((terms || []).map((term) => String(term).trim()).filter(Boolean))]
-              .sort((left, right) => right.length - left.length);
+            const byTerm = new Map();
+            for (const mark of marks || []) {
+              if (mark.kind !== "match") continue;
+              for (const term of mark.terms || []) {
+                const cleaned = String(term).trim();
+                if (!cleaned) continue;
+                const key = cleaned.toLowerCase();
+                const preferred = `kw:${key}` === mark.id;
+                if (!byTerm.has(key) || preferred) byTerm.set(key, { term: cleaned, id: mark.id });
+              }
+            }
+            const cleaned = [...byTerm.values()].sort((left, right) => right.term.length - left.term.length);
             if (!root || !cleaned.length) return;
             const pattern = new RegExp(
-              cleaned.map((term) => "(?<!\\w)" + term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?!\\w)").join("|"),
+              cleaned.map((item) => "(?<!\\w)" + item.term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?!\\w)").join("|"),
               "gi",
             );
             const nodes = [];
@@ -753,7 +786,7 @@
             let current;
             while ((current = walker.nextNode())) {
               if (!current.nodeValue || !current.nodeValue.trim()) continue;
-              if (current.parentElement?.closest("script, style")) continue;
+              if (current.parentElement?.closest("script, style, mark")) continue;
               nodes.push(current);
             }
             for (const textNode of nodes) {
@@ -766,8 +799,10 @@
               while ((match = pattern.exec(text))) {
                 found = true;
                 if (match.index > cursor) fragment.append(document.createTextNode(text.slice(cursor, match.index)));
+                const hit = byTerm.get(match[0].toLowerCase());
                 const mark = document.createElement("mark");
                 mark.className = "resume-keyword-hit";
+                if (hit?.id) mark.dataset.matchId = hit.id;
                 mark.textContent = match[0];
                 fragment.append(mark);
                 cursor = match.index + match[0].length;
@@ -778,26 +813,58 @@
               textNode.parentNode.replaceChild(fragment, textNode);
             }
           };
-          const revealHighlight = () => {
+          const matchIdsOf = (el) => el?.dataset.matchId
+            ? [el.dataset.matchId]
+            : matchIdList(el?.dataset.matchIds);
+          const applyActive = (activeIds) => {
             const root = document.getElementById("pages");
             if (!root) return;
-            const active = root.querySelector('.resume-page[data-active-page="true"]');
-            if (active?.querySelector("mark.resume-keyword-hit, .resume-line-suggestion")) return;
-            const hit = root.querySelector("mark.resume-keyword-hit, .resume-line-suggestion");
-            const page = hit?.closest(".resume-page");
-            if (!page) return;
-            const pageIndex = Number(page.dataset.pageIndex);
-            if (!Number.isFinite(pageIndex)) return;
-            showPage(pageIndex);
-            parent.postMessage({ type: "resume-highlight-page", pageIndex }, "*");
+            const ids = new Set((activeIds || []).map((id) => String(id)).filter(Boolean));
+            root.querySelectorAll(".hit-paired").forEach((el) => el.classList.remove("hit-paired"));
+            if (!ids.size) return;
+            const hits = [...root.querySelectorAll("[data-match-id], [data-match-ids]")].filter((el) =>
+              matchIdsOf(el).some((id) => ids.has(id)),
+            );
+            hits.forEach((el) => el.classList.add("hit-paired"));
+            const first = hits[0];
+            if (!first) return;
+            const page = first.closest(".resume-page");
+            const pageIndex = Number(page?.dataset.pageIndex);
+            if (page && page.dataset.activePage !== "true" && Number.isFinite(pageIndex)) {
+              showPage(pageIndex);
+              parent.postMessage({ type: "resume-highlight-page", pageIndex }, "*");
+            }
+            first.scrollIntoView({ block: "nearest", inline: "nearest" });
+            parent.postMessage({
+              type: "resume-highlight-anchor",
+              top: first.getBoundingClientRect().top,
+            }, "*");
           };
+          const pagesRoot = document.getElementById("pages");
+          pagesRoot?.addEventListener("mouseover", (event) => {
+            const hit = event.target.closest?.("[data-match-id], [data-match-ids]");
+            if (!hit || !pagesRoot.contains(hit)) return;
+            const id = matchIdsOf(hit)[0] || "";
+            if (!id || pagesRoot.dataset.hoverId === id) return;
+            pagesRoot.dataset.hoverId = id;
+            parent.postMessage({ type: "resume-highlight-hover", id }, "*");
+          });
+          pagesRoot?.addEventListener("mouseout", (event) => {
+            const hit = event.target.closest?.("[data-match-id], [data-match-ids]");
+            if (!hit || !pagesRoot.contains(hit)) return;
+            const next = event.relatedTarget?.closest?.("[data-match-id], [data-match-ids]");
+            if (next && pagesRoot.contains(next)) return;
+            if (!pagesRoot.dataset.hoverId) return;
+            pagesRoot.dataset.hoverId = "";
+            parent.postMessage({ type: "resume-highlight-hover", id: "" }, "*");
+          });
           addEventListener("message", (event) => {
             if (event.data?.type === "resume-show-page") showPage(event.data.pageIndex);
             if (event.data?.type === "resume-highlight") {
-              highlightLines(event.data.lines, event.data.excerpts);
-              highlightKeywords(event.data.terms);
-              revealHighlight();
+              highlightLines(event.data.marks);
+              highlightKeywords(event.data.marks);
             }
+            if (event.data?.type === "resume-highlight-focus") applyActive(event.data.activeIds);
           });
           {% endif %}
           parent.postMessage(state, "*");

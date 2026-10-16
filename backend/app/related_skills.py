@@ -13,6 +13,12 @@ _R_AND_D = re.compile(r"\br&d\b")
 _DOTTED_JS = re.compile(r"\b([a-z][a-z0-9]*)\.js\b")
 _DOT_NET = re.compile(r"\.net\b")
 _R_LANGUAGE = re.compile(r"(?<![a-z0-9])r(?![a-z0-9&])")
+_ACRONYMS = {
+    "acp", "ai", "api", "aws", "bi", "ca", "cad", "cd", "ci", "cpa", "cpo", "csm",
+    "dax", "edp", "elt", "epm", "erp", "etl", "fp", "gaap", "gcp", "hr", "hris",
+    "ibm", "json", "kpi", "llm", "llms", "mba", "nlp", "pmp", "qa", "roi", "sap", "sql",
+    "sso", "ssrs", "tdd", "ui", "ux", "vba", "xml",
+}
 
 
 def _normalize_base(value: str) -> str:
@@ -24,6 +30,38 @@ def _normalize_base(value: str) -> str:
     text = _R_LANGUAGE.sub(" r ", text)
     text = re.sub(r"[^a-z0-9+#]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _smart_title(label: str) -> str:
+    def one(part: str) -> str:
+        if not part:
+            return part
+        if part.lower() in _ACRONYMS or any(char.isdigit() for char in part):
+            return part.upper()
+        return part.capitalize()
+
+    words = []
+    for word in label.split():
+        slashed = []
+        for piece in word.split("/"):
+            slashed.append("-".join(one(bit) for bit in piece.split("-")))
+        words.append("/".join(slashed))
+    return " ".join(words)
+
+
+def _display_label(label: str) -> str:
+    if any(char.isupper() for char in label):
+        return label
+    return _smart_title(label)
+
+
+def _source_phrase(text: str, window: tuple[str, ...]) -> str:
+    parts = [re.escape(word) for word in window]
+    pattern = re.compile(r"(?<!\w)" + r"[\W_]+".join(parts) + r"(?!\w)", re.IGNORECASE)
+    match = pattern.search(text or "")
+    if not match:
+        return ""
+    return re.sub(r"\s+", " ", match.group(0)).strip(" ,;:()[]{}")
 
 
 class RelatedSkills:
@@ -68,6 +106,55 @@ class RelatedSkills:
                     when.append((label, normalized))
             if relates_to and len(when) >= 2:
                 self.combinations.append({"relates_to": relates_to, "when": when})
+        self.cluster_category: dict[str, str] = {}
+        for category, cluster_ids in (raw.get("categories") or {}).items():
+            label = str(category).strip()
+            for cluster_id in cluster_ids or []:
+                cleaned = str(cluster_id).strip()
+                if label and cleaned:
+                    self.cluster_category[cleaned] = label
+        self.families = []
+        for family in raw.get("families") or []:
+            family_id = str(family.get("id") or "").strip()
+            label = str(family.get("label") or family_id).strip()
+            clusters = [str(item).strip() for item in family.get("clusters") or [] if str(item).strip()]
+            if family_id and clusters:
+                self.families.append({"id": family_id, "label": label, "clusters": clusters})
+        self.display_of: dict[str, str] = {}
+        self.surfaces: dict[str, set[str]] = {}
+        self._phrases_by_size: dict[int, dict[tuple[str, ...], tuple[str, bool]]] = {}
+        self._max_phrase = 1
+        for terms in self.clusters.values():
+            for label, canonical in terms:
+                self.display_of.setdefault(canonical, _display_label(label))
+                self._remember_surface(canonical, _normalize_base(label))
+                self._remember_surface(canonical, canonical)
+                self._add_phrase(_normalize_base(label), canonical, False)
+                if _normalize_base(label) != canonical:
+                    self._add_phrase(canonical, canonical, False)
+        for _display, normalized, canonical in self.alias_terms:
+            target = canonical if canonical in self.membership else self._canonicalize(canonical)
+            if target not in self.membership:
+                continue
+            self._remember_surface(target, normalized)
+            self._add_phrase(normalized, target, normalized != target)
+
+    def _remember_surface(self, canonical: str, surface: str) -> None:
+        if surface:
+            self.surfaces.setdefault(canonical, set()).add(surface)
+
+    def _add_phrase(self, surface: str, canonical: str, via_alias: bool) -> None:
+        words = tuple(surface.split())
+        if not words or (len(words) == 1 and len(words[0]) < 2):
+            return
+        if canonical not in self.membership:
+            return
+        bucket = self._phrases_by_size.setdefault(len(words), {})
+        current = bucket.get(words)
+        if current and (not current[1] or via_alias):
+            return
+        bucket[words] = (canonical, via_alias)
+        self._max_phrase = max(self._max_phrase, len(words))
 
     def _canonicalize(self, value: str) -> str:
         text = _normalize_base(value)
@@ -76,6 +163,69 @@ class RelatedSkills:
         parts = [self.aliases.get(part, part) for part in text.split()]
         joined = " ".join(parts)
         return self.aliases.get(joined, joined)
+
+    def match_terms(self, text: str) -> list[str]:
+        """Return canonical tool and skill labels in the order they appear."""
+        words = _normalize_base(text).split()
+        if not words:
+            return []
+        occupied = [False] * len(words)
+        found: list[tuple[int, str]] = []
+        for size in range(self._max_phrase, 0, -1):
+            phrases = self._phrases_by_size.get(size)
+            if not phrases:
+                continue
+            for index in range(len(words) - size + 1):
+                if occupied[index]:
+                    continue
+                window = tuple(words[index : index + size])
+                entry = phrases.get(window)
+                if not entry or any(occupied[index : index + size]):
+                    continue
+                canonical, via_alias = entry
+                for offset in range(size):
+                    occupied[index + offset] = True
+                found.append((index, self._term_display(text, window, canonical, via_alias)))
+        found.sort()
+        displays: list[str] = []
+        seen: set[str] = set()
+        for _index, display in found:
+            key = display.lower()
+            if not display or key in seen:
+                continue
+            seen.add(key)
+            displays.append(display)
+        return displays
+
+    def _term_display(self, text: str, window: tuple[str, ...], canonical: str, via_alias: bool) -> str:
+        label = self.display_of.get(canonical, _smart_title(canonical))
+        if via_alias:
+            return label
+        source = _source_phrase(text, window)
+        if source and any(char.isupper() for char in source):
+            return source
+        return label
+
+    def mentions(self, keyword: str, text: str) -> bool:
+        """True when `text` contains this term or an alias, not a cluster sibling."""
+        canonical = self._canonicalize(keyword)
+        if canonical not in self.membership:
+            return False
+        terms = [(surface, surface) for surface in self.surfaces.get(canonical, set())]
+        if not terms:
+            return False
+        return self._contained_term(text, terms) is not None
+
+    def covers_token(self, keyword: str, token: str) -> bool:
+        canonical = self._canonicalize(keyword)
+        token_norm = _normalize_base(token)
+        if not token_norm or canonical not in self.surfaces:
+            return False
+        padded = f" {token_norm} "
+        return any(padded in f" {surface} " for surface in self.surfaces[canonical])
+
+    def is_known(self, keyword: str) -> bool:
+        return self._canonicalize(keyword) in self.membership
 
     def _clusters_for(self, keyword: str) -> set[str]:
         return set(self.membership.get(self._canonicalize(keyword), ()))
@@ -122,6 +272,25 @@ class RelatedSkills:
                 return " and ".join(label for label, _normalized in combo["when"])
         return None
 
+    def category_for_term(self, keyword: str) -> str | None:
+        categories = {
+            self.cluster_category.get(cluster_id)
+            for cluster_id in self._clusters_for(keyword)
+            if self.cluster_category.get(cluster_id)
+        }
+        if not categories:
+            return None
+        for preferred in ("tool", "methodology", "domain"):
+            if preferred in categories:
+                return preferred
+        return sorted(categories)[0]
+
+    def clusters_in_text(self, text: str) -> set[str]:
+        found: set[str] = set()
+        for display in self.match_terms(text):
+            found.update(self._clusters_for(display))
+        return found
+
 
 DICTIONARY = RelatedSkills()
 
@@ -132,3 +301,31 @@ def related_mention(keyword: str, text: str) -> str | None:
 
 def combination_mention(keyword: str, text: str) -> str | None:
     return DICTIONARY.combination_mention(keyword, text)
+
+
+def find_terms(text: str) -> list[str]:
+    return DICTIONARY.match_terms(text)
+
+
+def mentions(keyword: str, text: str) -> bool:
+    return DICTIONARY.mentions(keyword, text)
+
+
+def is_known_term(keyword: str) -> bool:
+    return DICTIONARY.is_known(keyword)
+
+
+def covers_token(keyword: str, token: str) -> bool:
+    return DICTIONARY.covers_token(keyword, token)
+
+
+def category_for_term(keyword: str) -> str | None:
+    return DICTIONARY.category_for_term(keyword)
+
+
+def clusters_in_text(text: str) -> set[str]:
+    return DICTIONARY.clusters_in_text(text)
+
+
+def job_families() -> list[dict]:
+    return [dict(item) for item in DICTIONARY.families]

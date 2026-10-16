@@ -72,6 +72,7 @@ class CompositionCreate(BaseModel):
     display_title: str = Field(default="", max_length=200)
     target_company: str = Field(default="", max_length=200)
     target_role: str = Field(default="", max_length=200)
+    resume_variant_id: UUID | None = None
 
 
 class DuplicateComposition(BaseModel):
@@ -99,6 +100,8 @@ class CompositionState(BaseModel):
     section_sort_modes: dict[str, str] = {}
     summary_variant_id: UUID | None = None
     profile_id: UUID | None = None
+    is_starter: bool = False
+    is_default_starter: bool = False
     revision: int
     archived_at: object | None = None
     created_at: object | None = None
@@ -216,3 +219,47 @@ class EntryCreateWrite(BaseModel):
     revision: int = Field(ge=1)
     section: str
     fields: dict
+
+
+SaveMode = Literal["variant", "new", "overwrite"]
+
+
+class BulletSaveChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    mode: SaveMode = "variant"
+    body: str = Field(min_length=1)
+
+
+class EntrySaveChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    mode: SaveMode = "variant"
+    section: str
+    fields: dict
+
+
+class SummarySaveChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    mode: SaveMode = "variant"
+    name: str = Field(min_length=1, max_length=120)
+    body: str = Field(min_length=1)
+
+
+class ProfileSaveChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    mode: SaveMode = "variant"
+    fields: dict
+
+
+class ResumeVariantWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=120)
+    replace_id: UUID | None = None
+
+
+class AttachBulletWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_bullet_id: UUID

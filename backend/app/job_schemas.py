@@ -64,10 +64,21 @@ class JobDescriptionRecord(BaseModel):
     updated_at: datetime
 
 
+class Evidence(BaseModel):
+    source_requirement: str
+    matched_text: str = ""
+    relation: str
+    section: str = ""
+    confidence: float
+    explanation: str = ""
+
+
 class RequirementKeyword(BaseModel):
     keyword: str
     found: bool
     where: str = ""
+    relation: str = ""
+    evidence: Evidence | None = None
 
 
 class TagSuggestion(BaseModel):
@@ -84,6 +95,10 @@ class RequirementRow(BaseModel):
     group: str
     kind: str = "skill"
     label: str = ""
+    section: str = ""
+    category: str = ""
+    weight: float = 1.0
+    match_mode: Literal["any", "all"] = "all"
     matched: bool
     manual: bool = False
     detail: str = ""
@@ -95,12 +110,48 @@ class AnalysisRow(BaseModel):
     text: str
     kind: str = "skill"
     label: str = ""
+    match_mode: Literal["any", "all"] = "all"
     keywords: list[str]
+    category: str = ""
+    section: str = ""
+    weight: float = 0
 
 
 class JobAnalysis(BaseModel):
     required: list[AnalysisRow]
     preferred: list[AnalysisRow]
+    responsibilities: list[AnalysisRow] = []
+    eligibility: list[AnalysisRow] = []
+
+
+class ScoreComponents(BaseModel):
+    required_coverage: float = 0
+    preferred_coverage: float = 0
+    responsibility_alignment: float = 0
+    domain_alignment: float = 0
+    tools_alignment: float = 0
+    evidence_quality: float = 0
+
+
+class EligibilityGate(BaseModel):
+    status: Literal["pass", "fail", "unknown", "not_stated"] = "not_stated"
+    detail: str = ""
+
+
+class Eligibility(BaseModel):
+    degree: EligibilityGate = EligibilityGate()
+    years: EligibilityGate = EligibilityGate()
+    certification: EligibilityGate = EligibilityGate()
+    schedule: EligibilityGate = EligibilityGate()
+    travel: EligibilityGate = EligibilityGate()
+    work_location: EligibilityGate = EligibilityGate()
+    employment_type: EligibilityGate = EligibilityGate()
+
+
+class JobFamily(BaseModel):
+    id: str
+    label: str
+    confidence: float
 
 
 class JobMatchRequest(BaseModel):
@@ -116,5 +167,10 @@ class JobMatch(BaseModel):
     preferred_matched: int
     required: list[RequirementRow]
     preferred: list[RequirementRow]
+    responsibilities: list[RequirementRow] = []
+    eligibility_rows: list[RequirementRow] = []
     salary: str = ""
     locations: list[str] = []
+    scores: ScoreComponents = ScoreComponents()
+    eligibility: Eligibility = Eligibility()
+    families: list[JobFamily] = []

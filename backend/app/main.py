@@ -66,6 +66,25 @@ from .editing_schemas import (
     BulletPlacementWrite, BulletCreateAndPlace, BulletPlacementReplace,
     BulletPlacementReorder, BulletUsageUpdate, CompositionPreferencesWrite,
     EntryCreateWrite,
+    BulletSaveChoice,
+    EntrySaveChoice,
+    SummarySaveChoice,
+    ProfileSaveChoice,
+    ResumeVariantWrite,
+    AttachBulletWrite,
+)
+from .resume_variants import (
+    attach_bullet,
+    apply_library_defaults,
+    copy_resume_variant,
+    default_starter,
+    detach_variant,
+    save_as_resume_variant,
+    save_bullet_edit,
+    save_entry_edit,
+    save_profile_edit,
+    save_summary_edit,
+    set_default_resume_variant,
 )
 from .identity import CurrentUser, resolve_current_user
 from .library_repository import (
@@ -139,13 +158,17 @@ from .library_schemas import (
 from .library_service import import_seed
 from .resume_import import ImportDraft, parse_upload
 from .resume_import_commit import commit_import
+from .ai_review import review_resume
+from .ai_schemas import AiReview
 from .job_repository import (
     analyze_job_description,
     archive_job_description,
     compare_job_description,
     create_job_description,
     get_job_description,
+    link_job_composition,
     list_job_descriptions,
+    load_ai_review_inputs,
     update_job_description,
 )
 from .job_schemas import (
@@ -207,6 +230,8 @@ def state(row):
         "section_sort_modes": row.get("section_sort_modes", {}),
         "summary_variant_id": row.get("summary_variant_id"),
         "profile_id": row.get("profile_id"),
+        "is_starter": row.get("is_starter", False),
+        "is_default_starter": row.get("is_default_starter", False),
         "revision": row["revision"],
         "archived_at": row.get("archived_at"),
         "resume": Resume.model_validate(row["render_payload"]),
@@ -989,6 +1014,24 @@ async def new_comp(
 ):
     async with connection() as c:
         u = await owner(identity, c)
+        starter_id = req.resume_variant_id
+        if starter_id is None:
+            starter = await default_starter(c, u["id"])
+            starter_id = starter["id"] if starter else None
+        if starter_id:
+            row = await copy_resume_variant(
+                c,
+                u["id"],
+                starter_id,
+                req.name,
+                req.description,
+                req.display_title,
+                req.target_company,
+                req.target_role,
+            )
+            if not row:
+                raise HTTPException(404, "Resume variant not found")
+            return state(row)
         resume = Resume(header={"name": u["display_name"]})
         row = await create_composition(
             c,
@@ -1001,7 +1044,100 @@ async def new_comp(
             target_company=req.target_company,
             target_role=req.target_role,
         )
+        row = await apply_library_defaults(c, u["id"], row["id"])
         return state(row)
+
+
+@app.post("/api/compositions/{cid}/resume-variant", response_model=CompositionState, status_code=201)
+async def save_resume_variant(cid: UUID, req: ResumeVariantWrite, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await save_as_resume_variant(c, u["id"], cid, req.name, req.replace_id)
+        if error == "name":
+            raise HTTPException(409, "A resume with that name already exists")
+        if not row:
+            raise HTTPException(404, "Resume not found")
+        return state(row)
+
+
+@app.post("/api/resume-variants/{cid}/default", response_model=CompositionState)
+async def default_resume_variant(cid: UUID, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row = await set_default_resume_variant(c, u["id"], cid)
+        if not row:
+            raise HTTPException(404, "Resume variant not found")
+        return state(row)
+
+
+@app.post("/api/compositions/{cid}/bullet-placements/{placement_id}/save", response_model=CompositionState)
+async def save_bullet_choice(cid: UUID, placement_id: UUID, req: BulletSaveChoice, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await save_bullet_edit(c, u["id"], cid, placement_id, req.revision, req.body, req.mode)
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        if not row:
+            raise HTTPException(404, "Bullet not found")
+        return state(row)
+
+
+@app.post("/api/compositions/{cid}/entries/{item_id}/save", response_model=CompositionState)
+async def save_entry_choice(cid: UUID, item_id: UUID, req: EntrySaveChoice, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await save_entry_edit(c, u["id"], cid, item_id, req.revision, req.section, req.fields, req.mode)
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        if not row:
+            raise HTTPException(404, "Entry not found")
+        return state(row)
+
+
+@app.post("/api/compositions/{cid}/summaries/{summary_id}/save", response_model=CompositionState)
+async def save_summary_choice(cid: UUID, summary_id: UUID, req: SummarySaveChoice, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await save_summary_edit(c, u["id"], cid, summary_id, req.revision, req.name, req.body, req.mode)
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        if not row:
+            raise HTTPException(404, "Summary not found")
+        return state(row)
+
+
+@app.post("/api/compositions/{cid}/profiles/{profile_id}/save", response_model=CompositionState)
+async def save_profile_choice(cid: UUID, profile_id: UUID, req: ProfileSaveChoice, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await save_profile_edit(c, u["id"], cid, profile_id, req.revision, req.fields, req.mode)
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        if not row:
+            raise HTTPException(404, "Profile not found")
+        return state(row)
+
+
+@app.post("/api/library/variants/{variant_id}/detach")
+async def detach_bullet_variant(variant_id: UUID, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row = await detach_variant(c, u["id"], variant_id)
+        if not row:
+            raise HTTPException(404, "Variant not found")
+        return row
+
+
+@app.post("/api/library/bullets/{bullet_id}/attach")
+async def attach_bullet_variant(bullet_id: UUID, req: AttachBulletWrite, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await attach_bullet(c, u["id"], bullet_id, req.target_bullet_id)
+        if error == "same":
+            raise HTTPException(409, "Choose a different bullet")
+        if not row:
+            raise HTTPException(404, "Bullet not found")
+        return row
 
 
 @app.get("/api/compositions/{cid}", response_model=CompositionState)
@@ -1440,6 +1576,33 @@ async def match_job_description_post(
     identity: CurrentUser = Depends(resolve_current_user),
 ):
     return await _compare_job(job_id, req.composition_id, identity)
+
+
+@app.post("/api/job-descriptions/{job_id}/ai-review", response_model=AiReview)
+async def ai_review_job(
+    job_id: UUID,
+    req: JobMatchRequest,
+    identity: CurrentUser = Depends(resolve_current_user),
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        inputs, error = await load_ai_review_inputs(c, u["id"], job_id, req.composition_id)
+        user_id = u["id"]
+    if error == "resume":
+        raise HTTPException(404, "Resume not found")
+    if error:
+        raise HTTPException(404, "Job description not found")
+    result = await review_resume(
+        req.composition_id,
+        inputs["description"],
+        inputs["resume"],
+        inputs["bullets"],
+        inputs["review"],
+        inputs["revision"],
+    )
+    async with connection() as c:
+        await link_job_composition(c, user_id, job_id, req.composition_id)
+    return result
 
 
 if FRONTEND.exists():

@@ -92,17 +92,18 @@ function BulletEditDialog({
 }: {
   initial: string;
   close: () => void;
-  onSave: (body: string) => Promise<void>;
+  onSave: (body: string) => Promise<void | false>;
 }) {
   const [body, setBody] = useState(initial);
   return (
     <LibraryEditDialog
       title="Edit bullet"
       close={close}
-      note="This updates the library wording and this resume. Other resumes keep their saved wording until they refresh it."
+      note="Choose how to keep this wording when you save."
       onSave={async () => {
         if (!body.trim()) throw new Error("Bullet text is required.");
-        await onSave(body.trim());
+        if (body.trim() === initial.trim()) return;
+        return onSave(body.trim());
       }}
     >
       <label>
@@ -129,12 +130,20 @@ function EditRecordDialog({
   kind: LibraryEntryKind;
   initial: any;
   close: () => void;
-  onSave: (draft: any) => Promise<void>;
+  onSave: (draft: any) => Promise<void | false>;
   note?: string;
 }) {
   const [draft, setDraft] = useState(initial);
   return (
-    <LibraryEditDialog title={title} close={close} note={note} onSave={() => onSave(draft)}>
+    <LibraryEditDialog
+      title={title}
+      close={close}
+      note={note}
+      onSave={async () => {
+        if (JSON.stringify(draft) === JSON.stringify(initial)) return;
+        return onSave(draft);
+      }}
+    >
       <LibraryEntryForm kind={kind} draft={draft} setDraft={setDraft} />
     </LibraryEditDialog>
   );
@@ -158,13 +167,13 @@ export function EditorLibraryDialogs({
   actions: {
     pickProfile: (id: string) => Promise<void>;
     createProfile: (draft: any) => Promise<void>;
-    saveProfile: (id: string, draft: any) => Promise<void>;
+    saveProfile: (id: string, draft: any) => Promise<void | false>;
     pickSummary: (id: string | null) => Promise<void>;
     createSummary: (draft: any) => Promise<void>;
-    saveSummary: (id: string, draft: any) => Promise<void>;
+    saveSummary: (id: string, draft: any) => Promise<void | false>;
     pickEntry: (section: string, item: any, replaceId?: string) => Promise<void>;
     createEntry: (section: string, draft: any) => Promise<void>;
-    saveEntry: (section: string, id: string, draft: any) => Promise<void>;
+    saveEntry: (section: string, id: string, draft: any) => Promise<void | false>;
     pickBullet: (
       section: string,
       parentId: string,
@@ -172,7 +181,7 @@ export function EditorLibraryDialogs({
       placementId?: string,
     ) => Promise<void>;
     createBullet: (section: string, parentId: string, body: string) => Promise<void>;
-    saveBullet: (placement: any, body: string) => Promise<void>;
+    saveBullet: (placement: any, body: string) => Promise<void | false>;
     pickInterest: (item: any, replaceId?: string) => Promise<void>;
     createInterest: (draft: any) => Promise<void>;
     saveInterest: (id: string, draft: any) => Promise<void>;
@@ -212,6 +221,7 @@ export function EditorLibraryDialogs({
         kind="profile"
         initial={{ ...dialog.item }}
         close={close}
+        note="Choose how to keep this change when you save."
         onSave={async (draft) => {
           const message = profileWriteError(draft);
           if (message) throw new Error(message);
@@ -256,6 +266,7 @@ export function EditorLibraryDialogs({
         kind="summary"
         initial={{ name: dialog.item.name, body: dialog.item.body }}
         close={close}
+        note="Choose how to keep this change when you save."
         onSave={async (draft) => {
           if (!draft.name?.trim() || !draft.body?.trim())
             throw new Error("Summary name and text are required.");
@@ -315,6 +326,11 @@ export function EditorLibraryDialogs({
         kind={FORM_KIND[section]}
         initial={entryDraft(section, dialog.item)}
         close={close}
+        note={
+          section === "personal_interests" || section === "tool_groups"
+            ? undefined
+            : "Choose how to keep this change when you save."
+        }
         onSave={(draft) =>
           section === "personal_interests"
             ? actions.saveInterest(dialog.item.id, draft)

@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import json
 from psycopg.rows import dict_row
 
@@ -73,7 +67,29 @@ async def render_historical(conn, user_id, item_id, composition_id=None):
         return None
     rows = [] if composition_id else await many(
             conn,
-            """SELECT b.id,v.body FROM bullets b JOIN LATERAL (SELECT body FROM bullet_variants x WHERE x.bullet_id=b.id AND x.user_id=b.user_id AND x.archived_at IS NULL ORDER BY x.is_default DESC,x.sort_order,x.id LIMIT 1) v ON true WHERE b.parent_id=%s AND b.user_id=%s AND b.archived_at IS NULL ORDER BY b.sort_order,b.id""",
+            """
+            SELECT b.id,v.body
+               FROM bullets b
+               JOIN LATERAL
+                (
+                    SELECT body
+                    FROM bullet_variants x
+                    WHERE x.bullet_id = b.id
+                          AND x.user_id=b.user_id
+                          AND x.archived_at IS NULL
+                    ORDER BY
+                        x.is_default DESC,
+                        x.sort_order,
+                        x.id
+                    LIMIT 1
+                ) v ON true
+                    WHERE b.parent_id = %s
+                          AND b.user_id=%s
+                          AND b.archived_at IS NULL
+                    ORDER BY
+                        b.sort_order,
+                        b.id
+            """,
             (item_id, user_id),
         )
     base = {"id": str(row["id"]), "date": row.get("date_label") or "", "date_label": row.get("date_label") or "", "start_year": row.get("start_year"), "start_month": row.get("start_month"), "end_year": row.get("end_year"), "end_month": row.get("end_month"), "is_current": row.get("is_current", False), "manual_order": row.get("sort_order", 0), "bullets": [x["body"] for x in rows]}
@@ -85,6 +101,34 @@ async def render_historical(conn, user_id, item_id, composition_id=None):
             location=row.get("location") or "",
             title=row["title"],
         )
+    if composition_id:
+        variant = await one(
+            conn,
+            """SELECT v.item_name,v.subtitle,v.organization,v.location,v.title,v.date_label,
+                      v.start_year,v.start_month,v.end_year,v.end_month,v.is_current
+               FROM composition_items i
+               JOIN content_item_variants v ON v.id=i.variant_id
+               WHERE i.composition_id=%s AND i.item_id=%s AND v.archived_at IS NULL""",
+            (composition_id, item_id),
+        )
+        if variant:
+            base.update(
+                date=variant.get("date_label") or "",
+                date_label=variant.get("date_label") or "",
+                start_year=variant.get("start_year"),
+                start_month=variant.get("start_month"),
+                end_year=variant.get("end_year"),
+                end_month=variant.get("end_month"),
+                is_current=variant.get("is_current", False),
+            )
+            if row["kind"] == "project":
+                base.update(name=variant.get("item_name") or "", subtitle=variant.get("subtitle") or "")
+            else:
+                base.update(
+                    organization=variant.get("organization") or "",
+                    location=variant.get("location") or "",
+                    title=variant.get("title") or "",
+                )
     return base
 
 
@@ -392,7 +436,7 @@ async def update_composition_metadata(
         row = await one(
             conn,
             f"""
-            UPDATE resume_compositions 
+            UPDATE resume_compositions
             SET
                 name=%s,
                 description=%s,
@@ -402,9 +446,9 @@ async def update_composition_metadata(
                 {job_sql},
                 revision=revision+1,
                 updated_at=now()
-            WHERE 
-                id=%s 
-                AND user_id=%s 
+            WHERE
+                id=%s
+                AND user_id=%s
                 AND revision=%s
             RETURNING *""",
             tuple(params),
@@ -427,9 +471,23 @@ async def update_composition_metadata(
 async def set_composition_archive(conn,user_id,cid,revision,archived):
     async with conn.transaction():
         clause='archived_at IS NULL' if archived else 'archived_at IS NOT NULL'
-        row=await one(conn,f"""UPDATE resume_compositions SET archived_at={'now()' if archived else 'NULL'},revision=revision+1,updated_at=now()
+        default_clause=",is_default_starter=false" if archived else ""
+        row=await one(conn,f"""UPDATE resume_compositions SET archived_at={'now()' if archived else 'NULL'}{default_clause},revision=revision+1,updated_at=now()
             WHERE id=%s AND user_id=%s AND {clause} AND revision=%s
             RETURNING *""",(cid,user_id,revision))
+        if row and archived and row["is_starter"]:
+            await conn.execute(
+                """UPDATE resume_compositions SET is_default_starter=true,updated_at=now()
+                   WHERE id=(SELECT id FROM resume_compositions WHERE user_id=%s AND is_starter AND archived_at IS NULL AND NOT is_default_starter ORDER BY updated_at DESC,id LIMIT 1)
+                     AND NOT EXISTS (SELECT 1 FROM resume_compositions WHERE user_id=%s AND is_default_starter AND archived_at IS NULL)""",
+                (user_id, user_id),
+            )
+        if row and not archived and row["is_starter"] and not row["is_default_starter"]:
+            await conn.execute(
+                """UPDATE resume_compositions SET is_default_starter=true,updated_at=now()
+                   WHERE id=%s AND NOT EXISTS (SELECT 1 FROM resume_compositions WHERE user_id=%s AND is_default_starter AND archived_at IS NULL AND id<>%s)""",
+                (cid, user_id, cid),
+            )
         if not row:return None,('stale' if await one(conn,"SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s",(cid,user_id)) else 'missing')
         await conn.execute("INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,%s,%s::jsonb)",(cid,user_id,row['revision'],'archive' if archived else 'restore-composition',json.dumps({'name':row['name'],'description':row['description'],'display_title':row['display_title'],'target_company':row['target_company'],'target_role':row['target_role'],'job_description_id':_job_link(row),'preferred_page_length':row.get('preferred_page_length',1),'date_format':row.get('date_format','long'),'template_style':row.get('template_style','classic'),'skill_row_max':row.get('skill_row_max',4),'section_sort_modes':row.get('section_sort_modes',{}),'resume':row['render_payload'],'interest_layout':row['interest_layout'],'section_order':row['section_order']})))
         return row,None
@@ -437,12 +495,12 @@ async def set_composition_archive(conn,user_id,cid,revision,archived):
 async def duplicate(conn, user_id, cid, name):
     async with conn.transaction():
         row = await one(conn,"""INSERT INTO resume_compositions(
-            user_id,name,description,display_title,target_company,target_role,job_description_id,tags,summary_variant_id,profile_id,render_payload,interest_layout,section_order,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes
-        ) SELECT user_id,%s,description,display_title,target_company,target_role,job_description_id,tags,summary_variant_id,profile_id,render_payload,interest_layout,section_order,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes
+            user_id,name,description,display_title,target_company,target_role,job_description_id,tags,summary_variant_id,profile_id,profile_variant_id,render_payload,interest_layout,section_order,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes
+        ) SELECT user_id,%s,description,display_title,target_company,target_role,job_description_id,tags,summary_variant_id,profile_id,profile_variant_id,render_payload,interest_layout,section_order,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes
         FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL
         RETURNING *""",(name.strip(),cid,user_id))
         if row:
-            await conn.execute("INSERT INTO composition_items(composition_id,section,item_id,sort_order) SELECT %s,section,item_id,sort_order FROM composition_items WHERE composition_id=%s",(row['id'],cid))
+            await conn.execute("INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order) SELECT %s,section,item_id,variant_id,sort_order FROM composition_items WHERE composition_id=%s",(row['id'],cid))
             await conn.execute("INSERT INTO composition_bullets(composition_id,bullet_id,variant_id,destination_section,destination_parent_type,destination_parent_id,sort_order,wording_snapshot,snapshot_source_updated_at) SELECT %s,bullet_id,variant_id,destination_section,destination_parent_type,destination_parent_id,sort_order,wording_snapshot,snapshot_source_updated_at FROM composition_bullets WHERE composition_id=%s",(row['id'],cid))
             await conn.execute("INSERT INTO composition_custom_sections(composition_id,section_id,sort_order) SELECT %s,section_id,sort_order FROM composition_custom_sections WHERE composition_id=%s",(row['id'],cid))
             await conn.execute("INSERT INTO composition_revisions(composition_id,user_id,revision,source,note,snapshot) VALUES(%s,%s,%s,'duplicate',%s,%s::jsonb)",(row['id'],user_id,row['revision'],f"Duplicated from {cid}",json.dumps({'name':row['name'],'description':row['description'],'display_title':row['display_title'],'target_company':row['target_company'],'target_role':row['target_role'],'job_description_id':_job_link(row),'preferred_page_length':row.get('preferred_page_length',1),'date_format':row.get('date_format','long'),'template_style':row.get('template_style','classic'),'skill_row_max':row.get('skill_row_max',4),'section_sort_modes':row.get('section_sort_modes',{}),'resume':row['render_payload'],'interest_layout':row['interest_layout'],'section_order':row['section_order']})))
@@ -466,10 +524,10 @@ async def get_revision(conn, user_id, cid, rid):
 
 
 async def revision_snapshot(conn, row):
-    items = await many(conn, "SELECT section,item_id,sort_order FROM composition_items WHERE composition_id=%s ORDER BY section,sort_order,id", (row["id"],))
+    items = await many(conn, "SELECT section,item_id,variant_id,sort_order FROM composition_items WHERE composition_id=%s ORDER BY section,sort_order,id", (row["id"],))
     custom = await many(conn, "SELECT section_id,sort_order FROM composition_custom_sections WHERE composition_id=%s ORDER BY sort_order,id", (row["id"],))
     placements = await many(conn, "SELECT bullet_id,variant_id,destination_section,destination_parent_type,destination_parent_id,sort_order,wording_snapshot,snapshot_source_updated_at FROM composition_bullets WHERE composition_id=%s ORDER BY destination_section,destination_parent_id,sort_order,id", (row["id"],))
-    return {"name":row["name"],"description":row.get("description", ""),"display_title":row.get("display_title", ""),"target_company":row.get("target_company", ""),"target_role":row.get("target_role", ""),"job_description_id":_job_link(row),"resume":row["render_payload"],"preferred_page_length":row.get("preferred_page_length",1),"date_format":row.get("date_format","long"),"template_style":row.get("template_style","classic"),"skill_row_max":row.get("skill_row_max",4),"section_sort_modes":row.get("section_sort_modes",{}),"section_order":row.get("section_order",[]),"interest_layout":row.get("interest_layout","compact"),"summary_variant_id":str(row["summary_variant_id"]) if row.get("summary_variant_id") else None,"profile_id":str(row["profile_id"]) if row.get("profile_id") else None,"composition_items":[{**x,"item_id":str(x["item_id"])} for x in items],"composition_custom_sections":[{**x,"section_id":str(x["section_id"])} for x in custom],"bullet_placements":[{k:(str(v) if k.endswith("_id") and v is not None else v) for k,v in x.items()} for x in placements]}
+    return {"name":row["name"],"description":row.get("description", ""),"display_title":row.get("display_title", ""),"target_company":row.get("target_company", ""),"target_role":row.get("target_role", ""),"job_description_id":_job_link(row),"resume":row["render_payload"],"preferred_page_length":row.get("preferred_page_length",1),"date_format":row.get("date_format","long"),"template_style":row.get("template_style","classic"),"skill_row_max":row.get("skill_row_max",4),"section_sort_modes":row.get("section_sort_modes",{}),"section_order":row.get("section_order",[]),"interest_layout":row.get("interest_layout","compact"),"summary_variant_id":str(row["summary_variant_id"]) if row.get("summary_variant_id") else None,"profile_id":str(row["profile_id"]) if row.get("profile_id") else None,"composition_items":[{**x,"item_id":str(x["item_id"]),"variant_id":str(x["variant_id"]) if x.get("variant_id") else None} for x in items],"composition_custom_sections":[{**x,"section_id":str(x["section_id"])} for x in custom],"bullet_placements":[{k:(str(v) if k.endswith("_id") and v is not None else v) for k,v in x.items()} for x in placements]}
 
 async def restore_revision(conn, user_id, cid, rid, expected):
     async with conn.transaction():
@@ -494,7 +552,7 @@ async def restore_revision(conn, user_id, cid, rid, expected):
         row=await one(conn,"""UPDATE resume_compositions SET name=%s,description=%s,display_title=%s,target_company=%s,target_role=%s,job_description_id=%s,render_payload=%s::jsonb,preferred_page_length=%s,date_format=%s,template_style=%s,skill_row_max=%s,section_sort_modes=%s::jsonb,section_order=%s::jsonb,interest_layout=%s,summary_variant_id=%s,profile_id=%s,revision=revision+1,updated_at=now(),autosaved_at=now() WHERE id=%s AND user_id=%s RETURNING *""",(name,value("description"),value("display_title"),company,role,job_id,json.dumps(snap.get("resume",current["render_payload"])),value("preferred_page_length"),value("date_format"),value("template_style") or "classic",value("skill_row_max") or 4,json.dumps(value("section_sort_modes") or {}),json.dumps(value("section_order") or []),value("interest_layout"),value("summary_variant_id"),value("profile_id"),cid,user_id))
         if "composition_items" in snap:
             await conn.execute("DELETE FROM composition_items WHERE composition_id=%s",(cid,))
-            for x in snap["composition_items"]: await conn.execute("INSERT INTO composition_items(composition_id,section,item_id,sort_order) VALUES(%s,%s,%s,%s)",(cid,x["section"],x["item_id"],x.get("sort_order",0)))
+            for x in snap["composition_items"]: await conn.execute("INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order) VALUES(%s,%s,%s,%s,%s)",(cid,x["section"],x["item_id"],x.get("variant_id"),x.get("sort_order",0)))
         if "composition_custom_sections" in snap:
             await conn.execute("DELETE FROM composition_custom_sections WHERE composition_id=%s",(cid,))
             for x in snap["composition_custom_sections"]: await conn.execute("INSERT INTO composition_custom_sections(composition_id,section_id,sort_order) VALUES(%s,%s,%s)",(cid,x["section_id"],x.get("sort_order",0)))

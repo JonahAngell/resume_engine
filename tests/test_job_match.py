@@ -42,8 +42,8 @@ def test_missing_phrase_suggests_a_section():
     result = match_resume(DESCRIPTION, RESUME)
     missing = {item["keyword"].lower(): item for item in result["missing"]}
     hit = missing["production incident response"]
-    assert hit["section"] == "Work Experience"
-    assert "only where it is true" in hit["suggestion"]
+    assert hit["section"] == "Skills"
+    assert "if you use it" in hit["suggestion"]
     assert result["included_count"] == 2
     assert result["missing_count"] == 1
     assert result["keyword_count"] == 3
@@ -146,7 +146,8 @@ def test_required_and_preferred_sections_are_separate_rows():
     assert all("Build dashboards" not in text for text in required + preferred)
     assert "python" in _keywords(parsed["required"])
     assert "pyspark" in _keywords(parsed["preferred"])
-    assert "sql/oracle" in _keywords(parsed["preferred"])
+    assert "sql" in _keywords(parsed["preferred"])
+    assert "oracle" in _keywords(parsed["preferred"])
     for word in ("team", "strong", "experience", "skills"):
         assert word not in _keywords(parsed["required"] + parsed["preferred"])
 
@@ -156,7 +157,7 @@ def test_requirement_sentence_keeps_the_tool():
     assert keywords_from_requirement(
         "Experience with tools (e.g., JIRA, Confluence)"
     ) == ["JIRA", "Confluence"]
-    assert keywords_from_requirement("Proficiency in SQL/Oracle query language") == ["SQL/Oracle"]
+    assert keywords_from_requirement("Proficiency in SQL/Oracle query language") == ["SQL", "Oracle"]
 
 
 def test_python_requirement_matches_resume_text_or_a_bullet_tag():
@@ -316,7 +317,7 @@ def test_combination_needs_every_term():
             },
         ],
     )
-    assert result["required"][0]["keywords"][0]["keyword"] == "data engineering"
+    assert result["required"][0]["keywords"][0]["keyword"] == "Data Engineering"
     suggestions = result["required"][0]["suggestions"]
     assert suggestions[0]["bullet_id"] == "both"
     assert "Python and SQL" in suggestions[0]["suggestion"]
@@ -439,7 +440,7 @@ def test_r_language_outranks_an_unrelated_bullet():
     )
     suggestions = result["required"][0]["suggestions"]
     assert suggestions[0]["bullet_id"] == "rlang"
-    assert "related to statistics" in suggestions[0]["suggestion"]
+    assert "related to Statistics" in suggestions[0]["suggestion"]
 
 
 def test_fallback_requirement_sentence_when_there_is_no_heading():
@@ -483,15 +484,15 @@ Preferred Education
 """
     )
     required_kinds = {row["kind"] for row in parsed["required"]}
-    assert required_kinds == {"skill", "education"}
-    assert any(row["kind"] == "skill" and "Python" in row["keywords"] for row in parsed["required"])
-    education = [row for row in parsed["required"] if row["kind"] == "education"]
-    assert len(education) == 2
-    assert all(row["group"] == "required" for row in education)
-    preferred_education = [row for row in parsed["preferred"] if row["kind"] == "education"]
+    assert required_kinds == {"tool"}
+    assert any(row["kind"] == "tool" and "Python" in row["keywords"] for row in parsed["required"])
+    education = [row for row in parsed["eligibility"] if row["kind"] == "degree"]
+    required_education = [row for row in education if row["group"] == "required"]
+    assert len(required_education) == 2
+    preferred_education = [row for row in education if row["group"] == "preferred"]
     assert len(preferred_education) == 1
     assert preferred_education[0]["label"] == "Master's degree"
-    assert any(row["kind"] == "skill" and "Tableau" in row["keywords"] for row in parsed["preferred"])
+    assert any(row["kind"] == "tool" and "Tableau" in row["keywords"] for row in parsed["preferred"])
 
 
 def test_bachelors_resume_satisfies_bachelors_not_masters():
@@ -507,17 +508,18 @@ def test_bachelors_resume_satisfies_bachelors_not_masters():
         "Required Education\nBachelor's degree in Information Systems or a related field\n",
         resume,
     )
-    row = bachelors["required"][0]
-    assert row["kind"] == "education"
-    assert row["matched"] is True
-    assert "Management Information Systems" in row["detail"]
-    assert row["suggestions"] == []
+    degree = bachelors["eligibility"]["degree"]
+    assert degree["status"] == "pass"
+    assert "Management Information Systems" in degree["detail"]
+    assert bachelors["required"] == []
+    assert bachelors["scores"]["required_coverage"] == 0
     masters = match_qualifications(
         "Preferred Education\nMaster's degree\n",
         resume,
     )
-    assert masters["preferred"][0]["matched"] is False
-    assert masters["preferred"][0]["detail"] == "This resume does not list a qualifying degree."
+    assert masters["eligibility"]["degree"]["status"] == "fail"
+    assert masters["eligibility"]["degree"]["detail"] == "This resume does not list a qualifying degree."
+    assert masters["preferred"] == []
 
 
 def test_masters_resume_satisfies_a_bachelors_requirement():
@@ -525,9 +527,9 @@ def test_masters_resume_satisfies_a_bachelors_requirement():
         "Minimum Education\nBachelor's degree in Computer Science\n",
         {"education": [{"degree": "Master of Science, Computer Science", "institution": "State"}]},
     )
-    row = result["required"][0]
-    assert row["matched"] is True
-    assert "Computer Science" in row["detail"]
+    assert result["required"] == []
+    assert result["eligibility"]["degree"]["status"] == "pass"
+    assert "Computer Science" in result["eligibility"]["degree"]["detail"]
 
 
 def test_named_field_must_appear_when_the_posting_does_not_allow_related():
@@ -535,7 +537,8 @@ def test_named_field_must_appear_when_the_posting_does_not_allow_related():
         "Required Education\nBachelor's degree in Computer Science\n",
         {"education": [{"degree": "Bachelor of Science, Management Information Systems"}]},
     )
-    assert result["required"][0]["matched"] is False
+    assert result["required"] == []
+    assert result["eligibility"]["degree"]["status"] == "fail"
 
 
 def test_salary_and_location_are_facts_not_requirements():
@@ -559,11 +562,8 @@ def test_skill_without_a_keyword_uses_a_short_label():
     parsed = parse_requirements(
         "Required Qualifications\nStrong communication across partner teams and executives\n"
     )
-    row = parsed["required"][0]
-    assert row["kind"] == "skill"
-    assert row["keywords"] == []
-    assert row["label"]
-    assert row["label"] != "No keyword"
+    assert parsed["required"][0]["category"] == "soft_skill"
+    assert "communication" in parsed["required"][0]["keywords"]
 
 
 def test_review_can_mark_a_missing_row_as_matched():
@@ -600,7 +600,7 @@ def test_analyze_requirements_skips_the_resume_and_applies_review():
     assert "dbt" in keywords
     assert result["preferred"] == []
     for row in result["required"]:
-        assert set(row) == {"text", "kind", "label", "keywords"}
+        assert set(row) == {"text", "kind", "label", "keywords", "match_mode", "category", "section", "weight"}
         assert all(isinstance(keyword, str) for keyword in row["keywords"])
 
 
@@ -609,3 +609,215 @@ def test_keyword_review_migration_is_additive():
     assert "DROP " not in sql.upper()
     assert "keyword_review" in sql
     assert "jsonb" in sql
+
+
+def test_qualifications_and_skills_heading_is_required():
+    parsed = parse_requirements(
+        """
+What You Will Do
+Run reporting and create automation
+
+Required Qualifications & Skills
+Experience with report development utilizing tools such as Tableau, Power BI, Smartsheet or SQL
+Skilled in project management tools such as Jira, Confluence, or MS Project
+Strong communication skills, with the ability to engage partners
+
+Education
+High School Diploma or equivalent required
+"""
+    )
+    keywords = _keywords(parsed["required"])
+    assert "tableau" in keywords
+    assert "power bi" in keywords
+    assert "microsoft project" in keywords
+    assert any(row["match_mode"] == "any" and "Tableau" in row["keywords"] for row in parsed["required"])
+    assert any(row["category"] == "soft_skill" and "communication" in row["keywords"] for row in parsed["required"])
+    assert any(row["kind"] == "degree" and row["label"] == "High school" for row in parsed["eligibility"])
+
+
+def test_basic_qualifications_and_inline_education():
+    parsed = parse_requirements(
+        """
+Basic Qualifications/You Will Have
+Experience supporting project management activities, including coordinating priorities.
+
+Preferred Qualifications
+Experience with portfolio tooling such as Smartsheet, Airtable, Bluebeam, SAP, and Maximo.
+
+Education
+Bachelor's degree in an engineering or related field is required.
+Master's degree in engineering, business, or equivalent is preferred.
+
+Additional Information
+Disney offers a rewards package to help you live your best life.
+"""
+    )
+    assert "project management" in _keywords(parsed["required"])
+    assert any(
+        row["kind"] == "degree" and row["label"] == "Bachelor's degree" and row["group"] == "required"
+        for row in parsed["eligibility"]
+    )
+    assert any(
+        row["kind"] == "degree" and row["label"] == "Master's degree" and row["group"] == "preferred"
+        for row in parsed["eligibility"]
+    )
+    assert any(row["match_mode"] == "any" and "Maximo" in row["keywords"] for row in parsed["preferred"])
+    assert all("rewards package" not in row["text"].lower() for row in parsed["required"] + parsed["preferred"])
+
+
+def test_preferences_and_misfiled_requirements_skip_the_company_blurb():
+    parsed = parse_requirements(
+        """
+Job Summary
+DE manages production and distribution (including Disney+, Hulu) across broadcast and cable.
+
+Responsibilities and Duties of the Role:
+3+ years of finance/accounting related work experience
+Bachelor's degree in Finance, Accounting, Economics, or Statistics
+Proficient in Excel and PowerPoint; and with financial reporting systems (e.g., Oracle EPM, COGNOS TM1)
+
+Preferences
+MBA and/or CPA
+Oracle EPM / Smart View
+Microsoft Power BI
+"""
+    )
+    blob = " ".join(row["text"] for row in parsed["required"] + parsed["preferred"] + parsed["responsibilities"])
+    assert "Disney+" not in blob
+    assert "Hulu" not in blob
+    assert any("Excel" in row["keywords"] for row in parsed["responsibilities"])
+    assert any(row["kind"] == "degree" and "Bachelor" in row["label"] for row in parsed["eligibility"])
+    assert any(row["kind"] == "credential" and "CPA" in row["keywords"] for row in parsed["eligibility"])
+    assert any(row["kind"] == "degree" and "Master" in row["label"] for row in parsed["eligibility"])
+    assert any("Power BI" in row["keywords"] for row in parsed["preferred"])
+
+
+def test_example_list_matches_when_one_tool_is_present():
+    result = match_qualifications(
+        "Required Qualifications & Skills\n"
+        "Experience with tools such as Tableau, Power BI, Smartsheet or SQL\n",
+        {"summary": "Built Tableau dashboards for finance"},
+    )
+    row = result["required"][0]
+    assert row["match_mode"] == "any"
+    assert row["matched"] is True
+    assert any(item["keyword"] == "Tableau" and item["found"] for item in row["keywords"])
+    assert result["required_matched"] == 1
+
+
+def test_powerbi_is_suggested_and_matched_as_power_bi():
+    missing = match_qualifications(
+        "Required Qualifications\nExperience with tools such as PowerBI\n",
+        {"summary": "No dashboards yet"},
+    )
+    row = missing["required"][0]
+    assert row["keywords"][0]["keyword"] == "Power BI"
+    assert "Power BI" in row["suggestions"][0]["suggestion"]
+    found = match_qualifications(
+        "Required Qualifications\nExperience with tools such as PowerBI\n",
+        {"summary": "Shipped PowerBI reports"},
+    )
+    assert found["required"][0]["matched"] is True
+    assert found["required"][0]["keywords"][0]["where"] == "Summary"
+
+
+def test_my_time_matches_a_workbrain_resume():
+    result = match_qualifications(
+        "Preferred Qualifications\n"
+        "Experience with MY TIME (aka Infor, Workbrain), Zendesk, and/or SAP\n",
+        {"summary": "Maintained schedules in Workbrain"},
+    )
+    row = result["preferred"][0]
+    assert row["match_mode"] == "any"
+    assert row["matched"] is True
+    assert any("time" in item["keyword"].lower() and item["found"] for item in row["keywords"])
+
+
+def test_communication_only_line_is_a_soft_skill():
+    parsed = parse_requirements(
+        "Required Qualifications & Skills\n"
+        "Strong communication skills, with the ability to engage partners\n"
+    )
+    assert parsed["required"][0]["category"] == "soft_skill"
+    assert parsed["eligibility"] == []
+    assert parsed["preferred"] == []
+
+
+def test_negated_and_example_only_tools_are_not_required():
+    parsed = parse_requirements(
+        """
+What You Will Do
+Use a tracker, for example Jira, when the team asks.
+
+Required Qualifications
+No experience required with Kubernetes.
+Willing to learn Terraform.
+Demonstrated experience with Python
+"""
+    )
+    kept = _keywords(parsed["required"] + parsed["responsibilities"])
+    assert "jira" not in kept
+    assert "kubernetes" not in kept
+    assert "terraform" not in kept
+    assert "python" in _keywords(parsed["required"])
+
+
+def test_cluster_evidence_is_weaker_than_an_exact_mention():
+    result = match_qualifications(
+        "Required Qualifications\nDemonstrated experience with Python\n",
+        {"summary": "Analyzed data with pandas"},
+    )
+    keyword = result["required"][0]["keywords"][0]
+    assert keyword["found"] is False
+    assert keyword["relation"] == "cluster"
+    assert keyword["evidence"]["confidence"] == 0.55
+    assert keyword["evidence"]["section"] == "Summary"
+    assert result["required"][0]["matched"] is False
+    assert result["scores"]["required_coverage"] == 0
+    assert result["scores"]["evidence_quality"] == 0.55
+
+
+def test_tax_and_programme_postings_score_sections_separately():
+    tax = (ROOT / "docs/job_description_repository/tax_analyst.md").read_text(encoding="utf-8")
+    programme = (ROOT / "docs/job_description_repository/program_engineer.md").read_text(encoding="utf-8")
+    parsed = parse_requirements(tax)
+    assert any(row["weight"] == 1.0 and row["category"] == "tool" for row in parsed["required"])
+    assert any(row["weight"] == 0.65 for row in parsed["responsibilities"])
+    assert any(row["kind"] == "degree" for row in parsed["eligibility"])
+    assert any(row["match_mode"] == "any" for row in parsed["required"])
+    result = match_qualifications(
+        tax,
+        {
+            "summary": "Supported tax technology during a finance transformation",
+            "education": [{"degree": "Bachelor of Science, Accounting", "institution": "State"}],
+            "work_experience": [
+                {
+                    "title": "Analyst",
+                    "start_year": 2020,
+                    "end_year": 2024,
+                    "bullets": ["Built Power BI reports for tax compliance"],
+                }
+            ],
+        },
+    )
+    family_ids = {item["id"] for item in result["families"]}
+    assert "tax-technology" in family_ids
+    assert "finance-transformation" in family_ids
+    assert result["eligibility"]["degree"]["status"] == "pass"
+    assert result["eligibility"]["years"]["status"] == "pass"
+    assert all(row["category"] not in {"degree", "experience_duration", "credential"} for row in result["required"])
+    evidence = next(
+        item["evidence"]
+        for row in result["required"] + result["preferred"] + result["responsibilities"]
+        for item in row["keywords"]
+        if item["found"] and item["evidence"]
+    )
+    assert set(evidence) >= {"source_requirement", "matched_text", "relation", "section", "confidence", "explanation"}
+    assert evidence["relation"] in {"exact", "alias"}
+    programme_match = match_qualifications(programme, {"summary": "Led portfolio reviews in Bluebeam"})
+    assert any(item["id"] == "technical-program" for item in programme_match["families"])
+    assert "required_coverage" in programme_match["scores"]
+    assert all(
+        row["category"] not in {"degree", "experience_duration", "credential"}
+        for row in programme_match["required"]
+    )

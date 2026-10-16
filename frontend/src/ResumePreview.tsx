@@ -1,5 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { Fit } from "./FitIndicator";
+import type { MatchMark } from "./matchMarks";
+
+export type PreviewHighlight = { marks: MatchMark[]; activeIds: string[] };
+const emptyHighlight: PreviewHighlight = { marks: [], activeIds: [] };
+
 export default function ResumePreview({
   compositionId,
   revision,
@@ -7,8 +12,9 @@ export default function ResumePreview({
   preferredPageCount,
   onFit,
   currentPage,
-  highlight = { terms: [], lines: [], excerpts: [] },
+  highlight = emptyHighlight,
   onHighlightPage,
+  onHighlightHover,
 }: {
   compositionId: string;
   revision: number;
@@ -16,24 +22,26 @@ export default function ResumePreview({
   preferredPageCount: number;
   onFit: (x: Fit) => void;
   currentPage: number;
-  highlight?: { terms: string[]; lines: string[]; excerpts: string[] };
+  highlight?: PreviewHighlight;
   onHighlightPage?: (page: number) => void;
+  onHighlightHover?: (ids: string[]) => void;
 }) {
   const [html, setHtml] = useState(""),
     seq = useRef(0),
     frame = useRef<HTMLIFrameElement>(null),
     measured = useRef<Fit | null>(null),
-    highlightRef = useRef(highlight);
+    highlightRef = useRef(highlight),
+    fromFrame = useRef(false);
   highlightRef.current = highlight;
-  const postHighlight = () => {
-    const current = highlightRef.current;
+  const postMarks = () => {
     frame.current?.contentWindow?.postMessage(
-      {
-        type: "resume-highlight",
-        terms: current.terms,
-        lines: current.lines,
-        excerpts: current.excerpts,
-      },
+      { type: "resume-highlight", marks: highlightRef.current.marks },
+      "*",
+    );
+  };
+  const postActive = () => {
+    frame.current?.contentWindow?.postMessage(
+      { type: "resume-highlight-focus", activeIds: highlightRef.current.activeIds },
       "*",
     );
   };
@@ -46,32 +54,6 @@ export default function ResumePreview({
       .then(async (r) => {
         if (!r.ok) {
           const detail = (await r.json().catch(() => ({}))).detail;
-          // #region agent log
-          fetch(
-            "http://127.0.0.1:7353/ingest/d7c1cc8b-c0a3-49b7-960e-6eca5743ef25",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Debug-Session-Id": "1b8194",
-              },
-              body: JSON.stringify({
-                sessionId: "1b8194",
-                runId: "pre-fix",
-                hypothesisId: "C",
-                location: "ResumePreview.tsx:render",
-                message: "preview error detail",
-                data: {
-                  url,
-                  detailType: Array.isArray(detail) ? "array" : typeof detail,
-                  detailLength: Array.isArray(detail) ? detail.length : null,
-                  stringified: String(detail ?? "").slice(0, 240),
-                },
-                timestamp: Date.now(),
-              }),
-            },
-          ).catch(() => {});
-          // #endregion
           throw new Error(detail || "Preview failed");
         }
         return r.text();
@@ -86,13 +68,36 @@ export default function ResumePreview({
   useEffect(() => {
     const fn = (e: MessageEvent) => {
       if (e.source !== frame.current?.contentWindow) return;
+      if (e.data?.type === "resume-highlight-hover") {
+        const id = String(e.data.id || "");
+        fromFrame.current = Boolean(id);
+        onHighlightHover?.(id ? [id] : []);
+        return;
+      }
+      if (e.data?.type === "resume-highlight-anchor") {
+        if (fromFrame.current) {
+          fromFrame.current = false;
+          return;
+        }
+        const frameEl = frame.current;
+        const pane = frameEl?.closest<HTMLElement>(".stage");
+        const offset = Number(e.data.top);
+        if (!frameEl || !pane || !Number.isFinite(offset)) return;
+        const top = frameEl.getBoundingClientRect().top + offset;
+        const paneRect = pane.getBoundingClientRect();
+        if (top < paneRect.top + 24 || top > paneRect.bottom - 48) {
+          pane.scrollBy({ top: top - paneRect.top - 72 });
+        }
+        return;
+      }
       if (e.data?.type === "resume-highlight-page") {
         const page = Number(e.data.pageIndex) + 1;
         if (page >= 1) onHighlightPage?.(page);
         return;
       }
       if (e.data?.type !== "resume-pages") return;
-      postHighlight();
+      postMarks();
+      postActive();
       const actual = e.data.actual_page_count || 1;
       const next: Fit = {
         fits: e.data.state === "measured" && actual === preferredPageCount,
@@ -107,7 +112,7 @@ export default function ResumePreview({
     };
     addEventListener("message", fn);
     return () => removeEventListener("message", fn);
-  }, [onFit, onHighlightPage, preferredPageCount]);
+  }, [onFit, onHighlightHover, onHighlightPage, preferredPageCount]);
   useEffect(() => {
     const last = measured.current;
     if (!last?.actualPageCount) return;
@@ -123,9 +128,15 @@ export default function ResumePreview({
       "*",
     );
   }, [currentPage, html]);
+  const marksKey = JSON.stringify(highlight.marks);
+  const activeKey = highlight.activeIds.join("\n");
   useEffect(() => {
-    postHighlight();
-  }, [highlight, html]);
+    postMarks();
+    postActive();
+  }, [marksKey, html]);
+  useEffect(() => {
+    postActive();
+  }, [activeKey]);
   return (
     <iframe
       ref={frame}
