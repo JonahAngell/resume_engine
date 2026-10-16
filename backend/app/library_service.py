@@ -67,6 +67,7 @@ async def import_seed(
                 ).fetchone()
             )[0]
             education_ids.append(education_id)
+            item["id"] = str(education_id)
         tool_group_ids = []
         for gi, group in enumerate(data["tool_groups"]):
             gid = (
@@ -78,6 +79,7 @@ async def import_seed(
                 ).fetchone()
             )[0]
             tool_group_ids.append(gid)
+            group["id"] = str(gid)
             for ti, name in enumerate(group["items"]):
                 await conn.execute(
                     "INSERT INTO tools(user_id,group_id,name,sort_order) VALUES (%s,%s,%s,%s)",
@@ -107,6 +109,7 @@ async def import_seed(
                     ).fetchone()
                 )[0]
                 historical_ids[kind].append(parent)
+                item["id"] = str(parent)
                 for bi, body in enumerate(item["bullets"]):
                     bullet = (
                         await (
@@ -130,6 +133,7 @@ async def import_seed(
         await add_items("employment", data["work_experience"])
         await add_items("leadership", data["leadership"])
         interest_ids = []
+        data["personal_interest_items"] = []
         for i, body in enumerate(data["personal_interests"]):
             interest_id = (
                 await (
@@ -140,6 +144,9 @@ async def import_seed(
                 ).fetchone()
             )[0]
             interest_ids.append(interest_id)
+            data["personal_interest_items"].append(
+                {"id": str(interest_id), "body": body, "bullets": []}
+            )
         composition = (
             await (
                 await conn.execute(

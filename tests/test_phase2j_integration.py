@@ -40,12 +40,31 @@ async def exercise():
                 c, u["id"], ROOT / "seed/jonah-resume.json", "2j"
             )
             comp = await load_composition(c, u["id"], cid)
-            parent, bullet, variant = await (
-                await c.execute(
-                    "SELECT x.id,b.id,v.id FROM content_items x JOIN bullets b ON b.parent_id=x.id JOIN bullet_variants v ON v.bullet_id=b.id WHERE x.user_id=%s ORDER BY x.id,b.id LIMIT 1",
-                    (u["id"],),
-                )
-            ).fetchone()
+            # Seed bullets are already placed; place a fresh bullet on a seeded project.
+            parent = (
+                await (
+                    await c.execute(
+                        "SELECT id FROM content_items WHERE user_id=%s AND kind='project' ORDER BY sort_order LIMIT 1",
+                        (u["id"],),
+                    )
+                ).fetchone()
+            )[0]
+            bullet = (
+                await (
+                    await c.execute(
+                        "INSERT INTO bullets(user_id,parent_id,sort_order) VALUES (%s,%s,99) RETURNING id",
+                        (u["id"], parent),
+                    )
+                ).fetchone()
+            )[0]
+            variant = (
+                await (
+                    await c.execute(
+                        "INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order) VALUES (%s,%s,'Phase 2j',%s,true,0) RETURNING id",
+                        (u["id"], bullet, "Placed from the phase 2j picker."),
+                    )
+                ).fetchone()
+            )[0]
             row, error = await insert_placement(
                 c,
                 u["id"],
@@ -60,6 +79,10 @@ async def exercise():
                 ),
             )
             assert row and error is None
+            placed_parent = next(
+                x for x in row["render_payload"]["projects"] if x["id"] == str(parent)
+            )
+            assert placed_parent["bullets"][-1] == "Placed from the phase 2j picker."
             usages = await usage_rows(c, u["id"], cid)
             placed = usages[-1]
             assert placed["wording_snapshot"] and placed["usage_status"] == "current"
