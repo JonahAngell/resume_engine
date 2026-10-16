@@ -22,7 +22,7 @@ from async_test_utils import run_async
 ROOT = Path(__file__).resolve().parents[1]
 URL = os.getenv("TEST_DATABASE_URL")
 SEED = ROOT / "seed/nia-calder-resume.json"
-BACKFILL = ROOT / "backend/migrations/024_render_payload_entry_ids.sql"
+BACKFILL = ROOT / "backend/migrations/025_render_payload_entry_ids.sql"
 SECTIONS = ("education", "tool_groups", "projects", "work_experience", "leadership")
 pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is required")
 
