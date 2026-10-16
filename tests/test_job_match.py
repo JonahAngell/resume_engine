@@ -821,3 +821,62 @@ def test_tax_and_programme_postings_score_sections_separately():
         row["category"] not in {"degree", "experience_duration", "credential"}
         for row in programme_match["required"]
     )
+
+
+def test_suggestions_carry_placement_and_action():
+    result = match_qualifications(
+        "Required Qualifications\nExperience with financial forecasting for budgeting teams\n",
+        {"summary": "x"},
+        bullets=[
+            {
+                "id": "b1",
+                "placement_id": "p1",
+                "parent_id": "job-1",
+                "line_index": 0,
+                "wording": "Owned budgeting reviews for regional teams",
+                "tags": [],
+                "section": "Work Experience",
+            }
+        ],
+    )
+    first, fallback = result["required"][0]["suggestions"]
+    assert (first["placement_id"], first["line_id"], first["action"]) == (
+        "p1",
+        "job-1-bullet-0",
+        "rewrite",
+    )
+    assert (fallback["placement_id"], fallback["line_id"], fallback["action"]) == (
+        "",
+        "tools",
+        "add_skill",
+    )
+
+
+def test_missing_tool_on_a_bullet_is_added_to_skills_not_rewritten():
+    result = match_qualifications(
+        "Required Qualifications\nDemonstrated experience with Python and stakeholder analysis\n",
+        {"summary": "Builds models"},
+        bullets=[
+            {
+                "id": "near",
+                "placement_id": "p-near",
+                "wording": "Owned stakeholder analysis for the marketing team",
+                "tags": [],
+                "section": "Work Experience",
+            }
+        ],
+    )
+    suggestions = result["required"][0]["suggestions"]
+    assert suggestions[0]["placement_id"] == "p-near"
+    assert {item["action"] for item in suggestions} == {"add_skill"}
+
+
+def test_skill_group_option_is_add_skill():
+    result = match_qualifications(
+        "Required Qualifications\nDemonstrated experience with Python\n",
+        {"tool_groups": [{"name": "Analysis", "items": ["pandas", "SQL"]}]},
+        bullets=[],
+    )
+    suggestion = result["required"][0]["suggestions"][0]
+    assert suggestion["line_id"] == "tool-group-0"
+    assert suggestion["action"] == "add_skill"

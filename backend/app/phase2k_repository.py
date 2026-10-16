@@ -60,7 +60,7 @@ async def usages(c,u,bid):
 async def detail(c,u,bid):
  item=await one(c,"""SELECT b.id,b.section,b.parent_context,b.archived_at,b.created_at,b.updated_at,COALESCE(d.body,'') body FROM bullets b LEFT JOIN LATERAL(SELECT body FROM bullet_variants v WHERE v.bullet_id=b.id ORDER BY v.is_default DESC,v.sort_order,v.id LIMIT 1)d ON true WHERE b.id=%s AND b.user_id=%s""",(bid,u))
  if not item:return None
- item['variants']=await many(c,"SELECT id,name,body,is_default,sort_order,archived_at,created_at,updated_at FROM bullet_variants WHERE bullet_id=%s AND user_id=%s ORDER BY sort_order,id",(bid,u))
+ item['variants']=await many(c,"SELECT v.id,v.name,v.body,v.is_default,v.sort_order,v.archived_at,v.created_at,v.updated_at,v.ai_generated,v.ai_model,v.ai_job_id,j.company ai_job_company,j.role ai_job_role FROM bullet_variants v LEFT JOIN job_descriptions j ON j.id=v.ai_job_id AND j.user_id=v.user_id WHERE v.bullet_id=%s AND v.user_id=%s ORDER BY v.sort_order,v.id",(bid,u))
  item['tags']=await many(c,"SELECT t.id,t.display_name,t.normalized_name FROM library_bullet_tags bt JOIN library_tags t ON t.id=bt.tag_id WHERE bt.bullet_id=%s AND t.user_id=%s ORDER BY t.normalized_name,t.id",(bid,u))
  item['usage']=await usages(c,u,bid)
  item['parent_id']=item.get('parent_id')

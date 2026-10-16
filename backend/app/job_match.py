@@ -1016,6 +1016,7 @@ def _evaluate_requirement(row: dict, candidates: list, bullets: list, education:
         suggestions = []
         for keyword in pending:
             suggestions.extend(_placement_options(keyword, row["text"], bullets, skill_groups or []))
+    suggestions = [_with_action(item, category) for item in suggestions]
     return _public_row(
         row,
         category,
@@ -1445,6 +1446,7 @@ def _bullet_candidates(bullets: list) -> list[dict]:
             {
                 "kind": "bullet",
                 "bullet_id": str(bullet.get("id")) if bullet.get("id") else None,
+                "placement_id": str(bullet.get("placement_id") or ""),
                 "line_id": line_id,
                 "section": bullet.get("section") or "",
                 "name": "",
@@ -1481,7 +1483,25 @@ def _skills_fallback(keyword: str) -> dict:
         "section": "Skills",
         "suggestion": f'Add "{keyword}" to Skills if you use it.',
         "line_id": "tools",
+        "placement_id": "",
     }
+
+
+def is_skill_keyword(keyword: str, row_category: str = "") -> bool:
+    """A keyword that belongs in Skills: a dictionary tool, or an unknown term on a tool row."""
+    known = category_for_term(keyword)
+    if known:
+        return known == "tool"
+    return row_category == "tool"
+
+
+def _with_action(item: dict, row_category: str) -> dict:
+    # Missing tools are added to Skills. Only non-tool keywords on a bullet are rewrite targets.
+    if item.get("placement_id") and not is_skill_keyword(item.get("keyword") or "", row_category):
+        action = "rewrite"
+    else:
+        action = "add_skill"
+    return {**item, "action": action}
 
 
 def _placement_options(keyword: str, requirement: str, bullets: list, skill_groups: list) -> list[dict]:
@@ -1508,6 +1528,7 @@ def _placement_options(keyword: str, requirement: str, bullets: list, skill_grou
                 "section": candidate["section"],
                 "suggestion": _placement_reason(keyword, candidate, overlap, related, combo),
                 "line_id": candidate["line_id"],
+                "placement_id": candidate.get("placement_id") or "",
             }
         )
     if not options:

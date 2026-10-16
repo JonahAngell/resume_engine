@@ -263,3 +263,49 @@ class ResumeVariantWrite(BaseModel):
 class AttachBulletWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
     target_bullet_id: UUID
+
+
+class SkillRecommendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    keyword: str = Field(min_length=1, max_length=120)
+    allow_ai: bool = False
+
+
+class SkillAddWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=120)
+    group_id: UUID | None = None
+    new_group_name: str | None = Field(default=None, max_length=120)
+
+    @model_validator(mode="after")
+    def one_group(self):
+        if bool(self.group_id) == bool((self.new_group_name or "").strip()):
+            raise ValueError("Choose a group or name a new one")
+        return self
+
+
+AiGoal = Literal["concise", "impact", "align"]
+AiKeywordCategory = Literal[
+    "tool", "domain", "responsibility", "methodology", "credential", "degree", "experience_duration", "soft_skill", ""
+]
+
+
+class AiVariantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: UUID
+    keyword: str = Field(default="", max_length=200)
+    requirement: str = Field(default="", max_length=2000)
+    category: AiKeywordCategory = ""
+    goal: AiGoal | None = None
+
+
+class AiVariantAccept(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    name: str = Field(default="", max_length=120)
+    body: str = Field(min_length=1, max_length=2000)
+    source: Literal["draft", "edited", "own"]
+    job_id: UUID | None = None
+    model: str = Field(default="", max_length=200)
+

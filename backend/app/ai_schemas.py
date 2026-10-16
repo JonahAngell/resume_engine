@@ -83,3 +83,20 @@ class AiReview(BaseModel):
     semantic_candidates: list[AiSemantic] = []
     bullet_tags: list[AiBulletTags] = []
     suggestions: list[AiSuggestion] = []
+
+
+class VariantDraft(BaseModel):
+    name: str
+    body: str
+    rationale: str = ""
+
+
+class VariantSuggestions(BaseModel):
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    model: str = ""
+    original: str = ""
+    category: str = ""
+    drafts: list[VariantDraft] = []
+    dropped: int = 0
+

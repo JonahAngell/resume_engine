@@ -581,7 +581,13 @@ async def rerender(conn, user_id, cid, source):
     return saved
 
 
-async def save_bullet_edit(conn, user_id, cid, placement_id, revision, body, mode):
+async def save_bullet_edit(
+    conn, user_id, cid, placement_id, revision, body, mode, name=None, ai=None
+):
+    """Save placed bullet wording. `name` and `ai` apply to mode="variant" only.
+
+    `ai` is {"generated": bool, "model": str | None, "job_id": UUID | None}.
+    """
     async with conn.transaction():
         locked, error = await _lock_composition(conn, user_id, cid, revision)
         if error:
@@ -620,18 +626,30 @@ async def save_bullet_edit(conn, user_id, cid, placement_id, revision, body, mod
                 (bullet["id"], variant["id"], text, placement_id),
             )
         else:
+            # Leave room for a " 12" suffix inside the 120-character name limit.
+            base = " ".join((name or "").split())[:112] or "Variant"
             name = await _unique_name(
                 conn,
                 "SELECT id FROM bullet_variants WHERE bullet_id=%s AND name=%s",
                 (placement["bullet_id"],),
-                "Variant",
+                base,
             )
+            ai = ai or {}
             variant = await one(
                 conn,
-                """INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order)
-                   VALUES(%s,%s,%s,%s,false,(SELECT COALESCE(max(sort_order)+1,0) FROM bullet_variants WHERE bullet_id=%s))
+                """INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order,ai_generated,ai_model,ai_job_id)
+                   VALUES(%s,%s,%s,%s,false,(SELECT COALESCE(max(sort_order)+1,0) FROM bullet_variants WHERE bullet_id=%s),%s,%s,%s)
                    RETURNING id""",
-                (user_id, placement["bullet_id"], name, text, placement["bullet_id"]),
+                (
+                    user_id,
+                    placement["bullet_id"],
+                    name,
+                    text,
+                    placement["bullet_id"],
+                    bool(ai.get("generated")),
+                    ai.get("model"),
+                    ai.get("job_id"),
+                ),
             )
             await conn.execute(
                 """UPDATE composition_bullets SET variant_id=%s,wording_snapshot=%s,snapshot_source_updated_at=now(),updated_at=now()

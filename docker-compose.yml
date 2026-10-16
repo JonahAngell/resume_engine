@@ -9,6 +9,11 @@ services:
       # Values below are read from the .env file next to this compose file.
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
+      # Studioshare AI Gateway, tried before OpenRouter. `launch env pull` writes
+      # the URL and a 12-hour OIDC token into .env; leave them empty to skip.
+      STUDIOSHARE_AI_GATEWAY_URL: ${STUDIOSHARE_AI_GATEWAY_URL:-}
+      STUDIOSHARE_OIDC_TOKEN: ${STUDIOSHARE_OIDC_TOKEN:-}
+      STUDIOSHARE_AI_MODELS: ${STUDIOSHARE_AI_MODELS:-}
     depends_on:
       db: { condition: service_healthy }
       gotenberg: { condition: service_started }

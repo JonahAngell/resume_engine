@@ -1,7 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import AddSkillDialog from "./AddSkillDialog";
 import ChoiceList from "./ChoiceList";
-import { activeIdsForTerms, buildMatchMarks, type CompareJob, type MatchMark } from "./matchMarks";
+import {
+  activeIdsForTerms,
+  buildMatchMarks,
+  matchMarkId,
+  type CompareJob,
+  type MatchMark,
+} from "./matchMarks";
+import type { PreviewSuggest } from "./ResumePreview";
+import SuggestVariantDialog, { type VariantTarget } from "./SuggestVariantDialog";
 
 type AddedRequirement = {
   group: "required" | "preferred";
@@ -48,7 +57,18 @@ type TagSuggestion = {
   section: string;
   suggestion: string;
   line_id?: string;
+  placement_id?: string;
+  action?: "add_skill" | "rewrite" | "";
 };
+
+type AssistHandlers = {
+  onAddSkill: (keyword: string) => void;
+  onRewrite: (target: VariantTarget) => void;
+};
+
+function normQuote(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
+}
 
 function rowIds(row: Pick<RequirementRow, "kind" | "category" | "label" | "keywords">) {
   if (row.kind === "education" || row.kind === "degree" || row.category === "degree") {
@@ -199,16 +219,38 @@ function tagPairs(tags: AiReview["bullet_tags"][number]) {
   ).filter(([, value]) => value);
 }
 
+function rewriteTargetFor(match: JobMatch, quote: string): VariantTarget | null {
+  const key = normQuote(quote);
+  if (key.length < 12) return null;
+  for (const row of [...match.required, ...match.preferred, ...(match.responsibilities || [])]) {
+    for (const item of row.suggestions) {
+      const excerpt = normQuote(item.bullet_excerpt || "");
+      if (item.action !== "rewrite" || !item.placement_id || excerpt.length < 12) continue;
+      if (excerpt.startsWith(key) || key.startsWith(excerpt))
+        return {
+          placementId: item.placement_id,
+          excerpt: item.bullet_excerpt,
+          keyword: item.keyword,
+          requirement: row.text,
+          category: row.category || row.kind || "",
+        };
+    }
+  }
+  return null;
+}
+
 function AiReviewBody({
   review,
   match,
   busy,
   onMark,
+  onRewrite,
 }: {
   review: AiReview;
   match: JobMatch;
   busy: boolean;
   onMark: (row: RequirementRow) => void;
+  onRewrite: (target: VariantTarget) => void;
 }) {
   const empty =
     review.families.length === 0 &&
@@ -302,15 +344,23 @@ function AiReviewBody({
         <div>
           <h3>Rewrite suggestions</h3>
           <ul>
-            {review.suggestions.map((row) => (
-              <li key={`${row.requirement}-${row.resume_quote}`}>
-                <p>
-                  <strong>{row.requirement}. </strong>
-                  {row.suggestion}
-                </p>
-                <p>“{row.resume_quote}”</p>
-              </li>
-            ))}
+            {review.suggestions.map((row) => {
+              const target = rewriteTargetFor(match, row.resume_quote);
+              return (
+                <li key={`${row.requirement}-${row.resume_quote}`}>
+                  <p>
+                    <strong>{row.requirement}. </strong>
+                    {row.suggestion}
+                  </p>
+                  <p>“{row.resume_quote}”</p>
+                  {target && (
+                    <button type="button" disabled={busy} onClick={() => onRewrite(target)}>
+                      Open in Suggest
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -322,15 +372,27 @@ function SuggestionOptions({
   suggestions,
   busy,
   activeIds,
+  requirement,
+  category,
   onAddTag,
   onActive,
+  onAddSkill,
+  onRewrite,
 }: {
   suggestions: TagSuggestion[];
   busy: boolean;
   activeIds: string[];
+  requirement: string;
+  category: string;
   onAddTag: (bulletId: string, keyword: string) => void;
   onActive: (ids: string[]) => void;
-}) {
+} & AssistHandlers) {
+  // One Add to Skills button per keyword, on its first Skills-bound option.
+  const skillButtonAt = new Map<string, number>();
+  suggestions.forEach((item, index) => {
+    if (item.action === "add_skill" && item.keyword && !skillButtonAt.has(item.keyword))
+      skillButtonAt.set(item.keyword, index);
+  });
   return suggestions.map((suggestion, suggestionIndex) => (
     <div
       className="jobs-suggestion"
@@ -346,15 +408,39 @@ function SuggestionOptions({
         {suggestion.suggestion}
       </p>
       {suggestion.bullet_excerpt && <p>“{suggestion.bullet_excerpt}”</p>}
-      {suggestion.bullet_id && suggestion.keyword && (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onAddTag(suggestion.bullet_id as string, suggestion.keyword)}
-        >
-          Add tag
-        </button>
-      )}
+      <div className="jobs-suggestion-actions">
+        {suggestion.bullet_id && suggestion.keyword && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onAddTag(suggestion.bullet_id as string, suggestion.keyword)}
+          >
+            Add tag
+          </button>
+        )}
+        {suggestion.action === "rewrite" && suggestion.placement_id && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              onRewrite({
+                placementId: suggestion.placement_id as string,
+                excerpt: suggestion.bullet_excerpt,
+                keyword: suggestion.keyword,
+                requirement,
+                category,
+              })
+            }
+          >
+            Suggest wording
+          </button>
+        )}
+        {skillButtonAt.get(suggestion.keyword) === suggestionIndex && (
+          <button type="button" disabled={busy} onClick={() => onAddSkill(suggestion.keyword)}>
+            Add to Skills
+          </button>
+        )}
+      </div>
     </div>
   ));
 }
@@ -406,6 +492,8 @@ function RequirementList({
   onMark,
   onAddTag,
   onActive,
+  onAddSkill,
+  onRewrite,
 }: {
   title: string;
   rows: RequirementRow[];
@@ -414,7 +502,7 @@ function RequirementList({
   onMark: (row: RequirementRow) => void;
   onAddTag: (bulletId: string, keyword: string) => void;
   onActive: (ids: string[]) => void;
-}) {
+} & AssistHandlers) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const matched = rows.filter((row) => row.matched).length;
   const groups = groupedRows(rows);
@@ -483,8 +571,12 @@ function RequirementList({
                             suggestions={row.suggestions}
                             busy={busy}
                             activeIds={rowIds(row)}
+                            requirement={row.text}
+                            category={row.category || row.kind || ""}
                             onAddTag={onAddTag}
                             onActive={onActive}
+                            onAddSkill={onAddSkill}
+                            onRewrite={onRewrite}
                           />
                         )}
                         <div className="qual-actions">
@@ -518,12 +610,14 @@ function KeywordMatchList({
   busy,
   onAddTag,
   onActive,
+  onAddSkill,
+  onRewrite,
 }: {
   rows: RequirementRow[];
   busy: boolean;
   onAddTag: (bulletId: string, keyword: string) => void;
   onActive: (ids: string[]) => void;
-}) {
+} & AssistHandlers) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [filter, setFilter] = useState<"all" | "matched" | "missing">("all");
   const keywords = rows
@@ -532,6 +626,7 @@ function KeywordMatchList({
         ...item,
         group: row.group,
         kind: row.kind,
+        category: row.category || row.kind || "",
         detail: row.detail,
         requirement: row.text,
         suggestions: row.suggestions.filter((suggestion) => suggestion.keyword === item.keyword),
@@ -607,8 +702,12 @@ function KeywordMatchList({
                         suggestions={item.suggestions}
                         busy={busy}
                         activeIds={activeIdsForTerms([item.keyword])}
+                        requirement={item.requirement}
+                        category={item.category}
                         onAddTag={onAddTag}
                         onActive={onActive}
+                        onAddSkill={onAddSkill}
+                        onRewrite={onRewrite}
                       />
                     )}
                   </div>
@@ -679,6 +778,8 @@ export default function JobMatchPanel({
   active,
   onCompare,
   onActive,
+  previewRequest,
+  onApplied,
 }: {
   compositionId: string;
   revision: number;
@@ -687,6 +788,10 @@ export default function JobMatchPanel({
   active: boolean;
   onCompare: (view: { job: CompareJob | null; marks: MatchMark[] }) => void;
   onActive: (ids: string[]) => void;
+  /** A Suggest or Add to Skills chip clicked in the preview. */
+  previewRequest?: (PreviewSuggest & { nonce: number }) | null;
+  /** A dialog saved this resume; the returned state replaces the editor's copy. */
+  onApplied: (state: any) => void;
 }) {
   const [jobs, setJobs] = useState<JobDescription[]>([]);
   const [jobId, setJobId] = useState("");
@@ -698,9 +803,45 @@ export default function JobMatchPanel({
   const [matchGeneration, setMatchGeneration] = useState(0);
   const [ai, setAi] = useState<AiReview | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  const [skillKeyword, setSkillKeyword] = useState<string | null>(null);
+  const [variantTarget, setVariantTarget] = useState<VariantTarget | null>(null);
   const request = useRef(0);
   const manual = useRef(false);
   const selected = jobs.find((job) => job.id === jobId) || null;
+  const compareJob: CompareJob | null = selected
+    ? {
+        id: selected.id,
+        title: selected.title,
+        company: selected.company,
+        role: selected.role,
+        body: selected.body,
+      }
+    : null;
+
+  useEffect(() => {
+    if (!previewRequest || !match) return;
+    const wanted = new Set(previewRequest.matchIds);
+    const rows = [...match.required, ...match.preferred, ...(match.responsibilities || [])];
+    for (const row of rows) {
+      for (const item of row.suggestions) {
+        if (item.line_id !== previewRequest.lineId || !wanted.has(matchMarkId(item.keyword))) continue;
+        if (previewRequest.action === "rewrite" && item.action === "rewrite" && item.placement_id) {
+          setVariantTarget({
+            placementId: item.placement_id,
+            excerpt: item.bullet_excerpt,
+            keyword: item.keyword,
+            requirement: row.text,
+            category: row.category || row.kind || "",
+          });
+          return;
+        }
+        if (previewRequest.action === "add_skill" && item.action === "add_skill") {
+          setSkillKeyword(item.keyword);
+          return;
+        }
+      }
+    }
+  }, [previewRequest?.nonce]);
 
   useEffect(() => {
     manual.current = false;
@@ -937,7 +1078,13 @@ export default function JobMatchPanel({
               {aiBusy ? "Reviewing…" : "Review with AI"}
             </button>
             {ai && (
-              <AiReviewBody review={ai} match={match} busy={busy || aiBusy} onMark={markRequirement} />
+              <AiReviewBody
+                review={ai}
+                match={match}
+                busy={busy || aiBusy}
+                onMark={markRequirement}
+                onRewrite={setVariantTarget}
+              />
             )}
           </div>
           {match.required_count === 0 &&
@@ -1012,6 +1159,8 @@ export default function JobMatchPanel({
                   onMark={markRequirement}
                   onAddTag={addTag}
                   onActive={onActive}
+                  onAddSkill={setSkillKeyword}
+                  onRewrite={setVariantTarget}
                 />
               )}
               {qualGroup === "preferred" && (
@@ -1023,6 +1172,8 @@ export default function JobMatchPanel({
                   onMark={markRequirement}
                   onAddTag={addTag}
                   onActive={onActive}
+                  onAddSkill={setSkillKeyword}
+                  onRewrite={setVariantTarget}
                 />
               )}
               {qualGroup === "responsibilities" && (
@@ -1034,6 +1185,8 @@ export default function JobMatchPanel({
                   onMark={markRequirement}
                   onAddTag={addTag}
                   onActive={onActive}
+                  onAddSkill={setSkillKeyword}
+                  onRewrite={setVariantTarget}
                 />
               )}
               {qualGroup === "keywords" && (
@@ -1042,11 +1195,42 @@ export default function JobMatchPanel({
                   busy={busy}
                   onAddTag={addTag}
                   onActive={onActive}
+                  onAddSkill={setSkillKeyword}
+                  onRewrite={setVariantTarget}
                 />
               )}
             </div>
           )}
         </>
+      )}
+      {skillKeyword && (
+        <AddSkillDialog
+          compositionId={compositionId}
+          revision={revision}
+          keyword={skillKeyword}
+          onApplied={async (state) => {
+            onApplied(state);
+            await reloadLibrary();
+          }}
+          close={() => setSkillKeyword(null)}
+        />
+      )}
+      {variantTarget && compareJob && (
+        <SuggestVariantDialog
+          compositionId={compositionId}
+          revision={revision}
+          job={compareJob}
+          target={variantTarget}
+          onApplied={async (state) => {
+            onApplied(state);
+            await reloadLibrary();
+          }}
+          onAddSkill={(keyword) => {
+            setVariantTarget(null);
+            setSkillKeyword(keyword);
+          }}
+          close={() => setVariantTarget(null)}
+        />
       )}
     </section>
   );

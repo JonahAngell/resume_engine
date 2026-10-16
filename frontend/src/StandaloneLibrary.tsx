@@ -1187,6 +1187,19 @@ function Variants({ detail, mutate }: any) {
               {v.is_default && (
                 <span className="status-badge default">Default</span>
               )}
+              {v.ai_generated && (
+                <span
+                  className="status-badge variant-ai-badge"
+                  title={[
+                    v.ai_model ? `Drafted by ${v.ai_model}` : "Drafted by AI",
+                    [v.ai_job_role, v.ai_job_company].filter(Boolean).join(" at "),
+                  ]
+                    .filter(Boolean)
+                    .join(" for ")}
+                >
+                  AI-written
+                </span>
+              )}
             </strong>
           </label>
           <p className="variant-wording">{v.body}</p>

@@ -230,6 +230,7 @@ async def _placed_bullets(conn, user_id, composition_id: UUID):
     rows = await _many(
         conn,
         """SELECT cb.bullet_id::text AS id,
+                  cb.id::text AS placement_id,
                   cb.destination_parent_id::text AS parent_id,
                   COALESCE(cb.wording_snapshot, v.body, '') AS wording,
                   COALESCE(cb.destination_section, '') AS section,
@@ -261,6 +262,7 @@ async def _placed_bullets(conn, user_id, composition_id: UUID):
         placed.append(
             {
                 "id": row["id"],
+                "placement_id": row["placement_id"],
                 "parent_id": row["parent_id"],
                 "line_index": row["line_index"],
                 "wording": row["wording"] or "",
@@ -269,3 +271,24 @@ async def _placed_bullets(conn, user_id, composition_id: UUID):
             }
         )
     return placed
+
+
+async def load_variant_inputs(conn, user_id, composition_id: UUID, placement_id: UUID, job_id: UUID):
+    """The placed bullet's current wording and the job text. The client never supplies the bullet."""
+    composition = await load_composition(conn, user_id, composition_id, include_archived=False)
+    if not composition:
+        return None, "resume"
+    placement = await _one(
+        conn,
+        """SELECT COALESCE(cb.wording_snapshot, v.body, '') AS wording
+           FROM composition_bullets cb
+           LEFT JOIN bullet_variants v ON v.id = cb.variant_id
+           WHERE cb.id = %s AND cb.composition_id = %s""",
+        (placement_id, composition_id),
+    )
+    if not placement:
+        return None, "placement"
+    job = await get_job_description(conn, user_id, job_id)
+    if not job:
+        return None, "job"
+    return {"original": placement["wording"], "description": job["body"] or ""}, None
