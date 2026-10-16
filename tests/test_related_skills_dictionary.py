@@ -39,3 +39,19 @@ def test_every_combination_names_a_cluster():
         if combo["relates_to"] not in DICTIONARY.clusters
     ]
     assert missing == []
+
+
+def test_every_cluster_hint_names_a_cluster_and_hint_set():
+    bad = [
+        f"{cluster_id}:{hint}"
+        for cluster_id, hints in DICTIONARY.cluster_hints.items()
+        for hint in hints
+        if cluster_id not in DICTIONARY.clusters or hint not in DICTIONARY.group_hints
+    ]
+    bad += [
+        f"{category}:{hint}"
+        for category, hints in DICTIONARY.category_hints.items()
+        for hint in hints
+        if hint not in DICTIONARY.group_hints
+    ]
+    assert bad == []

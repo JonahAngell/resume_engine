@@ -47,6 +47,10 @@ from .editing_repository import (
     set_composition_archive,
 )
 from .editing_schemas import (
+    AiVariantAccept,
+    AiVariantRequest,
+    SkillAddWrite,
+    SkillRecommendRequest,
     BulletCreate,
     BulletMove,
     BulletRestore,
@@ -86,8 +90,11 @@ from .resume_variants import (
     save_summary_edit,
     set_default_resume_variant,
 )
+from .ai_client import providers as ai_providers
 from .identity import CurrentUser, resolve_current_user
 from .library_repository import (
+    add_skill_to_resume,
+    load_skill_inputs,
     create_education,
     create_interest,
     create_profile,
@@ -159,7 +166,11 @@ from .library_service import import_seed
 from .resume_import import ImportDraft, parse_upload
 from .resume_import_commit import commit_import
 from .ai_review import review_resume
-from .ai_schemas import AiReview
+from .ai_schemas import AiReview, VariantSuggestions
+from .ai_variants import issued_draft, suggest_variants
+from .job_match import extract_keywords, is_skill_keyword
+from .related_skills import category_for_term
+from .skill_groups import recommend_group, recommend_with_ai
 from .job_repository import (
     analyze_job_description,
     archive_job_description,
@@ -169,6 +180,7 @@ from .job_repository import (
     link_job_composition,
     list_job_descriptions,
     load_ai_review_inputs,
+    load_variant_inputs,
     update_job_description,
 )
 from .job_schemas import (
@@ -254,6 +266,15 @@ def seed(identity: CurrentUser = Depends(resolve_current_user)):
 async def me(identity: CurrentUser = Depends(resolve_current_user)):
     async with connection() as c:
         return await owner(identity, c)
+
+
+@app.get("/api/ai/status")
+def ai_status(identity: CurrentUser = Depends(resolve_current_user)):
+    chain = ai_providers()
+    return {
+        "available": bool(chain),
+        "providers": [{"name": p.name, "models": list(p.models)} for p in chain],
+    }
 
 
 @app.get("/api/library", response_model=LibraryResponse)
@@ -628,6 +649,35 @@ async def choose_tool_group(
             raise HTTPException(404, "Composition or tool group not found")
         if error == "stale":
             raise HTTPException(409, "Composition changed; reload before saving")
+        return state(row)
+
+
+@app.post("/api/compositions/{cid}/skills/recommend")
+async def recommend_skill_group(cid: UUID, req: SkillRecommendRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        inputs = await load_skill_inputs(c, u["id"], cid)
+    if inputs is None:
+        raise HTTPException(404, "Composition not found")
+    # Local data first; the model only runs on a second call when that found nothing.
+    if req.allow_ai:
+        return await recommend_with_ai(req.keyword, inputs["groups"], inputs["tools"])
+    return recommend_group(req.keyword, inputs["groups"], inputs["tools"])
+
+
+@app.post("/api/compositions/{cid}/skills", response_model=CompositionState)
+async def add_skill(cid: UUID, req: SkillAddWrite, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await add_skill_to_resume(
+            c, u["id"], cid, req.revision, req.name, req.group_id, req.new_group_name
+        )
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        if error == "invalid":
+            raise HTTPException(422, "Name the skill and its group")
+        if error or not row:
+            raise HTTPException(404, "Composition or skill group not found")
         return state(row)
 
 
@@ -1395,6 +1445,62 @@ async def refresh_bullet_usage(cid: UUID, placement_id: UUID, req: BulletUsageUp
     async with connection() as c:
         u=await owner(identity,c); row,error=await update_usage(c,u["id"],cid,placement_id,req.revision)
         return _placement_result(row,error)
+
+@app.post("/api/compositions/{cid}/bullet-placements/{placement_id}/ai-variants", response_model=VariantSuggestions)
+async def suggest_bullet_variants(cid: UUID, placement_id: UUID, req: AiVariantRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        inputs, error = await load_variant_inputs(c, u["id"], cid, placement_id, req.job_id)
+    if error == "resume":
+        raise HTTPException(404, "Resume not found")
+    if error == "placement":
+        raise HTTPException(404, "Bullet not found")
+    if error:
+        raise HTTPException(404, "Job description not found")
+    category = "tool" if is_skill_keyword(req.keyword, req.category) else (req.category or category_for_term(req.keyword) or "")
+    # Job tools the bullet may not claim: dictionary tools and capitalised unknown terms.
+    job_terms = [
+        item["keyword"]
+        for item in extract_keywords(inputs["description"])
+        if category_for_term(item["keyword"]) == "tool"
+        or (category_for_term(item["keyword"]) is None and any(char.isupper() for char in item["keyword"]))
+    ]
+    result = await suggest_variants(
+        inputs["original"],
+        inputs["description"],
+        req.requirement,
+        req.keyword,
+        category,
+        req.goal,
+        job_terms,
+        placement_id=str(placement_id),
+        job_id=str(req.job_id),
+    )
+    return {**result, "original": inputs["original"], "category": category}
+
+
+@app.post("/api/compositions/{cid}/bullet-placements/{placement_id}/ai-variants/accept", response_model=CompositionState)
+async def accept_bullet_variant(cid: UUID, placement_id: UUID, req: AiVariantAccept, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        ai = None
+        if req.source != "own" and req.job_id:
+            job = await get_job_description(c, u["id"], req.job_id)
+            if not job:
+                raise HTTPException(404, "Job description not found")
+            # Only text this server handed out, unchanged, counts as AI-written.
+            served = issued_draft(str(placement_id), req.body, str(req.job_id))
+            generated = req.source == "draft" and served is not None
+            ai = {"generated": generated, "model": served or req.model or None, "job_id": req.job_id}
+        row, error = await save_bullet_edit(
+            c, u["id"], cid, placement_id, req.revision, req.body, "variant", name=req.name, ai=ai
+        )
+        if error == "stale":
+            raise HTTPException(409, "Composition changed; reload before saving")
+        if not row:
+            raise HTTPException(404, "Bullet not found")
+        return state(row)
+
 
 @app.post("/api/render", response_class=HTMLResponse)
 def render(payload: Resume, identity: CurrentUser = Depends(resolve_current_user)):

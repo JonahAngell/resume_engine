@@ -262,6 +262,22 @@
       }
       {% if measure %}
       body.paginated .resume-page:not([data-active-page="true"]) { display: none; }
+      .suggest-chip {
+        position: absolute;
+        z-index: 20;
+        padding: 3px 10px;
+        border: 1px solid #8a6400;
+        border-radius: 999px;
+        background: #fff;
+        color: #5c4300;
+        font: 600 12px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+        cursor: pointer;
+      }
+      .suggest-chip:hover, .suggest-chip:focus-visible { background: #fff6d6; outline: 2px solid #b8860b; outline-offset: 1px; }
+      .suggest-chip[hidden] { display: none; }
+      [data-suggest-action]:focus-visible { outline: 2px solid #b8860b; outline-offset: 1px; }
+      @media print { .suggest-chip { display: none !important; } }
       {% endif %}
       @media print {
         .pages {
@@ -722,18 +738,69 @@
             document.querySelectorAll(".resume-line-suggestion").forEach((line) => {
               line.classList.remove("resume-line-suggestion", "hit-paired");
               delete line.dataset.matchIds;
+              delete line.dataset.suggestAction;
+              delete line.dataset.suggestLine;
+              line.removeAttribute("tabindex");
             });
+            hideChip();
           };
           const quoteAttr = (value) => String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
           const normLine = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
           const matchIdList = (value) => String(value || "").split("\u001f").filter(Boolean);
-          const rememberMatch = (line, id) => {
+          const rememberMatch = (line, id, lineId, action) => {
             if (!line || !id) return;
             line.classList.add("resume-line-suggestion");
             const ids = new Set(matchIdList(line.dataset.matchIds));
             ids.add(id);
             line.dataset.matchIds = [...ids].join("\u001f");
+            if (!action || !lineId) return;
+            // A rewrite on the line wins; Add to Skills stays reachable from the match panel.
+            line.dataset.suggestAction = line.dataset.suggestAction === "rewrite" ? "rewrite" : action;
+            line.dataset.suggestLine = lineId;
+            line.tabIndex = 0;
           };
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "suggest-chip";
+          chip.hidden = true;
+          document.body.append(chip);
+          let chipLine = null;
+          let chipTimer = 0;
+          const hideChip = () => {
+            clearTimeout(chipTimer);
+            chip.hidden = true;
+            chipLine = null;
+          };
+          const hideChipSoon = () => {
+            clearTimeout(chipTimer);
+            chipTimer = setTimeout(hideChip, 250);
+          };
+          const showChip = (line) => {
+            clearTimeout(chipTimer);
+            chipLine = line;
+            const label = line.dataset.suggestAction === "rewrite" ? "Suggest" : "Add to Skills";
+            chip.textContent = label;
+            chip.setAttribute("aria-label", `${label} for this line`);
+            chip.hidden = false;
+            const box = line.getBoundingClientRect();
+            // Anchor to the line's start: the preview pane can clip the page's right side.
+            const left = Math.max(4, Math.min(box.left + scrollX, innerWidth + scrollX - chip.offsetWidth - 4));
+            chip.style.left = `${left}px`;
+            chip.style.top = `${Math.max(4, box.top + scrollY - chip.offsetHeight - 2)}px`;
+          };
+          const sendChip = (line) => {
+            if (!line?.dataset.suggestAction) return;
+            parent.postMessage({
+              type: "resume-suggest",
+              lineId: line.dataset.suggestLine,
+              matchIds: matchIdList(line.dataset.matchIds),
+              action: line.dataset.suggestAction,
+            }, "*");
+          };
+          chip.addEventListener("click", () => sendChip(chipLine));
+          chip.addEventListener("mouseenter", () => clearTimeout(chipTimer));
+          chip.addEventListener("mouseleave", hideChipSoon);
+          chip.addEventListener("blur", hideChipSoon);
           const highlightLines = (marks) => {
             const root = document.getElementById("pages");
             clearLineSuggestions();
@@ -758,6 +825,19 @@
                   return text.startsWith(excerpt) || excerpt.startsWith(text);
                 });
                 rememberMatch(hit, id);
+              }
+              // Chip targets: find the line by id, or by its text when the id is not in the preview.
+              for (const target of mark.targets || []) {
+                const value = quoteAttr(String(target.line || ""));
+                const excerpt = normLine(target.excerpt);
+                const line = (value && (root.querySelector(`[data-bullet-id="${value}"]`)
+                    || root.querySelector(`[data-item-id="${value}"]`)
+                    || root.querySelector(`[data-section-id="${value}"]`)))
+                  || (excerpt.length >= 12 && bullets.find((bullet) => {
+                    const text = normLine(bullet.textContent);
+                    return text.length >= 12 && (text.startsWith(excerpt) || excerpt.startsWith(text));
+                  }));
+                rememberMatch(line, id, String(target.line || ""), target.action);
               }
             }
           };
@@ -857,6 +937,37 @@
             if (!pagesRoot.dataset.hoverId) return;
             pagesRoot.dataset.hoverId = "";
             parent.postMessage({ type: "resume-highlight-hover", id: "" }, "*");
+          });
+          pagesRoot?.addEventListener("mouseover", (event) => {
+            const line = event.target.closest?.("[data-suggest-action]");
+            if (line && pagesRoot.contains(line) && line !== chipLine) showChip(line);
+            else if (line) clearTimeout(chipTimer);
+          });
+          pagesRoot?.addEventListener("mouseout", (event) => {
+            const line = event.target.closest?.("[data-suggest-action]");
+            if (!line || event.relatedTarget === chip || line.contains(event.relatedTarget)) return;
+            hideChipSoon();
+          });
+          pagesRoot?.addEventListener("focusin", (event) => {
+            const line = event.target.closest?.("[data-suggest-action]");
+            if (line) showChip(line);
+          });
+          pagesRoot?.addEventListener("focusout", (event) => {
+            if (event.relatedTarget !== chip) hideChipSoon();
+          });
+          pagesRoot?.addEventListener("keydown", (event) => {
+            const line = event.target.closest?.("[data-suggest-action]");
+            if (line && (event.key === "Enter" || event.key === " ")) {
+              event.preventDefault();
+              sendChip(line);
+            }
+          });
+          // Touch has no hover: the first tap on a line shows the chip, a tap on the chip opens it.
+          pagesRoot?.addEventListener("pointerdown", (event) => {
+            if (event.pointerType === "mouse") return;
+            const line = event.target.closest?.("[data-suggest-action]");
+            if (line) showChip(line);
+            else hideChip();
           });
           addEventListener("message", (event) => {
             if (event.data?.type === "resume-show-page") showPage(event.data.pageIndex);
