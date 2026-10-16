@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { Fit } from "./FitIndicator";
-import type { MatchMark } from "./matchMarks";
+import type { LineAction, MatchMark } from "./matchMarks";
 
 export type PreviewHighlight = { marks: MatchMark[]; activeIds: string[] };
+export type PreviewSuggest = { lineId: string; matchIds: string[]; action: LineAction };
 const emptyHighlight: PreviewHighlight = { marks: [], activeIds: [] };
 
 export default function ResumePreview({
@@ -15,6 +16,7 @@ export default function ResumePreview({
   highlight = emptyHighlight,
   onHighlightPage,
   onHighlightHover,
+  onSuggest,
 }: {
   compositionId: string;
   revision: number;
@@ -25,6 +27,7 @@ export default function ResumePreview({
   highlight?: PreviewHighlight;
   onHighlightPage?: (page: number) => void;
   onHighlightHover?: (ids: string[]) => void;
+  onSuggest?: (request: PreviewSuggest) => void;
 }) {
   const [html, setHtml] = useState(""),
     seq = useRef(0),
@@ -90,6 +93,17 @@ export default function ResumePreview({
         }
         return;
       }
+      if (e.data?.type === "resume-suggest") {
+        const action = e.data.action === "rewrite" ? "rewrite" : "add_skill";
+        const lineId = String(e.data.lineId || "");
+        if (lineId)
+          onSuggest?.({
+            lineId,
+            matchIds: (Array.isArray(e.data.matchIds) ? e.data.matchIds : []).map(String),
+            action,
+          });
+        return;
+      }
       if (e.data?.type === "resume-highlight-page") {
         const page = Number(e.data.pageIndex) + 1;
         if (page >= 1) onHighlightPage?.(page);
@@ -112,7 +126,7 @@ export default function ResumePreview({
     };
     addEventListener("message", fn);
     return () => removeEventListener("message", fn);
-  }, [onFit, onHighlightHover, onHighlightPage, preferredPageCount]);
+  }, [onFit, onHighlightHover, onHighlightPage, onSuggest, preferredPageCount]);
   useEffect(() => {
     const last = measured.current;
     if (!last?.actualPageCount) return;

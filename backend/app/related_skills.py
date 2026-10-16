@@ -64,6 +64,16 @@ def _source_phrase(text: str, window: tuple[str, ...]) -> str:
     return re.sub(r"\s+", " ", match.group(0)).strip(" ,;:()[]{}")
 
 
+def _hint_word(value: str) -> str:
+    word = _normalize_base(str(value))
+    return word[:-1] if len(word) > 3 and word.endswith("s") else word
+
+
+def hint_words(name: str) -> set[str]:
+    """Group-name tokens in the form `group_hints` words use."""
+    return {_hint_word(token) for token in _normalize_base(name).split()} - {""}
+
+
 class RelatedSkills:
     def __init__(self, path: Path = DICTIONARY_PATH):
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -120,6 +130,21 @@ class RelatedSkills:
             clusters = [str(item).strip() for item in family.get("clusters") or [] if str(item).strip()]
             if family_id and clusters:
                 self.families.append({"id": family_id, "label": label, "clusters": clusters})
+        self.group_hints: dict[str, dict] = {}
+        for hint_id, hint in (raw.get("group_hints") or {}).items():
+            words = {_hint_word(word) for word in (hint or {}).get("words") or []}
+            words.discard("")
+            title = str((hint or {}).get("title") or hint_id).strip()
+            if words:
+                self.group_hints[str(hint_id)] = {"title": title, "words": words}
+        self.cluster_hints = {
+            str(cluster_id): [str(item) for item in hints or []]
+            for cluster_id, hints in (raw.get("cluster_hints") or {}).items()
+        }
+        self.category_hints = {
+            str(category): [str(item) for item in hints or []]
+            for category, hints in (raw.get("category_hints") or {}).items()
+        }
         self.display_of: dict[str, str] = {}
         self.surfaces: dict[str, set[str]] = {}
         self._phrases_by_size: dict[int, dict[tuple[str, ...], tuple[str, bool]]] = {}
@@ -285,6 +310,33 @@ class RelatedSkills:
                 return preferred
         return sorted(categories)[0]
 
+    def canonical(self, value: str) -> str:
+        return self._canonicalize(value)
+
+    def display_for(self, keyword: str) -> str:
+        """Display label for a skill: the posting's casing when it has any, else the dictionary's."""
+        text = " ".join((keyword or "").split())
+        if any(char.isupper() for char in text):
+            return text
+        canonical = self._canonicalize(text)
+        return self.display_of.get(canonical) or _smart_title(text)
+
+    def hints_for_term(self, keyword: str) -> list[str]:
+        """Hint set ids for a term, cluster hints first, then category hints."""
+        found: list[str] = []
+        clusters = sorted(self._clusters_for(keyword))
+        for cluster_id in clusters:
+            for hint in self.cluster_hints.get(cluster_id, []):
+                if hint not in found:
+                    found.append(hint)
+        if not found:
+            for cluster_id in clusters:
+                category = self.cluster_category.get(cluster_id)
+                for hint in self.category_hints.get(category or "", []):
+                    if hint not in found:
+                        found.append(hint)
+        return found
+
     def clusters_in_text(self, text: str) -> set[str]:
         found: set[str] = set()
         for display in self.match_terms(text):
@@ -329,3 +381,15 @@ def clusters_in_text(text: str) -> set[str]:
 
 def job_families() -> list[dict]:
     return [dict(item) for item in DICTIONARY.families]
+
+
+def canonical_term(value: str) -> str:
+    return DICTIONARY.canonical(value)
+
+
+def display_for(keyword: str) -> str:
+    return DICTIONARY.display_for(keyword)
+
+
+def hints_for_term(keyword: str) -> list[str]:
+    return DICTIONARY.hints_for_term(keyword)

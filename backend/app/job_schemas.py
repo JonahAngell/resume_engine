@@ -88,6 +88,8 @@ class TagSuggestion(BaseModel):
     section: str = ""
     suggestion: str
     line_id: str = ""
+    placement_id: str = ""
+    action: Literal["add_skill", "rewrite", ""] = ""
 
 
 class RequirementRow(BaseModel):

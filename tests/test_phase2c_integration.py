@@ -10,10 +10,14 @@ from app.editing_repository import (
     create_variant,
     set_default_variant,
     archive_variant,
-    select_bullet_variant,
-    render_historical,
 )
-from app.editing_schemas import BulletCreate, VariantWrite
+from app.editing_schemas import (
+    BulletCreate,
+    BulletPlacementReplace,
+    BulletPlacementWrite,
+    VariantWrite,
+)
+from app.phase2j_repository import insert_placement, replace_placement
 from async_test_utils import run_async
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,21 +71,63 @@ async def exercise():
             )
             assert alt
             assert await set_default_variant(conn, a["id"], alt["id"])
+            section = (
+                await (
+                    await conn.execute(
+                        "SELECT section FROM composition_items WHERE composition_id=%s AND item_id=%s",
+                        (cid, parent),
+                    )
+                ).fetchone()
+            )[0]
             comp = await load_composition(conn, a["id"], cid)
-            selected, error = await select_bullet_variant(
-                conn, a["id"], cid, comp["revision"], made["id"], alt["id"]
+            placed, error = await insert_placement(
+                conn,
+                a["id"],
+                cid,
+                BulletPlacementWrite(
+                    revision=comp["revision"],
+                    bullet_id=made["id"],
+                    variant_id=made["variant_id"],
+                    destination_section=section,
+                    destination_parent_type="content_item",
+                    destination_parent_id=parent,
+                ),
+            )
+            assert placed and error is None
+            placement_id = (
+                await (
+                    await conn.execute(
+                        "SELECT id FROM composition_bullets WHERE composition_id=%s AND bullet_id=%s",
+                        (cid, made["id"]),
+                    )
+                ).fetchone()
+            )[0]
+            comp = await load_composition(conn, a["id"], cid)
+            choice = BulletPlacementReplace(
+                revision=comp["revision"], bullet_id=made["id"], variant_id=alt["id"]
+            )
+            selected, error = await replace_placement(
+                conn, a["id"], cid, placement_id, choice
             )
             assert selected and error is None
-            stale, error = await select_bullet_variant(
-                conn, a["id"], cid, comp["revision"], made["id"], alt["id"]
+            stale, error = await replace_placement(
+                conn, a["id"], cid, placement_id, choice
             )
             assert stale is None and error == "stale"
             row, error = await archive_variant(
                 conn, a["id"], alt["id"], made["variant_id"]
             )
             assert row and error is None
-            rendered = await render_historical(conn, a["id"], parent, cid)
-            assert "Short wording" in rendered["bullets"]
+            # Archiving a variant keeps the composition's pinned wording.
+            snapshot = (
+                await (
+                    await conn.execute(
+                        "SELECT variant_id,wording_snapshot FROM composition_bullets WHERE id=%s",
+                        (placement_id,),
+                    )
+                ).fetchone()
+            )
+            assert snapshot == (alt["id"], "Short wording")
             assert await set_default_variant(conn, b["id"], made["variant_id"]) is None
     finally:
         async with await psycopg.AsyncConnection.connect(URL, autocommit=True) as admin:

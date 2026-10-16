@@ -7,6 +7,8 @@ from uuid import UUID
 
 from psycopg.rows import dict_row
 
+from .skill_groups import same_skill
+
 
 async def _one(conn, query, params=()):
     async with conn.cursor(row_factory=dict_row) as cursor:
@@ -1588,3 +1590,173 @@ async def create_and_include_entry(conn,user_id,cid,payload):
         return result,error
 
 
+async def load_skill_inputs(conn, user_id, cid):
+    """Active Skills groups and every tool, shaped for skill_groups.recommend_group."""
+    if not await _one(
+        conn,
+        "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+        (cid, user_id),
+    ):
+        return None
+    groups = await _many(
+        conn,
+        """SELECT g.id::text id,g.name,g.sort_order,
+                  EXISTS(SELECT 1 FROM composition_items i WHERE i.composition_id=%s AND i.section='tool_groups' AND i.item_id=g.id) on_resume
+           FROM tool_groups g WHERE g.user_id=%s AND g.archived_at IS NULL ORDER BY g.sort_order,g.id""",
+        (cid, user_id),
+    )
+    tools = await _many(
+        conn,
+        """SELECT t.id::text id,t.name,t.group_id::text group_id,g.name group_name,
+                  (t.archived_at IS NOT NULL OR g.archived_at IS NOT NULL) archived,
+                  EXISTS(SELECT 1 FROM composition_hidden_tools h WHERE h.composition_id=%s AND h.tool_id=t.id) hidden_here
+           FROM tools t JOIN tool_groups g ON g.id=t.group_id AND g.user_id=t.user_id
+           WHERE t.user_id=%s ORDER BY g.sort_order,t.sort_order,t.id""",
+        (cid, user_id),
+    )
+    return {"groups": groups, "tools": tools}
+
+
+async def _unique_group_name(conn, user_id, base):
+    name, number = base, 2
+    while await _one(conn, "SELECT id FROM tool_groups WHERE user_id=%s AND name=%s", (user_id, name)):
+        name = f"{base} {number}"
+        number += 1
+    return name
+
+
+async def add_skill_to_resume(conn, user_id, cid, expected, name, group_id=None, new_group_name=None):
+    """Add one skill to the library and to this resume only.
+
+    Other resumes that include the group get a hidden row for a new or restored tool, so their
+    payload, revision and history stay as they are.
+    """
+    label = " ".join((name or "").split())[:120]
+    if not label:
+        return None, "invalid"
+    async with conn.transaction():
+        locked = await _one(
+            conn,
+            "SELECT render_payload FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL AND revision=%s FOR UPDATE",
+            (cid, user_id, expected),
+        )
+        if not locked:
+            return None, (
+                "stale"
+                if await _one(
+                    conn,
+                    "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+                    (cid, user_id),
+                )
+                else "missing"
+            )
+        if group_id:
+            group = await _one(
+                conn,
+                "SELECT id FROM tool_groups WHERE id=%s AND user_id=%s AND archived_at IS NULL",
+                (group_id, user_id),
+            )
+            if not group:
+                return None, "missing"
+        else:
+            wanted = " ".join((new_group_name or "").split())[:112]
+            if not wanted:
+                return None, "invalid"
+            groups = await _many(
+                conn,
+                "SELECT id,name FROM tool_groups WHERE user_id=%s AND archived_at IS NULL",
+                (user_id,),
+            )
+            # An active group that differs only by case is the same group.
+            group = next((g for g in groups if g["name"].casefold() == wanted.casefold()), None)
+            if not group:
+                group = await _one(
+                    conn,
+                    "INSERT INTO tool_groups(user_id,name,sort_order) VALUES(%s,%s,(SELECT COALESCE(max(sort_order)+1,0) FROM tool_groups WHERE user_id=%s)) RETURNING id",
+                    (user_id, await _unique_group_name(conn, user_id, wanted), user_id),
+                )
+        gid = group["id"]
+
+        tools = await _many(
+            conn,
+            "SELECT id,name,group_id,archived_at FROM tools WHERE user_id=%s ORDER BY (archived_at IS NULL) DESC,sort_order,id",
+            (user_id,),
+        )
+        same = [t for t in tools if same_skill(t["name"], label)]
+        here = next((t for t in same if str(t["group_id"]) == str(gid)), None)
+        archived_elsewhere = next((t for t in same if t["archived_at"] and str(t["group_id"]) != str(gid)), None)
+        newly_visible = True
+        if here and not here["archived_at"]:
+            tool_id = here["id"]
+            newly_visible = False
+        elif here:
+            tool_id = here["id"]
+            await conn.execute(
+                "UPDATE tools SET archived_at=NULL,updated_at=now() WHERE id=%s AND user_id=%s",
+                (tool_id, user_id),
+            )
+        elif archived_elsewhere:
+            # An archived row is on no resume, so moving it into the chosen group is safe.
+            tool_id = archived_elsewhere["id"]
+            await conn.execute(
+                "UPDATE tools SET archived_at=NULL,group_id=%s,sort_order=(SELECT COALESCE(max(sort_order)+1,0) FROM tools WHERE group_id=%s),updated_at=now() WHERE id=%s AND user_id=%s",
+                (gid, gid, tool_id, user_id),
+            )
+        else:
+            # Never move an active tool from another group: that would change other resumes.
+            tool_id = (
+                await _one(
+                    conn,
+                    "INSERT INTO tools(user_id,group_id,name,sort_order) VALUES(%s,%s,%s,(SELECT COALESCE(max(sort_order)+1,0) FROM tools WHERE group_id=%s)) RETURNING id",
+                    (user_id, gid, label, gid),
+                )
+            )["id"]
+
+        member = await _one(
+            conn,
+            "SELECT 1 FROM composition_items WHERE composition_id=%s AND section='tool_groups' AND item_id=%s",
+            (cid, gid),
+        )
+        if not member:
+            await conn.execute(
+                "INSERT INTO composition_items(composition_id,section,item_id,sort_order) VALUES(%s,'tool_groups',%s,(SELECT COALESCE(max(sort_order)+1,0) FROM composition_items WHERE composition_id=%s AND section='tool_groups'))",
+                (cid, gid, cid),
+            )
+            # The user asked for one skill, so the rest of a newly added group stays hidden here.
+            await conn.execute(
+                "INSERT INTO composition_hidden_tools(composition_id,tool_id) SELECT %s,t.id FROM tools t WHERE t.group_id=%s AND t.user_id=%s AND t.id<>%s ON CONFLICT DO NOTHING",
+                (cid, gid, user_id, tool_id),
+            )
+        await conn.execute(
+            "DELETE FROM composition_hidden_tools WHERE composition_id=%s AND tool_id=%s",
+            (cid, tool_id),
+        )
+        if newly_visible:
+            await conn.execute(
+                """INSERT INTO composition_hidden_tools(composition_id,tool_id)
+                   SELECT i.composition_id,%s FROM composition_items i
+                   JOIN resume_compositions c ON c.id=i.composition_id AND c.user_id=%s
+                   WHERE i.section='tool_groups' AND i.item_id=%s AND i.composition_id<>%s
+                   ON CONFLICT DO NOTHING""",
+                (tool_id, user_id, gid, cid),
+            )
+
+        selected = await _many(
+            conn,
+            "SELECT item_id FROM composition_items WHERE composition_id=%s AND section='tool_groups' ORDER BY sort_order,id",
+            (cid,),
+        )
+        resume = locked["render_payload"]
+        resume["tool_groups"] = [
+            await _tool_group_render(conn, user_id, x["item_id"], cid) for x in selected
+        ]
+        row = await _one(
+            conn,
+            "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",
+            (json.dumps(resume), cid, user_id),
+        )
+        await conn.execute(
+            "INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,'skill-add',%s::jsonb)",
+            (cid, user_id, row["revision"], json.dumps({"resume": resume})),
+        )
+        return row, None
