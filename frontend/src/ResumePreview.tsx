@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { Fit } from "./FitIndicator";
-import type { LineAction, MatchMark } from "./matchMarks";
+import type { MatchMark } from "./matchMarks";
+import type { PopoverAnchor } from "./match/MarkPopover";
 
 export type PreviewHighlight = { marks: MatchMark[]; activeIds: string[] };
-export type PreviewSuggest = { lineId: string; matchIds: string[]; action: LineAction };
+export type PreviewMarkClick = { matchIds: string[]; lineId: string; anchor: PopoverAnchor };
 const emptyHighlight: PreviewHighlight = { marks: [], activeIds: [] };
 
 export default function ResumePreview({
@@ -16,7 +17,7 @@ export default function ResumePreview({
   highlight = emptyHighlight,
   onHighlightPage,
   onHighlightHover,
-  onSuggest,
+  onMarkClick,
 }: {
   compositionId: string;
   revision: number;
@@ -27,7 +28,7 @@ export default function ResumePreview({
   highlight?: PreviewHighlight;
   onHighlightPage?: (page: number) => void;
   onHighlightHover?: (ids: string[]) => void;
-  onSuggest?: (request: PreviewSuggest) => void;
+  onMarkClick?: (click: PreviewMarkClick) => void;
 }) {
   const [html, setHtml] = useState(""),
     seq = useRef(0),
@@ -93,15 +94,24 @@ export default function ResumePreview({
         }
         return;
       }
-      if (e.data?.type === "resume-suggest") {
-        const action = e.data.action === "rewrite" ? "rewrite" : "add_skill";
-        const lineId = String(e.data.lineId || "");
-        if (lineId)
-          onSuggest?.({
-            lineId,
-            matchIds: (Array.isArray(e.data.matchIds) ? e.data.matchIds : []).map(String),
-            action,
-          });
+      if (e.data?.type === "resume-mark-click") {
+        const frameEl = frame.current;
+        const rect = e.data.rect || {};
+        if (!frameEl) return;
+        // The preview is scaled with a CSS transform, so map frame coordinates through that scale.
+        const box = frameEl.getBoundingClientRect();
+        const scale = frameEl.offsetWidth ? box.width / frameEl.offsetWidth : 1;
+        const at = (value: unknown) => (Number(value) || 0) * scale;
+        onMarkClick?.({
+          matchIds: (Array.isArray(e.data.matchIds) ? e.data.matchIds : []).map(String),
+          lineId: String(e.data.lineId || ""),
+          anchor: {
+            left: box.left + at(rect.left),
+            top: box.top + at(rect.top),
+            right: box.left + at(rect.right),
+            bottom: box.top + at(rect.bottom),
+          },
+        });
         return;
       }
       if (e.data?.type === "resume-highlight-page") {
@@ -126,7 +136,7 @@ export default function ResumePreview({
     };
     addEventListener("message", fn);
     return () => removeEventListener("message", fn);
-  }, [onFit, onHighlightHover, onHighlightPage, onSuggest, preferredPageCount]);
+  }, [onFit, onHighlightHover, onHighlightPage, onMarkClick, preferredPageCount]);
   useEffect(() => {
     const last = measured.current;
     if (!last?.actualPageCount) return;

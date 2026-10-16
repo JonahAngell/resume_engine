@@ -215,6 +215,8 @@ async def load_ai_review_inputs(conn, user_id, job_id, composition_id: UUID):
         "bullets": bullets,
         "review": review,
         "revision": int(composition.get("revision") or 0),
+        "job": job,
+        "composition": composition,
     }, None
 
 
