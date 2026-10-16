@@ -42,7 +42,7 @@ def test_generated_default_names_adopt_display_title_within_limit():
 def test_phase2g_api_and_ui_contracts():
     main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
     ui = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
-    assert "body: JSON.stringify({})" in ui
+    assert "variantId ? { resume_variant_id: variantId } : {}" in ui
     assert 'prompt("Composition name")' not in ui
     dialogs = (ROOT / "frontend/src/HomeDialogs.tsx").read_text(encoding="utf-8")
     surfaces = ui + dialogs

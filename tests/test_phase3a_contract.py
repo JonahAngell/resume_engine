@@ -11,5 +11,6 @@ def test_phase3a_refinement_contract():
     assert "composition-manager" not in app
     assert '["tools", "Skills"]' in app
     assert "items/order" in app and "item-drag-handle" in app
-    assert app.count("+ Add Bullet") == 1
+    assert app.count("+ Add Bullet") == 2
+    assert 'mode: "pick-bullet"' in app and "<AddBulletButton />" in app
 
