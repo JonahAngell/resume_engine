@@ -262,22 +262,8 @@
       }
       {% if measure %}
       body.paginated .resume-page:not([data-active-page="true"]) { display: none; }
-      .suggest-chip {
-        position: absolute;
-        z-index: 20;
-        padding: 3px 10px;
-        border: 1px solid #8a6400;
-        border-radius: 999px;
-        background: #fff;
-        color: #5c4300;
-        font: 600 12px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
-        cursor: pointer;
-      }
-      .suggest-chip:hover, .suggest-chip:focus-visible { background: #fff6d6; outline: 2px solid #b8860b; outline-offset: 1px; }
-      .suggest-chip[hidden] { display: none; }
-      [data-suggest-action]:focus-visible { outline: 2px solid #b8860b; outline-offset: 1px; }
-      @media print { .suggest-chip { display: none !important; } }
+      mark.resume-keyword-hit, .resume-line-suggestion { cursor: pointer; }
+      mark.resume-keyword-hit:focus-visible, .resume-line-suggestion:focus-visible { outline: 2px solid #1f5fbf; outline-offset: 1px; }
       {% endif %}
       @media print {
         .pages {
@@ -741,8 +727,8 @@
               delete line.dataset.suggestAction;
               delete line.dataset.suggestLine;
               line.removeAttribute("tabindex");
+              line.removeAttribute("role");
             });
-            hideChip();
           };
           const quoteAttr = (value) => String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
           const normLine = (value) => (value || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -750,6 +736,8 @@
           const rememberMatch = (line, id, lineId, action) => {
             if (!line || !id) return;
             line.classList.add("resume-line-suggestion");
+            line.tabIndex = 0;
+            line.setAttribute("role", "button");
             const ids = new Set(matchIdList(line.dataset.matchIds));
             ids.add(id);
             line.dataset.matchIds = [...ids].join("\u001f");
@@ -757,50 +745,7 @@
             // A rewrite on the line wins; Add to Skills stays reachable from the match panel.
             line.dataset.suggestAction = line.dataset.suggestAction === "rewrite" ? "rewrite" : action;
             line.dataset.suggestLine = lineId;
-            line.tabIndex = 0;
           };
-          const chip = document.createElement("button");
-          chip.type = "button";
-          chip.className = "suggest-chip";
-          chip.hidden = true;
-          document.body.append(chip);
-          let chipLine = null;
-          let chipTimer = 0;
-          const hideChip = () => {
-            clearTimeout(chipTimer);
-            chip.hidden = true;
-            chipLine = null;
-          };
-          const hideChipSoon = () => {
-            clearTimeout(chipTimer);
-            chipTimer = setTimeout(hideChip, 250);
-          };
-          const showChip = (line) => {
-            clearTimeout(chipTimer);
-            chipLine = line;
-            const label = line.dataset.suggestAction === "rewrite" ? "Suggest" : "Add to Skills";
-            chip.textContent = label;
-            chip.setAttribute("aria-label", `${label} for this line`);
-            chip.hidden = false;
-            const box = line.getBoundingClientRect();
-            // Anchor to the line's start: the preview pane can clip the page's right side.
-            const left = Math.max(4, Math.min(box.left + scrollX, innerWidth + scrollX - chip.offsetWidth - 4));
-            chip.style.left = `${left}px`;
-            chip.style.top = `${Math.max(4, box.top + scrollY - chip.offsetHeight - 2)}px`;
-          };
-          const sendChip = (line) => {
-            if (!line?.dataset.suggestAction) return;
-            parent.postMessage({
-              type: "resume-suggest",
-              lineId: line.dataset.suggestLine,
-              matchIds: matchIdList(line.dataset.matchIds),
-              action: line.dataset.suggestAction,
-            }, "*");
-          };
-          chip.addEventListener("click", () => sendChip(chipLine));
-          chip.addEventListener("mouseenter", () => clearTimeout(chipTimer));
-          chip.addEventListener("mouseleave", hideChipSoon);
-          chip.addEventListener("blur", hideChipSoon);
           const highlightLines = (marks) => {
             const root = document.getElementById("pages");
             clearLineSuggestions();
@@ -826,7 +771,7 @@
                 });
                 rememberMatch(hit, id);
               }
-              // Chip targets: find the line by id, or by its text when the id is not in the preview.
+              // Suggested lines: find the line by id, or by its text when the id is not in the preview.
               for (const target of mark.targets || []) {
                 const value = quoteAttr(String(target.line || ""));
                 const excerpt = normLine(target.excerpt);
@@ -882,6 +827,8 @@
                 const hit = byTerm.get(match[0].toLowerCase());
                 const mark = document.createElement("mark");
                 mark.className = "resume-keyword-hit";
+                mark.tabIndex = 0;
+                mark.setAttribute("role", "button");
                 if (hit?.id) mark.dataset.matchId = hit.id;
                 mark.textContent = match[0];
                 fragment.append(mark);
@@ -938,36 +885,27 @@
             pagesRoot.dataset.hoverId = "";
             parent.postMessage({ type: "resume-highlight-hover", id: "" }, "*");
           });
-          pagesRoot?.addEventListener("mouseover", (event) => {
-            const line = event.target.closest?.("[data-suggest-action]");
-            if (line && pagesRoot.contains(line) && line !== chipLine) showChip(line);
-            else if (line) clearTimeout(chipTimer);
-          });
-          pagesRoot?.addEventListener("mouseout", (event) => {
-            const line = event.target.closest?.("[data-suggest-action]");
-            if (!line || event.relatedTarget === chip || line.contains(event.relatedTarget)) return;
-            hideChipSoon();
-          });
-          pagesRoot?.addEventListener("focusin", (event) => {
-            const line = event.target.closest?.("[data-suggest-action]");
-            if (line) showChip(line);
-          });
-          pagesRoot?.addEventListener("focusout", (event) => {
-            if (event.relatedTarget !== chip) hideChipSoon();
+          // Clicking a highlight asks the editor to show what it is and what can be done about it.
+          const openHit = (hit) => {
+            const box = hit.getBoundingClientRect();
+            const line = hit.closest("[data-suggest-line]");
+            parent.postMessage({
+              type: "resume-mark-click",
+              matchIds: matchIdsOf(hit),
+              lineId: line?.dataset.suggestLine || "",
+              rect: { left: box.left, top: box.top, right: box.right, bottom: box.bottom },
+            }, "*");
+          };
+          pagesRoot?.addEventListener("click", (event) => {
+            const hit = event.target.closest?.("[data-match-id], [data-match-ids]");
+            if (hit && pagesRoot.contains(hit)) openHit(hit);
           });
           pagesRoot?.addEventListener("keydown", (event) => {
-            const line = event.target.closest?.("[data-suggest-action]");
-            if (line && (event.key === "Enter" || event.key === " ")) {
+            const hit = event.target.closest?.("[data-match-id], [data-match-ids]");
+            if (hit && (event.key === "Enter" || event.key === " ")) {
               event.preventDefault();
-              sendChip(line);
+              openHit(hit);
             }
-          });
-          // Touch has no hover: the first tap on a line shows the chip, a tap on the chip opens it.
-          pagesRoot?.addEventListener("pointerdown", (event) => {
-            if (event.pointerType === "mouse") return;
-            const line = event.target.closest?.("[data-suggest-action]");
-            if (line) showChip(line);
-            else hideChip();
           });
           addEventListener("message", (event) => {
             if (event.data?.type === "resume-show-page") showPage(event.data.pageIndex);

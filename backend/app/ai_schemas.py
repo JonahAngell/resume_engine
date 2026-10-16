@@ -100,3 +100,63 @@ class VariantSuggestions(BaseModel):
     drafts: list[VariantDraft] = []
     dropped: int = 0
 
+
+class CoachSuggestion(BaseModel):
+    id: str
+    kind: Literal["rewrite", "summary", "add_skill"]
+    requirement: str
+    group: str
+    category: str = ""
+    keyword: str = ""
+    placement_id: str = ""
+    original: str = ""
+    proposed: str = ""
+    rationale: str = ""
+    priority: Literal["high", "medium", "low"] = "medium"
+
+
+class CoachEquivalent(BaseModel):
+    id: str
+    requirement: str
+    group: str
+    placement_id: str
+    bullet: str
+    rationale: str = ""
+
+
+class CoachResult(BaseModel):
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    model: str = ""
+    revision: int = 0
+    suggestions: list[CoachSuggestion] = []
+    equivalents: list[CoachEquivalent] = []
+    dropped: int = 0
+
+
+class AtsComponent(BaseModel):
+    id: str
+    label: str
+    weight: int
+    earned: float
+    ratio: float
+    detail: str
+    tips: list[str] = []
+
+
+class AtsMethod(BaseModel):
+    id: str
+    label: str
+    weight: int
+    rule: str
+    why: str
+
+
+class AtsScore(BaseModel):
+    score: int
+    band: Literal["Strong", "Fair", "Needs work"]
+    components: list[AtsComponent]
+    methodology: list[AtsMethod]
+    disclaimer: str
+    revision: int = 0
+

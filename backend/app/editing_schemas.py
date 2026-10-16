@@ -309,3 +309,9 @@ class AiVariantAccept(BaseModel):
     job_id: UUID | None = None
     model: str = Field(default="", max_length=200)
 
+
+class AtsScoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    composition_id: UUID
+    page_count: int | None = Field(default=None, ge=1, le=20)
+
