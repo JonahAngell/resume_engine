@@ -124,3 +124,9 @@ def test_missing_key_or_paid_model_is_unavailable(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "key")
     monkeypatch.setenv("OPENROUTER_MODEL", "openai/gpt-paid")
     assert asyncio.run(suggest_variants(ORIGINAL, JOB, "req", "kw"))["status"] == "unavailable"
+
+
+def test_part_of_a_soft_keyword_is_allowed_but_tools_are_not():
+    original = "Turns crew schedules into decisions"
+    assert drop_reason("Turns crew schedules into forecasting decisions", original, "Financial Forecasting", "domain", []) == ""
+    assert drop_reason("Turns crew schedules into Python decisions", original, "Python Scripting", "domain", []) == "tool"

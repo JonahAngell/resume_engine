@@ -1,16 +1,20 @@
 import React, { useEffect, useRef } from "react";
 import { highlightSegments, type CompareJob, type MatchMark } from "./matchMarks";
+import type { PopoverAnchor } from "./match/MarkPopover";
 
 export default function JobDocument({
   job,
   marks,
   activeIds,
   onActive,
+  onMarkClick,
 }: {
   job: CompareJob | null;
   marks: MatchMark[];
   activeIds: string[];
   onActive: (ids: string[]) => void;
+  /** A highlight was clicked or activated from the keyboard. */
+  onMarkClick?: (markId: string, anchor: PopoverAnchor) => void;
 }) {
   const paper = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -29,6 +33,11 @@ export default function JobDocument({
     );
   }
   const meta = [job.company, job.role].filter(Boolean).join(" · ");
+  const open = (element: HTMLElement) => {
+    const id = element.dataset.matchId || "";
+    const box = element.getBoundingClientRect();
+    if (id) onMarkClick?.(id, { left: box.left, top: box.top, right: box.right, bottom: box.bottom });
+  };
   const segments = highlightSegments(job.body, marks);
   return (
     <article
@@ -60,6 +69,16 @@ export default function JobDocument({
                 key={`${segment.mark.id}-${index}`}
                 data-match-id={segment.mark.id}
                 className={`doc-hit ${segment.mark.kind}${activeIds.includes(segment.mark.id) ? " hit-paired" : ""}`}
+                role="button"
+                tabIndex={0}
+                aria-label={`${segment.text}: ${segment.mark.kind === "match" ? "matched" : "suggested"}. Show details`}
+                onClick={(event) => open(event.currentTarget)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    open(event.currentTarget);
+                  }
+                }}
               >
                 {segment.text}
               </mark>

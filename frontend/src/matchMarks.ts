@@ -1,3 +1,5 @@
+import type { RequirementRow, VariantTarget } from "./match/types";
+
 export type LineAction = "add_skill" | "rewrite";
 /** A suggested line: its preview id, its text (used when the id is not in the preview), and what the chip offers. */
 export type LineTarget = { line: string; excerpt: string; action: LineAction };
@@ -8,8 +10,20 @@ export type MatchMark = {
   terms: string[];
   lineIds: string[];
   excerpts: string[];
-  /** Suggested lines that get a preview chip: a rewrite or Add to Skills. */
+  /** Suggested lines in the preview: a rewrite or Add to Skills. */
   targets?: LineTarget[];
+  /** What the item popover shows when this highlight is clicked. */
+  items?: MarkItem[];
+};
+
+export type MarkItem = {
+  keyword: string;
+  group: string;
+  status: "matched" | "suggested";
+  manual: boolean;
+  requirement: string;
+  rewrites: VariantTarget[];
+  addSkill: boolean;
 };
 
 export type CompareJob = {
@@ -18,14 +32,6 @@ export type CompareJob = {
   company: string;
   role: string;
   body: string;
-};
-
-type MarkKeyword = { keyword: string; found: boolean };
-type MarkSuggestion = {
-  keyword: string;
-  bullet_excerpt?: string;
-  line_id?: string;
-  action?: LineAction | "";
 };
 
 function mergeTargets(left: LineTarget[] = [], right: LineTarget[] = []) {
@@ -37,15 +43,13 @@ function mergeTargets(left: LineTarget[] = [], right: LineTarget[] = []) {
   }
   return [...merged.values()];
 }
-type MarkRow = {
-  kind?: string;
-  label?: string;
-  detail?: string;
-  matched?: boolean;
-  manual?: boolean;
-  keywords?: MarkKeyword[];
-  suggestions?: MarkSuggestion[];
-};
+function mergeItems(left: MarkItem[] = [], right: MarkItem[] = []) {
+  const merged = [...left];
+  for (const item of right) {
+    if (!merged.some((x) => x.requirement === item.requirement && x.keyword === item.keyword)) merged.push(item);
+  }
+  return merged;
+}
 
 export function matchMarkId(term: string) {
   const key = term.trim().toLowerCase();
@@ -66,10 +70,12 @@ function addMark(map: Map<string, MatchMark>, mark: MatchMark) {
       lineIds: mark.kind === "match" ? [] : unique(mark.lineIds),
       excerpts: mark.kind === "match" ? [] : unique(mark.excerpts),
       targets: mark.kind === "match" ? [] : mergeTargets([], mark.targets),
+      items: mergeItems([], mark.items),
     });
     return;
   }
   current.terms = unique([...current.terms, ...mark.terms]);
+  current.items = mergeItems(current.items, mark.items);
   if (current.kind === "match" || mark.kind === "match") {
     current.kind = "match";
     current.lineIds = [];
@@ -82,7 +88,32 @@ function addMark(map: Map<string, MatchMark>, mark: MatchMark) {
   current.targets = mergeTargets(current.targets, mark.targets);
 }
 
-export function buildMatchMarks(rows: MarkRow[]): MatchMark[] {
+function rowItem(row: RequirementRow, keyword: string, found: boolean): MarkItem {
+  const key = keyword.trim().toLowerCase();
+  const mine = (row.suggestions || []).filter((item) => item.keyword.trim().toLowerCase() === key);
+  return {
+    keyword,
+    group: row.group,
+    status: found ? "matched" : "suggested",
+    manual: !!row.manual,
+    requirement: row.text,
+    rewrites: found
+      ? []
+      : mine
+          .filter((item) => item.action === "rewrite" && item.placement_id)
+          .map((item) => ({
+            placementId: item.placement_id as string,
+            lineId: item.line_id,
+            excerpt: item.bullet_excerpt,
+            keyword: item.keyword,
+            requirement: row.text,
+            category: row.category || row.kind || "",
+          })),
+    addSkill: !found && mine.some((item) => item.action === "add_skill"),
+  };
+}
+
+export function buildMatchMarks(rows: RequirementRow[]): MatchMark[] {
   const marks = new Map<string, MatchMark>();
   for (const row of rows) {
     if (row.kind === "education" || row.kind === "degree") {
@@ -94,7 +125,14 @@ export function buildMatchMarks(rows: MarkRow[]): MatchMark[] {
       if (found && row.detail && !row.detail.startsWith("This resume")) {
         terms.push(...row.detail.split(",").map((part) => part.trim()));
       }
-      addMark(marks, { id, kind: found ? "match" : "suggestion", terms, lineIds: [], excerpts: [] });
+      addMark(marks, {
+        id,
+        kind: found ? "match" : "suggestion",
+        terms,
+        lineIds: [],
+        excerpts: [],
+        items: [rowItem(row, label, found)],
+      });
       continue;
     }
     for (const keyword of row.keywords || []) {
@@ -120,6 +158,7 @@ export function buildMatchMarks(rows: MarkRow[]): MatchMark[] {
                 excerpt: item.bullet_excerpt || "",
                 action: item.action as LineAction,
               })),
+        items: [rowItem(row, term, found)],
       });
     }
   }

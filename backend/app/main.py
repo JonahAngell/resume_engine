@@ -49,6 +49,7 @@ from .editing_repository import (
 from .editing_schemas import (
     AiVariantAccept,
     AiVariantRequest,
+    AtsScoreRequest,
     SkillAddWrite,
     SkillRecommendRequest,
     BulletCreate,
@@ -166,9 +167,11 @@ from .library_service import import_seed
 from .resume_import import ImportDraft, parse_upload
 from .resume_import_commit import commit_import
 from .ai_review import review_resume
-from .ai_schemas import AiReview, VariantSuggestions
-from .ai_variants import issued_draft, suggest_variants
-from .job_match import extract_keywords, is_skill_keyword
+from .ai_schemas import AiReview, AtsScore, CoachResult, VariantSuggestions
+from .ai_coach import coach_resume
+from .ai_variants import issued_draft, job_tool_terms, suggest_variants
+from .ats_score import score_resume
+from .job_match import is_skill_keyword, match_qualifications
 from .related_skills import category_for_term
 from .skill_groups import recommend_group, recommend_with_ai
 from .job_repository import (
@@ -1458,13 +1461,7 @@ async def suggest_bullet_variants(cid: UUID, placement_id: UUID, req: AiVariantR
     if error:
         raise HTTPException(404, "Job description not found")
     category = "tool" if is_skill_keyword(req.keyword, req.category) else (req.category or category_for_term(req.keyword) or "")
-    # Job tools the bullet may not claim: dictionary tools and capitalised unknown terms.
-    job_terms = [
-        item["keyword"]
-        for item in extract_keywords(inputs["description"])
-        if category_for_term(item["keyword"]) == "tool"
-        or (category_for_term(item["keyword"]) is None and any(char.isupper() for char in item["keyword"]))
-    ]
+    job_terms = job_tool_terms(inputs["description"])
     result = await suggest_variants(
         inputs["original"],
         inputs["description"],
@@ -1709,6 +1706,38 @@ async def ai_review_job(
     async with connection() as c:
         await link_job_composition(c, user_id, job_id, req.composition_id)
     return result
+
+
+async def _review_inputs(job_id: UUID, composition_id: UUID, identity: CurrentUser):
+    async with connection() as c:
+        u = await owner(identity, c)
+        inputs, error = await load_ai_review_inputs(c, u["id"], job_id, composition_id)
+    if error == "resume":
+        raise HTTPException(404, "Resume not found")
+    if error:
+        raise HTTPException(404, "Job description not found")
+    return inputs
+
+
+@app.post("/api/job-descriptions/{job_id}/ai-coach", response_model=CoachResult)
+async def ai_coach_job(job_id: UUID, req: JobMatchRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    inputs = await _review_inputs(job_id, req.composition_id, identity)
+    return await coach_resume(
+        inputs["description"],
+        inputs["resume"],
+        inputs["bullets"],
+        inputs["review"],
+        inputs["revision"],
+        job_id=str(job_id),
+    )
+
+
+@app.post("/api/job-descriptions/{job_id}/ats-score", response_model=AtsScore)
+async def ats_score_job(job_id: UUID, req: AtsScoreRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    inputs = await _review_inputs(job_id, req.composition_id, identity)
+    match = match_qualifications(inputs["description"], inputs["resume"], inputs["bullets"], inputs["review"])
+    result = score_resume(match, inputs["resume"], inputs["job"], inputs["composition"], req.page_count)
+    return {**result, "revision": inputs["revision"]}
 
 
 if FRONTEND.exists():
