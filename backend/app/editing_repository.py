@@ -721,7 +721,7 @@ async def duplicate_bullet(conn, user_id, bullet_id):
             (bullet["parent_id"], bullet_id, user_id),
         )
         await conn.execute(
-            "INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order,archived_at) SELECT user_id,%s,name,body,is_default,sort_order,archived_at FROM bullet_variants WHERE bullet_id=%s AND user_id=%s ORDER BY sort_order,id",
+            "INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order,archived_at,ai_generated,ai_model,ai_job_id) SELECT user_id,%s,name,body,is_default,sort_order,archived_at,ai_generated,ai_model,ai_job_id FROM bullet_variants WHERE bullet_id=%s AND user_id=%s ORDER BY sort_order,id",
             (copy["id"], bullet_id, user_id),
         )
         await _refresh_parents(conn, user_id, [copy["parent_id"]], "bullet-duplicate")
@@ -828,7 +828,7 @@ async def duplicate_variant(conn, user_id, variant_id):
             return None
         base = await one(
             conn,
-            "SELECT name,body,sort_order FROM bullet_variants WHERE id=%s AND user_id=%s",
+            "SELECT name,body,sort_order,ai_generated,ai_model,ai_job_id FROM bullet_variants WHERE id=%s AND user_id=%s",
             (variant_id, user_id),
         )
         name = base["name"] + " Copy"
@@ -842,8 +842,18 @@ async def duplicate_variant(conn, user_id, variant_id):
             counter += 1
         row = await one(
             conn,
-            "INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order) VALUES(%s,%s,%s,%s,false,(SELECT COALESCE(max(sort_order)+1,0) FROM bullet_variants WHERE bullet_id=%s)) RETURNING id",
-            (user_id, variant["bullet_id"], name, base["body"], variant["bullet_id"]),
+            # A duplicate keeps the AI provenance: the body is the same text.
+            "INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order,ai_generated,ai_model,ai_job_id) VALUES(%s,%s,%s,%s,false,(SELECT COALESCE(max(sort_order)+1,0) FROM bullet_variants WHERE bullet_id=%s),%s,%s,%s) RETURNING id",
+            (
+                user_id,
+                variant["bullet_id"],
+                name,
+                base["body"],
+                variant["bullet_id"],
+                base["ai_generated"],
+                base["ai_model"],
+                base["ai_job_id"],
+            ),
         )
         await _ensure_default(conn, user_id, variant["bullet_id"])
         await _refresh_parents(

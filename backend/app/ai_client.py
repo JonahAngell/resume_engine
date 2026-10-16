@@ -1,4 +1,8 @@
-"""OpenRouter chat client for optional resume review."""
+"""Chat client for optional AI features.
+
+Providers are tried in order: the Studioshare AI Gateway when the app runs on
+Launch (or has `launch env pull` credentials), then free OpenRouter models.
+"""
 
 import asyncio
 import json
@@ -7,6 +11,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
 import httpx
 
@@ -20,6 +25,9 @@ logger.propagate = False
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openrouter/free"
+DEFAULT_GATEWAY_MODELS = ("anthropic/claude-sonnet-4-6",)
+TOKEN_REFRESH_MARGIN = 300.0
+TOKEN_FALLBACK_TTL = 600.0
 PROMPT_VERSION = "1"
 TIMEOUT_SECONDS = 30.0
 MAX_RETRY_WAIT = 5.0
@@ -39,7 +47,14 @@ class AiCompletion:
     model: str
 
 
-def model_name() -> str:
+@dataclass(frozen=True)
+class Provider:
+    name: str
+    url: str
+    models: tuple[str, ...]
+
+
+def openrouter_model() -> str:
     return os.environ.get("OPENROUTER_MODEL", "").strip() or DEFAULT_MODEL
 
 
@@ -49,6 +64,80 @@ def api_key() -> str:
 
 def is_free_model(model: str) -> bool:
     return model == DEFAULT_MODEL or model.endswith(":free")
+
+
+def gateway_url() -> str:
+    return os.environ.get("STUDIOSHARE_AI_GATEWAY_URL", "").strip().rstrip("/")
+
+
+def gateway_models() -> tuple[str, ...]:
+    raw = os.environ.get("STUDIOSHARE_AI_MODELS", "")
+    models = tuple(part.strip() for part in raw.split(",") if part.strip())
+    return models or DEFAULT_GATEWAY_MODELS
+
+
+def _gateway_credentials() -> bool:
+    return bool(
+        os.environ.get("STUDIOSHARE_OIDC_TOKEN", "").strip()
+        or os.environ.get("STUDIOSHARE_OIDC_URL", "").strip()
+    )
+
+
+def providers() -> list[Provider]:
+    """Configured providers in the order they are tried."""
+    found = []
+    if gateway_url() and _gateway_credentials():
+        found.append(Provider("studioshare", f"{gateway_url()}/v1/chat/completions", gateway_models()))
+    model = openrouter_model()
+    if api_key() and is_free_model(model):
+        found.append(Provider("openrouter", OPENROUTER_URL, (model,)))
+    return found
+
+
+def ai_available() -> bool:
+    return bool(providers())
+
+
+def model_name() -> str:
+    """Stable label for the provider chain. Callers use it in cache keys."""
+    chain = providers()
+    if not chain:
+        return openrouter_model()
+    return "|".join(f"{p.name}:{','.join(p.models)}" for p in chain)
+
+
+_TOKEN: dict = {"value": "", "expires": 0.0}
+
+
+def _expires_at(raw) -> float:
+    try:
+        stamp = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return time.time() + TOKEN_FALLBACK_TTL
+    return stamp.timestamp()
+
+
+def clear_gateway_token() -> None:
+    _TOKEN.update(value="", expires=0.0)
+
+
+async def gateway_token(client: httpx.AsyncClient) -> str:
+    """App-scoped OIDC token: the `launch env pull` token, else one minted by the sidecar."""
+    pulled = os.environ.get("STUDIOSHARE_OIDC_TOKEN", "").strip()
+    if pulled:
+        return pulled
+    if _TOKEN["value"] and time.time() < _TOKEN["expires"] - TOKEN_REFRESH_MARGIN:
+        return _TOKEN["value"]
+    oidc_url = os.environ.get("STUDIOSHARE_OIDC_URL", "").strip()
+    if not oidc_url:
+        return ""
+    response = await client.post(oidc_url)
+    response.raise_for_status()
+    payload = response.json()
+    token = str(payload.get("token") or "") if isinstance(payload, dict) else ""
+    if token:
+        _TOKEN.update(value=token, expires=_expires_at(payload.get("expiresAt")))
+    return token
 
 
 def parse_json_content(content: str) -> dict:
@@ -63,10 +152,13 @@ def parse_json_content(content: str) -> dict:
     return value
 
 
-def _log(model: str, outcome: str, started: float, usage: dict | None = None) -> None:
+def _log(
+    model: str, outcome: str, started: float, usage: dict | None = None, provider: str = "none"
+) -> None:
     usage = usage or {}
     logger.info(
-        "model=%s prompt=%s latency_ms=%s outcome=%s prompt_tokens=%s completion_tokens=%s",
+        "provider=%s model=%s prompt=%s latency_ms=%s outcome=%s prompt_tokens=%s completion_tokens=%s",
+        provider,
         model,
         PROMPT_VERSION,
         int((time.perf_counter() - started) * 1000),
@@ -74,6 +166,10 @@ def _log(model: str, outcome: str, started: float, usage: dict | None = None) ->
         int(usage.get("prompt_tokens") or 0),
         int(usage.get("completion_tokens") or 0),
     )
+
+
+def _gateway_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
 def _headers() -> dict[str, str]:
@@ -124,6 +220,8 @@ class _Exchange:
 
 async def _exchange(
     client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
     model: str,
     messages: list[dict],
     schema: dict,
@@ -136,7 +234,9 @@ async def _exchange(
             "type": "json_schema",
             "json_schema": {"name": name, "strict": True, "schema": schema},
         }
-    response = await client.post(OPENROUTER_URL, headers=_headers(), json=body)
+    response = await client.post(url, headers=headers, json=body)
+    if response.status_code == 401:
+        return _Exchange("unauthorized")
     if response.status_code == 429:
         return _Exchange("rate_limited", wait=_retry_wait(response))
     if response.status_code in (400, 422):
@@ -173,6 +273,8 @@ def _parsed(outcome: _Exchange) -> dict | None:
 
 async def _exchange_within(
     client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
     model: str,
     messages: list[dict],
     schema: dict,
@@ -181,11 +283,81 @@ async def _exchange_within(
 ) -> _Exchange:
     try:
         return await asyncio.wait_for(
-            _exchange(client, model, messages, schema, name, use_schema),
+            _exchange(client, url, headers, model, messages, schema, name, use_schema),
             timeout=TIMEOUT_SECONDS,
         )
     except (asyncio.TimeoutError, httpx.TimeoutException):
         return _Exchange("unavailable")
+
+
+class _Unauthorized(Exception):
+    pass
+
+
+async def _complete_with(
+    client: httpx.AsyncClient,
+    provider: str,
+    url: str,
+    headers: dict[str, str],
+    model: str,
+    messages: list[dict],
+    schema: dict,
+    name: str,
+    started: float,
+) -> AiCompletion:
+    """One model: a rate-limit retry, then a JSON repair. Raises AiCallError."""
+
+    async def call(body: list[dict]) -> _Exchange:
+        outcome = await _exchange_within(client, url, headers, model, body, schema, name, False)
+        if outcome.kind == "unauthorized":
+            raise _Unauthorized()
+        return outcome
+
+    outcome = await call(messages)
+    if outcome.kind == "rate_limited":
+        await asyncio.sleep(outcome.wait)
+        outcome = await call(messages)
+        if outcome.kind == "rate_limited":
+            _log(model, "rate_limited", started, outcome.usage, provider)
+            raise AiCallError("rate_limited")
+    if outcome.kind == "unavailable":
+        _log(model, "unavailable", started, outcome.usage, provider)
+        raise AiCallError("unavailable")
+    data = _parsed(outcome)
+    if data is not None:
+        served = outcome.served_model or model
+        _log(served, "ok", started, outcome.usage, provider)
+        return AiCompletion(data=data, model=served)
+
+    repair = [
+        *messages,
+        {
+            "role": "user",
+            "content": "Return one JSON object only, with no markdown.",
+        },
+    ]
+    outcome = await call(repair)
+    if outcome.kind == "rate_limited":
+        _log(model, "rate_limited", started, outcome.usage, provider)
+        raise AiCallError("rate_limited")
+    data = _parsed(outcome)
+    if data is None:
+        status = "unavailable" if outcome.kind == "unavailable" else "invalid"
+        _log(outcome.served_model or model, status, started, outcome.usage, provider)
+        raise AiCallError(status)
+    served = outcome.served_model or model
+    _log(served, "ok", started, outcome.usage, provider)
+    return AiCompletion(data=data, model=served)
+
+
+async def _provider_headers(provider: Provider, client: httpx.AsyncClient) -> dict[str, str] | None:
+    if provider.name != "studioshare":
+        return _headers()
+    try:
+        token = await gateway_token(client)
+    except (httpx.HTTPError, ValueError):
+        return None
+    return _gateway_headers(token) if token else None
 
 
 async def complete_json(
@@ -194,51 +366,40 @@ async def complete_json(
     name: str,
     client: httpx.AsyncClient | None = None,
 ) -> AiCompletion:
-    """Call a free OpenRouter model and return one JSON object."""
-    model = model_name()
+    """Return one JSON object from the first provider and model that produce one."""
     started = time.perf_counter()
-    if not is_free_model(model) or not api_key():
-        _log(model, "unavailable", started)
+    chain = providers()
+    if not chain:
+        _log(openrouter_model(), "unavailable", started)
         raise AiCallError("unavailable")
 
     owns_client = client is None
     client = client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+    status = "unavailable"
     try:
-        outcome = await _exchange_within(client, model, messages, schema, name, False)
-        if outcome.kind == "rate_limited":
-            await asyncio.sleep(outcome.wait)
-            outcome = await _exchange_within(client, model, messages, schema, name, False)
-            if outcome.kind == "rate_limited":
-                _log(model, "rate_limited", started, outcome.usage)
-                raise AiCallError("rate_limited")
-        data = _parsed(outcome)
-        if data is not None:
-            served = outcome.served_model or model
-            _log(served, "ok", started, outcome.usage)
-            return AiCompletion(data=data, model=served)
-
-        repair = [
-            *messages,
-            {
-                "role": "user",
-                "content": "Return one JSON object only, with no markdown.",
-            },
-        ]
-        outcome = await _exchange_within(client, model, repair, schema, name, False)
-        if outcome.kind == "rate_limited":
-            _log(model, "rate_limited", started, outcome.usage)
-            raise AiCallError("rate_limited")
-        data = _parsed(outcome)
-        if data is None:
-            status = "unavailable" if outcome.kind == "unavailable" else "invalid"
-            _log(outcome.served_model or model, status, started, outcome.usage)
-            raise AiCallError(status)
-        served = outcome.served_model or model
-        _log(served, "ok", started, outcome.usage)
-        return AiCompletion(data=data, model=served)
-    except httpx.HTTPError:
-        _log(model, "unavailable", started)
-        raise AiCallError("unavailable")
+        for provider in chain:
+            headers = await _provider_headers(provider, client)
+            if headers is None:
+                _log(provider.models[0], "no_token", started, provider=provider.name)
+                status = "unavailable"
+                continue
+            for model in provider.models:
+                try:
+                    return await _complete_with(
+                        client, provider.name, provider.url, headers, model, messages, schema, name, started
+                    )
+                except AiCallError as exc:
+                    status = exc.status
+                except _Unauthorized:
+                    if provider.name == "studioshare":
+                        clear_gateway_token()
+                    _log(model, "unauthorized", started, provider=provider.name)
+                    status = "unavailable"
+                    break
+                except httpx.HTTPError:
+                    _log(model, "unavailable", started, provider=provider.name)
+                    status = "unavailable"
+        raise AiCallError(status)
     finally:
         if owns_client:
             await client.aclose()

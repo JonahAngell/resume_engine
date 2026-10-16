@@ -1,9 +1,15 @@
+export type LineAction = "add_skill" | "rewrite";
+/** A suggested line: its preview id, its text (used when the id is not in the preview), and what the chip offers. */
+export type LineTarget = { line: string; excerpt: string; action: LineAction };
+
 export type MatchMark = {
   id: string;
   kind: "match" | "suggestion";
   terms: string[];
   lineIds: string[];
   excerpts: string[];
+  /** Suggested lines that get a preview chip: a rewrite or Add to Skills. */
+  targets?: LineTarget[];
 };
 
 export type CompareJob = {
@@ -15,7 +21,22 @@ export type CompareJob = {
 };
 
 type MarkKeyword = { keyword: string; found: boolean };
-type MarkSuggestion = { keyword: string; bullet_excerpt?: string; line_id?: string };
+type MarkSuggestion = {
+  keyword: string;
+  bullet_excerpt?: string;
+  line_id?: string;
+  action?: LineAction | "";
+};
+
+function mergeTargets(left: LineTarget[] = [], right: LineTarget[] = []) {
+  const merged = new Map(left.map((item) => [item.line, item]));
+  for (const item of right) {
+    const current = merged.get(item.line);
+    // A rewrite on a line wins: Add to Skills is always also reachable from the panel.
+    merged.set(item.line, current?.action === "rewrite" ? current : item);
+  }
+  return [...merged.values()];
+}
 type MarkRow = {
   kind?: string;
   label?: string;
@@ -44,6 +65,7 @@ function addMark(map: Map<string, MatchMark>, mark: MatchMark) {
       terms: unique(mark.terms),
       lineIds: mark.kind === "match" ? [] : unique(mark.lineIds),
       excerpts: mark.kind === "match" ? [] : unique(mark.excerpts),
+      targets: mark.kind === "match" ? [] : mergeTargets([], mark.targets),
     });
     return;
   }
@@ -52,10 +74,12 @@ function addMark(map: Map<string, MatchMark>, mark: MatchMark) {
     current.kind = "match";
     current.lineIds = [];
     current.excerpts = [];
+    current.targets = [];
     return;
   }
   current.lineIds = unique([...current.lineIds, ...mark.lineIds]);
   current.excerpts = unique([...current.excerpts, ...mark.excerpts]);
+  current.targets = mergeTargets(current.targets, mark.targets);
 }
 
 export function buildMatchMarks(rows: MarkRow[]): MatchMark[] {
@@ -87,6 +111,15 @@ export function buildMatchMarks(rows: MarkRow[]): MatchMark[] {
         terms: [term],
         lineIds: found ? [] : suggestions.map((item) => item.line_id || ""),
         excerpts: found ? [] : suggestions.map((item) => item.bullet_excerpt || ""),
+        targets: found
+          ? []
+          : suggestions
+              .filter((item) => item.line_id && item.action)
+              .map((item) => ({
+                line: item.line_id as string,
+                excerpt: item.bullet_excerpt || "",
+                action: item.action as LineAction,
+              })),
       });
     }
   }

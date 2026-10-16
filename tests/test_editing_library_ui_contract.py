@@ -25,7 +25,7 @@ def test_editing_page_uses_library_actions():
     assert "Summary variant" not in panel
     assert "Add new profile" not in panel
     assert "Select a profile" not in panel
-    assert 'value="manual"' in panel
+    assert '["manual", "Manual"]' in panel and "aria-pressed" in panel
 
 
 def test_education_bullets_and_skill_visibility_contract():

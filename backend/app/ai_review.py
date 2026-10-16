@@ -7,7 +7,7 @@ import logging
 import re
 from uuid import UUID
 
-from .ai_client import PROMPT_VERSION, AiCallError, AiCompletion, api_key, complete_json, is_free_model, model_name
+from .ai_client import PROMPT_VERSION, AiCallError, AiCompletion, ai_available, complete_json, model_name
 from .ai_schemas import (
     AiBulletTags,
     AiFamily,
@@ -654,7 +654,7 @@ async def review_resume(
     model = model_name()
     if complete is None:
         complete = complete_json
-        if not is_free_model(model) or not api_key():
+        if not ai_available():
             _log_validation(model, "unavailable", {}, {})
             return _pack(composition_id, match, "unavailable")
 

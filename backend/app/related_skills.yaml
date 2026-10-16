@@ -1407,6 +1407,77 @@ families:
     label: Emerging technology
     clusters: [emerging-technology, ai-assistants]
 
+# Skill group hints for Add to Skills. A user's Skills groups have their own names, so
+# these never name a group. Each hint set lists words that may appear in a group name
+# ("Programming Languages", "Cloud/Platforms"), and `title` is used when a new group is
+# suggested. cluster_hints map a cluster to one or more hint sets; clusters without an
+# entry fall back to category_hints. Words are matched against lowercased group-name
+# tokens with a trailing "s" removed, so list the singular form.
+group_hints:
+  language:
+    title: Languages
+    words: [language, programming, coding, scripting, code]
+  platform:
+    title: Platforms
+    words: [platform, cloud, infrastructure, devops, system, ops, technology, tech, software]
+  data:
+    title: Data
+    words: [data, analytic, bi, reporting, database, visualization, analysis]
+  collaboration:
+    title: Collaboration Tools
+    words: [collaboration, communication, productivity, office, teamwork, project]
+  engineering:
+    title: Engineering Tools
+    words: [engineering, cad, design, simulation, hardware]
+  production:
+    title: Production Equipment
+    words: [camera, equipment, gear, production, lighting, grip]
+  post:
+    title: Post-Production
+    words: [post, editing, color, creative, media, video]
+  method:
+    title: Methods
+    words: [method, methodology, practice, process, framework]
+  domain:
+    title: Expertise
+    words: [domain, expertise, knowledge, industry, area, competency]
+cluster_hints:
+  python: [language]
+  java: [language]
+  javascript: [language]
+  dotnet: [language]
+  systems-languages: [language]
+  sql: [language, data]
+  bi: [data]
+  nosql: [data]
+  spreadsheets: [data, collaboration]
+  web-analytics: [data]
+  cloud: [platform]
+  observability: [platform]
+  identity-access: [platform]
+  itsm: [platform]
+  erp: [platform]
+  ats: [platform]
+  workday: [platform]
+  version-control: [platform, collaboration]
+  software-testing: [platform]
+  microsoft-365: [collaboration]
+  power-platform: [collaboration, platform]
+  ai-assistants: [collaboration, platform]
+  cad: [engineering]
+  simulation: [engineering]
+  electrical: [engineering]
+  camera-systems: [production]
+  lenses: [production]
+  camera-movement: [production]
+  lighting-grip: [production]
+  color-grading: [post]
+  video-editing: [post]
+category_hints:
+  tool: [platform]
+  methodology: [method]
+  domain: [domain]
+
 aliases:
   # existing
   k8s: kubernetes

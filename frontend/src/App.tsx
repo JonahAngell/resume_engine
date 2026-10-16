@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import FitIndicator, { Fit } from "./FitIndicator";
-import ResumePreview from "./ResumePreview";
+import ResumePreview, { type PreviewSuggest } from "./ResumePreview";
 import { api } from "./api";
 import { RESUME_ENGINE_BUILD, RESUME_ENGINE_VERSION } from "./app-version";
 import { EditorHistory } from "./EditorHistory";
@@ -137,6 +137,9 @@ export default function App() {
   const [compareJob, setCompareJob] = useState<CompareJob | null>(null);
   const [matchMarks, setMatchMarks] = useState<MatchMark[]>([]);
   const [activeMatchIds, setActiveMatchIds] = useState<string[]>([]);
+  const [previewSuggest, setPreviewSuggest] = useState<
+    (PreviewSuggest & { nonce: number }) | null
+  >(null);
   const [matchRailOpen, setMatchRailOpen] = useState(true);
   const [zoom, setZoom] = useState(() => {
     const stored = Number(localStorage.getItem("resume-engine-preview-zoom"));
@@ -735,6 +738,9 @@ export default function App() {
     setCompareJob(view.job);
     setMatchMarks(view.marks);
   }, []);
+  const onPreviewSuggest = useCallback((request: PreviewSuggest) => {
+    setPreviewSuggest({ ...request, nonce: Date.now() });
+  }, []);
   const onActiveMatch = useCallback((ids: string[]) => {
     setActiveMatchIds((current) =>
       current.length === ids.length && current.every((id, index) => id === ids[index])
@@ -1080,6 +1086,7 @@ export default function App() {
           }
           onHighlightPage={setCurrentPage}
           onHighlightHover={onActiveMatch}
+          onSuggest={editorTab === "match" ? onPreviewSuggest : undefined}
         />
       </div>
     </section>
@@ -1292,6 +1299,8 @@ export default function App() {
                 active={editorTab === "match"}
                 onCompare={onCompare}
                 onActive={onActiveMatch}
+                previewRequest={previewSuggest}
+                onApplied={(next) => setComp(next)}
               />
             </div>
             {!matchRailShown && (

@@ -4234,6 +4234,153 @@ button[aria-disabled="true"] {
   color: #61708a;
   font-size: 13px;
 }
+.jobs-suggestion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.jobs-suggestion-actions:empty {
+  display: none;
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--focus-ring, #1f5fbf);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.assist-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(640px, 96vw);
+  padding: 0;
+}
+.assist-dialog .modal-heading {
+  padding: 16px 16px 0;
+}
+.assist-body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 16px 16px;
+  overflow: auto;
+}
+.assist-body p {
+  margin: 0;
+}
+.assist-field {
+  display: grid;
+  gap: 4px;
+  font-weight: 600;
+}
+.assist-field input,
+.assist-option input[type="text"],
+.assist-option input:not([type]),
+.assist-option textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+}
+.assist-note {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff6d6;
+  color: #5c4300;
+  font-size: 13px;
+}
+.assist-original {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid #cbd7e7;
+  background: #f7f9fc;
+  color: #4b5b78;
+  overflow-wrap: anywhere;
+}
+.assist-options {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.assist-options legend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-weight: 600;
+}
+.assist-option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  border: 1px solid #d5deeb;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+}
+.assist-option.selected {
+  border-color: var(--brand-branch-blue, #6d86b6);
+  background: #f2f6fd;
+  box-shadow: inset 0 0 0 1px var(--brand-branch-blue, #6d86b6);
+}
+.assist-option > div,
+.assist-option > textarea,
+.assist-option > .link-button {
+  grid-column: 2;
+}
+.assist-option > .link-button {
+  justify-self: start;
+}
+.assist-option-pick {
+  display: contents;
+  cursor: pointer;
+}
+/* The whole card is the label, so the radio itself can stay small on touch screens. */
+.assist-option input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  min-height: 0;
+  margin: 3px 0 0;
+}
+.assist-option-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.assist-option-text small {
+  color: #61708a;
+}
+.assist-option-text .status-badge {
+  justify-self: start;
+}
+.assist-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #e1e8f2;
+  background: #fff;
+}
+@media (max-width: 900px) {
+  .assist-dialog {
+    width: 100%;
+  }
+}
+.variant-ai-badge {
+  margin-left: 6px;
+  background: #f1eafd;
+  color: #5b3a99;
+}
 @media (max-width: 900px) {
   .jobs-detail {
     grid-template-columns: 1fr;
