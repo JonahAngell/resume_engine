@@ -10,7 +10,6 @@ from app.editing_repository import (
     create_variant,
     set_default_variant,
     archive_variant,
-    render_historical,
 )
 from app.editing_schemas import (
     BulletCreate,
@@ -119,8 +118,16 @@ async def exercise():
                 conn, a["id"], alt["id"], made["variant_id"]
             )
             assert row and error is None
-            rendered = await render_historical(conn, a["id"], parent, cid)
-            assert "Short wording" in rendered["bullets"]
+            # Archiving a variant keeps the composition's pinned wording.
+            snapshot = (
+                await (
+                    await conn.execute(
+                        "SELECT variant_id,wording_snapshot FROM composition_bullets WHERE id=%s",
+                        (placement_id,),
+                    )
+                ).fetchone()
+            )
+            assert snapshot == (alt["id"], "Short wording")
             assert await set_default_variant(conn, b["id"], made["variant_id"]) is None
     finally:
         async with await psycopg.AsyncConnection.connect(URL, autocommit=True) as admin:
