@@ -55,7 +55,7 @@ export function LibraryEditDialog({
   title: string;
   close: () => void;
   children: ReactNode;
-  onSave: () => Promise<void>;
+  onSave: () => Promise<void | false>;
   note?: string;
 }) {
   const [busy, setBusy] = useState(false);
@@ -64,8 +64,8 @@ export function LibraryEditDialog({
     setBusy(true);
     setError("");
     try {
-      await onSave();
-      close();
+      const result = await onSave();
+      if (result !== false) close();
     } catch (e: any) {
       setError(e.message || "Could not save this library record");
     } finally {

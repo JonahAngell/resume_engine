@@ -58,10 +58,21 @@ async def apply_placements(conn,user_id,cid,resume):
     return resume
 async def _commit(conn,user_id,locked,source):
     resume=dict(locked["render_payload"])
-    education=await _many(conn,"SELECT e.* FROM composition_items i JOIN education_items e ON e.id=i.item_id WHERE i.composition_id=%s AND i.section='education' ORDER BY i.sort_order,i.id",(locked["id"],))
+    education=await _many(conn,"""SELECT e.*, v.institution v_institution, v.college_school v_college, v.location v_location,
+              v.degree_type v_degree_type, v.degree_major v_degree_major, v.degree v_degree,
+              v.graduation_year v_year, v.graduation_month v_month, v.display_date v_display,
+              v.graduation_date v_graduation
+       FROM composition_items i JOIN education_items e ON e.id=i.item_id
+       LEFT JOIN education_item_variants v ON v.id=i.variant_id
+       WHERE i.composition_id=%s AND i.section='education' ORDER BY i.sort_order,i.id""",(locked["id"],))
     if education:
         from .library_repository import _education_render
-        resume["education"]=[_education_render(x) for x in education]
+        rendered=[]
+        for item in education:
+            if item.get("v_institution") is not None:
+                item={**item,"institution":item["v_institution"],"college_school":item["v_college"],"location":item["v_location"] or "","degree_type":item["v_degree_type"],"degree_major":item["v_degree_major"],"degree":item["v_degree"] or "","graduation_year":item["v_year"],"graduation_month":item["v_month"],"display_date":item["v_display"],"graduation_date":item["v_graduation"] or ""}
+            rendered.append(_education_render(item))
+        resume["education"]=rendered
     resume=await apply_placements(conn,user_id,locked["id"],resume)
     row=await _one(conn,"UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",(json.dumps(resume),locked["id"],user_id))
     snap=await _snapshot(conn,row,resume)

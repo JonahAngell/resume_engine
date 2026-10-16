@@ -5,13 +5,15 @@ import { api } from "./api";
 import { RESUME_ENGINE_BUILD, RESUME_ENGINE_VERSION } from "./app-version";
 import { EditorHistory } from "./EditorHistory";
 import StandaloneLibrary from "./StandaloneLibrary";
-import JobMatchPanel, { emptyHighlight, type ResumeHighlight } from "./JobMatchPanel";
+import JobMatchPanel from "./JobMatchPanel";
+import JobDocument from "./JobDocument";
+import { type CompareJob, type MatchMark } from "./matchMarks";
 import JobsPage from "./JobsPage";
 import { AppIcon } from "./AppIcon";
 import ModalShell from "./ModalShell";
 import OverflowMenu from "./OverflowMenu";
 import RevisionHistoryPanel from "./RevisionHistoryPanel";
-import { confirmDialog } from "./ConfirmDialog";
+import { chooseSaveMode, confirmDialog } from "./ConfirmDialog";
 import {
   bulletCoaching,
   dateFormatCoaching,
@@ -25,6 +27,7 @@ import MonthYearField from "./MonthYearField";
 import { autoFitSkillRows } from "./skillRows";
 import { SectionHelp } from "./SectionHelp";
 import { EditorLibraryDialogs } from "./editor/EditorLibraryDialogs";
+import { profilePayload } from "./LibraryEntryForms";
 import { RecordActions } from "./editor/LibraryPickerDialog";
 import { DragHandle, dragRowClass, useRowDrag } from "./editor/useRowDrag";
 import OptionGrid from "./OptionGrid";
@@ -49,6 +52,8 @@ type Comp = {
   section_sort_modes: Record<string, "automatic" | "manual">;
   summary_variant_id?: string | null;
   profile_id?: string | null;
+  is_starter?: boolean;
+  is_default_starter?: boolean;
   revision: number;
   archived_at?: string | null;
   created_at?: string | null;
@@ -95,6 +100,8 @@ export default function App() {
   const [fit, setFit] = useState<Fit | null>(null);
   const [status, setStatus] = useState("Loading…");
   const [error, setError] = useState("");
+  const [starterPicker, setStarterPicker] = useState(false);
+  const [resumeVariantDialog, setResumeVariantDialog] = useState(false);
   const [previewRevision, setPreviewRevision] = useState<any>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -127,7 +134,10 @@ export default function App() {
     }
   });
   const [currentPage, setCurrentPage] = useState(1);
-  const [matchHighlight, setMatchHighlight] = useState<ResumeHighlight>(emptyHighlight);
+  const [compareJob, setCompareJob] = useState<CompareJob | null>(null);
+  const [matchMarks, setMatchMarks] = useState<MatchMark[]>([]);
+  const [activeMatchIds, setActiveMatchIds] = useState<string[]>([]);
+  const [matchRailOpen, setMatchRailOpen] = useState(true);
   const [zoom, setZoom] = useState(() => {
     const stored = Number(localStorage.getItem("resume-engine-preview-zoom"));
     return stored >= 50 && stored <= 150 ? stored : 100;
@@ -322,16 +332,29 @@ export default function App() {
         x.organization === item.organization && x.title === item.title,
     );
   };
-  const createBlankComposition = async () => {
+  const createBlankComposition = async (resumeVariantId?: string) => {
+    const starters = (lib.compositions || []).filter(
+      (item: any) => item.is_starter && !item.archived_at,
+    );
+    const variantId =
+      typeof resumeVariantId === "string" ? resumeVariantId : undefined;
+    const hasDefault = starters.some((item: any) => item.is_default_starter);
+    if (!variantId && starters.length > 1 && !hasDefault) {
+      setStarterPicker(true);
+      return;
+    }
     try {
       const next = await api<Comp>("/api/compositions", {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify(
+          variantId ? { resume_variant_id: variantId } : {},
+        ),
       });
       setComp(next);
       await loadLibrary();
       setPreviewRevision(null);
       setScreen("editor");
+      setStarterPicker(false);
     } catch (e: any) {
       setError(e.message);
     }
@@ -685,28 +708,6 @@ export default function App() {
     );
     if (!r.ok) {
       const detail = (await r.json().catch(() => ({}))).detail;
-      // #region agent log
-      fetch("http://127.0.0.1:7353/ingest/d7c1cc8b-c0a3-49b7-960e-6eca5743ef25", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "1b8194",
-        },
-        body: JSON.stringify({
-          sessionId: "1b8194",
-          runId: "pre-fix",
-          hypothesisId: "B",
-          location: "App.tsx:exportPdf",
-          message: "export error detail",
-          data: {
-            detailType: Array.isArray(detail) ? "array" : typeof detail,
-            detailLength: Array.isArray(detail) ? detail.length : null,
-            stringified: String(detail ?? "").slice(0, 240),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setError(detail || "Export failed");
       return;
     }
@@ -730,6 +731,24 @@ export default function App() {
       Math.min(Math.max(1, page), x.actualPageCount || 1),
     );
   }, []);
+  const onCompare = useCallback((view: { job: CompareJob | null; marks: MatchMark[] }) => {
+    setCompareJob(view.job);
+    setMatchMarks(view.marks);
+  }, []);
+  const onActiveMatch = useCallback((ids: string[]) => {
+    setActiveMatchIds((current) =>
+      current.length === ids.length && current.every((id, index) => id === ids[index])
+        ? current
+        : ids,
+    );
+  }, []);
+  useEffect(() => {
+    if (editorTab !== "match") {
+      setCompareJob(null);
+      setMatchMarks([]);
+      setActiveMatchIds([]);
+    }
+  }, [editorTab]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -841,6 +860,36 @@ export default function App() {
           item={homeDialog.item}
           close={() => setHomeDialog(null)}
           save={saveHomeMetadata}
+        />
+      )}
+      {starterPicker && (
+        <StarterPicker
+          starters={(lib.compositions || []).filter(
+            (item: any) => item.is_starter && !item.archived_at,
+          )}
+          close={() => setStarterPicker(false)}
+          choose={(id: string) => createBlankComposition(id)}
+        />
+      )}
+      {resumeVariantDialog && comp && (
+        <SaveResumeVariantDialog
+          starters={(lib.compositions || []).filter(
+            (item: any) => item.is_starter && !item.archived_at,
+          )}
+          initialName={comp.display_title || comp.name}
+          close={() => setResumeVariantDialog(false)}
+          save={async (name: string, replaceId: string) => {
+            await api(`/api/compositions/${comp.id}/resume-variant`, {
+              method: "POST",
+              body: JSON.stringify({
+                name,
+                replace_id: replaceId || null,
+              }),
+            });
+            await loadLibrary();
+            setResumeVariantDialog(false);
+            setStatus("Saved");
+          }}
         />
       )}
     </>
@@ -960,6 +1009,82 @@ export default function App() {
   const activeSummaries = lib.summary_variants.filter(
     (x: any) => !x.archived_at,
   );
+  const resumePane = (
+    <section
+      className={`stage preview-workspace${editorTab === "match" ? " compare-doc" : ""}`}
+      aria-label="Live resume preview"
+    >
+      <div className="preview-toolbar">
+        <button
+          aria-label="Previous Page"
+          disabled={currentPage <= 1}
+          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+        >
+          ‹
+        </button>
+        <output aria-label="Current page and total pages">
+          Page {currentPage} / {fit?.actualPageCount || 1}
+        </output>
+        <button
+          aria-label="Next Page"
+          disabled={currentPage >= (fit?.actualPageCount || 1)}
+          onClick={() =>
+            setCurrentPage((p) => Math.min(fit?.actualPageCount || 1, p + 1))
+          }
+        >
+          ›
+        </button>
+        <span className="preview-toolbar-spacer" />
+        <FitIndicator fit={fit} compact />
+        <span className="preview-toolbar-spacer" />
+        <button
+          onClick={() => setZoom((value) => Math.max(50, value - 10))}
+          aria-label="Zoom out"
+        >
+          −
+        </button>
+        <output aria-label="Preview zoom">{zoom}%</output>
+        <button
+          onClick={() => setZoom((value) => Math.min(150, value + 10))}
+          aria-label="Zoom in"
+        >
+          +
+        </button>
+        <button onClick={toggleFullscreen} aria-label="Expand preview">
+          ⛶
+        </button>
+      </div>
+      <div
+        className="preview-canvas"
+        style={{ "--preview-zoom": zoom / 100 } as React.CSSProperties}
+      >
+        {previewRevision && (
+          <div className="revision-banner">
+            Previewing revision {previewRevision.revision} (read-only){" "}
+            <button onClick={() => setPreviewRevision(null)}>
+              Return to current
+            </button>
+          </div>
+        )}
+        <ResumePreview
+          compositionId={comp.id}
+          revision={comp.revision}
+          preferredPageCount={comp.preferred_page_length || 1}
+          revisionId={previewRevision?.id || null}
+          currentPage={currentPage}
+          onFit={onFit}
+          highlight={
+            editorTab === "match"
+              ? { marks: matchMarks, activeIds: activeMatchIds }
+              : { marks: [], activeIds: [] }
+          }
+          onHighlightPage={setCurrentPage}
+          onHighlightHover={onActiveMatch}
+        />
+      </div>
+    </section>
+  );
+  const matchRailShown = matchRailOpen || !compareJob;
   return (
     <main className="editing-shell">
       <header className="editing-topbar">
@@ -1041,6 +1166,26 @@ export default function App() {
             </button>
           )}
         </div>
+        <div className="editor-tabs header-tabs" role="tablist" aria-label="Editor">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={editorTab === "edit"}
+            className={editorTab === "edit" ? "active" : ""}
+            onClick={() => setEditorTab("edit")}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={editorTab === "match"}
+            className={editorTab === "match" ? "active" : ""}
+            onClick={() => setEditorTab("match")}
+          >
+            Job match
+          </button>
+        </div>
         <div className="editing-actions">
           <span
             className={`topbar-status ${status.toLowerCase().replaceAll(" ", "-")}`}
@@ -1115,15 +1260,63 @@ export default function App() {
           aria-pressed={mobileWorkspace === "editor"}
           onClick={() => setMobileWorkspace("editor")}
         >
-          Editor
+          {editorTab === "match" ? "Match details" : "Editor"}
         </button>
         <button
           aria-pressed={mobileWorkspace === "preview"}
           onClick={() => setMobileWorkspace("preview")}
         >
-          Live View
+          {editorTab === "match" ? "Documents" : "Live View"}
         </button>
       </div>
+      {editorTab === "match" ? (
+        <div
+          className={`compare-workspace mobile-${mobileWorkspace}${matchRailShown ? "" : " rail-collapsed"}`}
+        >
+          <aside className="compare-rail" aria-label="Job match">
+            <div hidden={!matchRailShown}>
+              {compareJob && (
+                <button
+                  type="button"
+                  className="rail-collapse"
+                  onClick={() => setMatchRailOpen(false)}
+                >
+                  Hide match details
+                </button>
+              )}
+              <JobMatchPanel
+                compositionId={comp.id}
+                revision={comp.revision}
+                linkedJobId={comp.job_description_id || ""}
+                reloadLibrary={loadLibrary}
+                active={editorTab === "match"}
+                onCompare={onCompare}
+                onActive={onActiveMatch}
+              />
+            </div>
+            {!matchRailShown && (
+              <button
+                type="button"
+                className="rail-restore"
+                onClick={() => setMatchRailOpen(true)}
+              >
+                Show match details
+              </button>
+            )}
+          </aside>
+          <div className="compare-documents">
+            <div className="compare-doc job-doc">
+              <JobDocument
+                job={compareJob}
+                marks={matchMarks}
+                activeIds={activeMatchIds}
+                onActive={onActiveMatch}
+              />
+            </div>
+            {resumePane}
+          </div>
+        </div>
+      ) : (
       <div
         className={`workspace mobile-${mobileWorkspace}`}
         style={{
@@ -1147,26 +1340,12 @@ export default function App() {
             <span className="version-marker sr-only">
               {RESUME_ENGINE_VERSION} Build {RESUME_ENGINE_BUILD}
             </span>
-            <div className="editor-tabs" role="tablist" aria-label="Editor">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={editorTab === "edit"}
-                className={editorTab === "edit" ? "active" : ""}
-                onClick={() => setEditorTab("edit")}
-              >
-                Edit
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={editorTab === "match"}
-                className={editorTab === "match" ? "active" : ""}
-                onClick={() => setEditorTab("match")}
-              >
-                Job match
-              </button>
-            </div>
+            {comp.is_starter && (
+              <p className="library-note">
+                This is a resume variant. Changes here update the default set
+                for new resumes. Resumes already created from it stay as they are.
+              </p>
+            )}
             <div className="editor-tab-panel" hidden={editorTab !== "edit"}>
               {error && (
                 <div role="alert" className="error">
@@ -1184,6 +1363,11 @@ export default function App() {
                 className={`save-status ${status.toLowerCase().replaceAll(" ", "-")}`}
               >
                 {status}
+                {!comp.is_starter && (
+                  <button type="button" onClick={() => setResumeVariantDialog(true)}>
+                    Save as resume variant
+                  </button>
+                )}
               </div>
               {status === "Conflict" && (
                 <div className="conflict-recovery" role="alert">
@@ -1209,16 +1393,6 @@ export default function App() {
                 chooseLibraryItem={chooseLibraryItem}
                 included={included}
                 openLibraryFromEditor={openLibraryFromEditor}
-              />
-            </div>
-            <div className="editor-tab-panel" hidden={editorTab !== "match"}>
-              <JobMatchPanel
-                compositionId={comp.id}
-                revision={comp.revision}
-                linkedJobId={comp.job_description_id || ""}
-                reloadLibrary={loadLibrary}
-                active={editorTab === "match"}
-                onHighlight={setMatchHighlight}
               />
             </div>
           </aside>
@@ -1260,78 +1434,10 @@ export default function App() {
             Show preview
           </button>
         ) : (
-          <section
-            className="stage preview-workspace"
-            aria-label="Live resume preview"
-          >
-            <div className="preview-toolbar">
-              <button
-                aria-label="Previous Page"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-              >
-                ‹
-              </button>
-              <output aria-label="Current page and total pages">
-                Page {currentPage} / {fit?.actualPageCount || 1}
-              </output>
-              <button
-                aria-label="Next Page"
-                disabled={currentPage >= (fit?.actualPageCount || 1)}
-                onClick={() =>
-                  setCurrentPage((p) =>
-                    Math.min(fit?.actualPageCount || 1, p + 1),
-                  )
-                }
-              >
-                ›
-              </button>
-              <span className="preview-toolbar-spacer" />
-              <FitIndicator fit={fit} compact />
-              <span className="preview-toolbar-spacer" />
-              <button
-                onClick={() => setZoom((value) => Math.max(50, value - 10))}
-                aria-label="Zoom out"
-              >
-                −
-              </button>
-              <output aria-label="Preview zoom">{zoom}%</output>
-              <button
-                onClick={() => setZoom((value) => Math.min(150, value + 10))}
-                aria-label="Zoom in"
-              >
-                +
-              </button>
-              <button onClick={toggleFullscreen} aria-label="Expand preview">
-                ⛶
-              </button>
-            </div>
-            <div
-              className="preview-canvas"
-              style={{ "--preview-zoom": zoom / 100 } as React.CSSProperties}
-            >
-              {previewRevision && (
-                <div className="revision-banner">
-                  Previewing revision {previewRevision.revision} (read-only){" "}
-                  <button onClick={() => setPreviewRevision(null)}>
-                    Return to current
-                  </button>
-                </div>
-              )}
-              <ResumePreview
-                compositionId={comp.id}
-                revision={comp.revision}
-                preferredPageCount={comp.preferred_page_length || 1}
-                revisionId={previewRevision?.id || null}
-                currentPage={currentPage}
-                onFit={onFit}
-                highlight={editorTab === "match" ? matchHighlight : emptyHighlight}
-                onHighlightPage={setCurrentPage}
-              />
-            </div>
-          </section>
+          resumePane
         )}
       </div>
+      )}
       {historyOpen && (
         <RevisionHistoryPanel
           comp={comp}
@@ -1509,6 +1615,105 @@ function ResumeDetails({ comp, save, savePreferences, status }: any) {
   );
 }
 
+function StarterPicker({
+  starters,
+  close,
+  choose,
+}: {
+  starters: any[];
+  close: () => void;
+  choose: (id: string) => void;
+}) {
+  const [id, setId] = useState(
+    starters.find((item) => item.is_default_starter)?.id || starters[0]?.id || "",
+  );
+  return (
+    <ModalShell title="Choose a resume variant" close={close}>
+      <p>New resumes start from a resume variant. Pick the default set for this one.</p>
+      <label>
+        Resume variant
+        <select value={id} onChange={(event) => setId(event.target.value)}>
+          {starters.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+              {item.is_default_starter ? " (default)" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="form-actions">
+        <button onClick={close}>Cancel</button>
+        <button className="primary" disabled={!id} onClick={() => choose(id)}>
+          Create resume
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function SaveResumeVariantDialog({
+  starters,
+  initialName,
+  close,
+  save,
+}: {
+  starters: any[];
+  initialName: string;
+  close: () => void;
+  save: (name: string, replaceId: string) => Promise<void>;
+}) {
+  const [name, setName] = useState(initialName);
+  const [replaceId, setReplaceId] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <ModalShell title="Save as resume variant" close={close}>
+      <p>
+        Store this resume as a default set. Later edits to either one do not
+        change the other.
+      </p>
+      <label>
+        Name
+        <input value={name} onChange={(event) => setName(event.target.value)} />
+      </label>
+      <label>
+        Replace an existing variant
+        <select
+          value={replaceId}
+          onChange={(event) => setReplaceId(event.target.value)}
+        >
+          <option value="">Create a new variant</option>
+          {starters.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {error && <p role="alert">{error}</p>}
+      <div className="form-actions">
+        <button onClick={close}>Cancel</button>
+        <button
+          className="primary"
+          disabled={busy || !name.trim()}
+          onClick={async () => {
+            setBusy(true);
+            setError("");
+            try {
+              await save(name.trim(), replaceId);
+            } catch (reason: any) {
+              setError(reason.message || "Could not save this resume variant");
+              setBusy(false);
+            }
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 function HomeScreen({
   lib,
   error,
@@ -1533,6 +1738,7 @@ function HomeScreen({
   const rows = (lib.compositions || []).filter(
     (item: any) =>
       Boolean(item.archived_at) === archived &&
+      !item.is_starter &&
       [
         item.name,
         item.display_title,
@@ -1644,7 +1850,10 @@ function HomeScreen({
           <p>A Really Useful tool for completing job applications</p>
           {section === "active" && (
             <div className="hero-actions">
-              <button className="primary-action" onClick={createResume}>
+              <button
+                className="primary-action"
+                onClick={() => createResume()}
+              >
                 + New Resume
               </button>
               <button type="button" onClick={onImport}>
@@ -2701,11 +2910,20 @@ function SectionsPanel({
       setStatus("Saved");
     },
     saveProfile: async (id: string, draft: any) => {
-      await api(`/api/library/profiles/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(draft),
-      });
-      await refreshResume();
+      const mode = await chooseSaveMode("entry");
+      if (!mode) return false;
+      setComp(
+        await api(`/api/compositions/${comp.id}/profiles/${id}/save`, {
+          method: "POST",
+          body: JSON.stringify({
+            revision: comp.revision,
+            mode,
+            fields: profilePayload(draft),
+          }),
+        }),
+      );
+      await reloadLibrary();
+      setStatus("Saved");
     },
     pickSummary: async (summaryId: string | null) => {
       setComp(
@@ -2737,11 +2955,21 @@ function SectionsPanel({
       setStatus("Saved");
     },
     saveSummary: async (id: string, draft: any) => {
-      await api(`/api/library/summaries/${id}`, {
-        method: "PUT",
-        body: JSON.stringify(draft),
-      });
-      await refreshResume();
+      const mode = await chooseSaveMode("entry");
+      if (!mode) return false;
+      setComp(
+        await api(`/api/compositions/${comp.id}/summaries/${id}/save`, {
+          method: "POST",
+          body: JSON.stringify({
+            revision: comp.revision,
+            mode,
+            name: (draft.name || "").trim(),
+            body: (draft.body || "").trim(),
+          }),
+        }),
+      );
+      await reloadLibrary();
+      setStatus("Saved");
     },
     pickEntry: async (section: string, item: any, replaceId?: string) => {
       if (!replaceId) {
@@ -2806,52 +3034,54 @@ function SectionsPanel({
       setStatus("Saved");
     },
     saveEntry: async (section: string, id: string, draft: any) => {
-      if (section === "education") {
-        await api(`/api/library/education/${id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            institution: (draft.institution || "").trim(),
-            college_school: draft.college_school || "",
-            location: draft.location || "",
-            degree_type: draft.degree_type || "",
-            degree_major: draft.degree_major || "",
-            graduation_year: draft.graduation_year ?? null,
-            graduation_month: draft.graduation_month ?? null,
-            display_date: draft.display_date || "",
-          }),
-        });
-      } else if (section === "tool_groups") {
+      if (section === "tool_groups") {
         await api(`/api/library/tool-groups/${id}`, {
           method: "PUT",
           body: JSON.stringify({ name: (draft.name || "").trim() }),
         });
-      } else {
-        const kind =
-          section === "projects"
-            ? "project"
-            : section === "leadership"
-              ? "leadership"
-              : "employment";
-        await api(`/api/library/items/${id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            kind,
-            name: draft.name || null,
-            subtitle: draft.subtitle || null,
-            organization: draft.organization || null,
-            location: draft.location || "",
-            title: draft.title || null,
-            date_label: draft.date_label || "",
-            start_year: draft.start_year ?? null,
-            start_month: draft.start_month ?? null,
-            end_year: draft.end_year ?? null,
-            end_month: draft.end_month ?? null,
-            is_current: !!draft.is_current,
-            bullets: [],
-          }),
-        });
+        await refreshResume();
+        return;
       }
-      await refreshResume();
+      const mode = await chooseSaveMode("entry");
+      if (!mode) return false;
+      const fields =
+        section === "education"
+          ? {
+              institution: (draft.institution || "").trim(),
+              college_school: draft.college_school || "",
+              location: draft.location || "",
+              degree_type: draft.degree_type || "",
+              degree_major: draft.degree_major || "",
+              graduation_year: draft.graduation_year ?? null,
+              graduation_month: draft.graduation_month ?? null,
+              display_date: draft.display_date || "",
+            }
+          : {
+              name: draft.name || null,
+              subtitle: draft.subtitle || null,
+              organization: draft.organization || null,
+              location: draft.location || "",
+              title: draft.title || null,
+              date_label: draft.date_label || "",
+              start_year: draft.start_year ?? null,
+              start_month: draft.start_month ?? null,
+              end_year: draft.end_year ?? null,
+              end_month: draft.end_month ?? null,
+              is_current: !!draft.is_current,
+            };
+      setComp(
+        await api(`/api/compositions/${comp.id}/entries/${id}/save`, {
+          method: "POST",
+          body: JSON.stringify({
+            revision: comp.revision,
+            mode,
+            section,
+            fields,
+          }),
+        }),
+      );
+      await reloadLibrary();
+      setStatus("Saved");
     },
     pickBullet: async (
       section: string,
@@ -2907,19 +3137,14 @@ function SectionsPanel({
       setStatus("Saved");
     },
     saveBullet: async (placement: any, body: string) => {
-      await api(`/api/library/variants/${placement.variant_id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          name: placement.variant_name || "Default",
-          body,
-        }),
-      });
+      const mode = await chooseSaveMode("bullet");
+      if (!mode) return false;
       setComp(
         await api(
-          `/api/compositions/${comp.id}/bullet-placements/${placement.id}/update-usage`,
+          `/api/compositions/${comp.id}/bullet-placements/${placement.id}/save`,
           {
             method: "POST",
-            body: JSON.stringify({ revision: comp.revision }),
+            body: JSON.stringify({ revision: comp.revision, mode, body }),
           },
         ),
       );

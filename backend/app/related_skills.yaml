@@ -160,6 +160,7 @@ clusters:
       - ssis
       - matillion
       - lakehouse
+      - alteryx
     phrases:
       - data engineering
       # added
@@ -177,6 +178,7 @@ clusters:
       - azure data factory
       - aws glue
       - google dataflow
+      - enterprise data platform
       - change data capture
       - batch processing
       - stream processing
@@ -205,6 +207,10 @@ clusters:
       - deep learning
       - artificial intelligence
       - generative ai
+      - physical ai
+      - spatial intelligence
+      - biometrics
+      - agentic systems
       - large language models
       - natural language processing
       - computer vision
@@ -323,6 +329,8 @@ clusters:
   - id: spreadsheets
     names:
       - excel
+      - powerpoint
+      - outlook
       - vlookup
       - xlookup
       - vba
@@ -369,12 +377,14 @@ clusters:
       - netsuite
       - peoplesoft
       - epicor
+      - maximo
     phrases:
       - sap s/4hana
       - sap ecc
       - oracle e-business suite
       - oracle fusion
       - jd edwards
+      - ibm maximo
       - microsoft dynamics
       - dynamics 365
       - workday financials
@@ -404,6 +414,7 @@ clusters:
       - visio
       - lucidchart
       - bpmn
+      - signavio
     phrases:
       - business analysis
       - business analyst
@@ -432,14 +443,60 @@ clusters:
       - kanban
       - waterfall
       - pmp
+      - csm
+      - acp
+      - cpo
+      - airtable
+      - bluebeam
+      - workfront
+      - keynote
     phrases:
       - project management
-      - program management
       - microsoft project
       - monday.com
       - scrum master
       - sprint planning
       - project plan
+      - ca clarity
+
+  - id: product-management
+    names:
+      - roadmap
+      - backlog
+    phrases:
+      - product management
+      - product manager
+      - product strategy
+      - product roadmap
+      - product lifecycle management
+      - product discovery
+      - product development
+      - proof of concept
+      - minimum viable product
+      - success criteria
+      - user research
+      - usability testing
+      - test and learn
+      - go-to-market
+
+  - id: program-portfolio-management
+    names:
+      - portfolio
+      - governance
+    phrases:
+      - program management
+      - portfolio management
+      - portfolio review
+      - dependency mapping
+      - risk management
+      - project governance
+      - program governance
+      - resource planning
+      - budget management
+      - change orders
+      - gate reviews
+      - business justification
+      - integrated facility planning
 
   - id: identity-access
     names:
@@ -1152,6 +1209,204 @@ clusters:
       - multi-camera
       - live production
 
+  - id: microsoft-365
+    names:
+      - sharepoint
+    phrases:
+      - microsoft word
+      - microsoft teams
+      - microsoft office
+      - microsoft 365
+
+  - id: power-platform
+    names: []
+    phrases:
+      - power apps
+      - power automate
+      - power platform
+      - microsoft fabric
+      - power bi
+
+  - id: finance
+    names:
+      - gaap
+      - cpa
+      - mba
+      - accounting
+      - longview
+      - epm
+      - tm1
+    phrases:
+      - financial planning
+      - financial analysis
+      - financial reporting
+      - financial forecasting
+      - annual operating plan
+      - long-range plan
+      - income statement
+      - cause of change
+      - quarter close
+      - cost allocation
+      - corporate allocation
+      - oracle epm
+      - smart view
+      - cognos tm1
+      - finance transformation
+
+  - id: tax-technology
+    names:
+      - onesource
+    phrases:
+      - tax technology
+      - tax data management
+      - tax compliance
+      - tax reporting
+      - onesource dataflow
+      - onesource data hub
+      - onesource income tax
+
+  - id: timekeeping
+    names:
+      - timekeeping
+      - workbrain
+    phrases:
+      - my time
+      - time and attendance
+      - time entry
+      - attendance records
+      - time recording
+      - attendance audit
+      - pay accuracy
+      - workforce management
+
+  - id: data-transformation
+    names: []
+    phrases:
+      - data strategy
+      - finance data catalog
+      - finance transformation
+      - data definition
+      - integrated forecasting
+      - process automation
+      - system implementation
+      - system migration
+      - technical issue resolution
+
+  - id: emerging-technology
+    names: []
+    phrases:
+      - emerging technology
+      - generative ai
+      - physical ai
+      - agentic systems
+      - computer vision
+      - spatial intelligence
+      - biometrics
+      - lab environment
+      - research and development
+
+  - id: ai-assistants
+    names:
+      - claude
+      - cursor
+      - copilot
+    phrases: []
+
+categories:
+  tool:
+    - python
+    - sql
+    - bi
+    - cloud
+    - observability
+    - nosql
+    - spreadsheets
+    - web-analytics
+    - erp
+    - itsm
+    - ats
+    - workday
+    - java
+    - javascript
+    - dotnet
+    - systems-languages
+    - version-control
+    - software-testing
+    - cad
+    - simulation
+    - electrical
+    - camera-systems
+    - lenses
+    - camera-movement
+    - lighting-grip
+    - color-grading
+    - video-editing
+    - microsoft-365
+    - power-platform
+    - ai-assistants
+    - identity-access
+  domain:
+    - finance
+    - tax-technology
+    - timekeeping
+    - human-resources
+    - talent-acquisition
+    - total-rewards
+    - payroll
+    - employee-relations
+    - learning-development
+    - performance-talent
+    - employee-engagement
+    - organizational-change
+    - people-analytics
+    - hris
+    - data-governance
+    - information-systems
+    - manufacturing-quality
+    - cinematography
+    - camera-crew
+    - video-production
+    - engineering-disciplines
+    - data-transformation
+    - emerging-technology
+    - integration
+  methodology:
+    - data-engineering
+    - data-science
+    - statistics
+    - data-analytics
+    - business-analysis
+    - project-management
+    - product-management
+    - program-portfolio-management
+    - software-engineering
+
+families:
+  - id: finance-transformation
+    label: Finance transformation
+    clusters: [finance, data-transformation]
+  - id: hris
+    label: HRIS
+    clusters: [hris, workday, human-resources]
+  - id: tax-technology
+    label: Tax technology
+    clusters: [tax-technology]
+  - id: technical-program
+    label: Technical programme
+    clusters: [program-portfolio-management, project-management]
+  - id: product
+    label: Product
+    clusters: [product-management]
+  - id: data
+    label: Data
+    clusters: [data-science, data-engineering, data-analytics]
+  - id: timekeeping
+    label: Timekeeping
+    clusters: [timekeeping]
+  - id: emerging-technology
+    label: Emerging technology
+    clusters: [emerging-technology, ai-assistants]
+
 aliases:
   # existing
   k8s: kubernetes
@@ -1231,6 +1486,45 @@ aliases:
   uat: user acceptance testing
   brd: business requirements document
   ms project: microsoft project
+  powerapps: power apps
+  powerautomate: power automate
+  "ms office": microsoft office
+  msoffice: microsoft office
+  "ms word": microsoft word
+  "microsoft word": microsoft word
+  "ms powerpoint": powerpoint
+  "microsoft powerpoint": powerpoint
+  ppt: powerpoint
+  "ms outlook": outlook
+  "microsoft outlook": outlook
+  "ms teams": microsoft teams
+  "microsoft teams": microsoft teams
+  "sharepoint online": sharepoint
+  "ms fabric": microsoft fabric
+  myjira: jira
+  "my jira": jira
+  smartview: smart view
+  "oracle smart view": smart view
+  "fp&a": financial planning
+  fpa: financial planning
+  "onesource dataflow": onesource
+  "onesource data hub": onesource
+  "onesource income tax": onesource
+  onesource: onesource
+  workbrain: my time
+  infor: my time
+  "infor workbrain": my time
+  mytime: my time
+  "github copilot": copilot
+  "microsoft copilot": copilot
+  "claude cowork": claude
+  myppm: ca clarity
+  "my ppm": ca clarity
+  "project management professional": pmp
+  "pmp certification": pmp
+  edp: enterprise data platform
+  "ms sql report builder": ssrs
+  "sql report builder": ssrs
   sso: single sign-on
   rbac: role-based access control
   iam: identity and access management
@@ -1290,6 +1584,20 @@ aliases:
   sup orgs: supervisory organizations
   sup org: supervisory organizations
   org charts: org chart
+
+  # ---- job-family additions ----
+  poc: proof of concept
+  pocs: proof of concept
+  mvp: minimum viable product
+  plm: product lifecycle management
+  fp&a: financial planning
+  fpa: financial planning
+  aop: annual operating plan
+  lrp: long-range plan
+  onesource data flow: onesource
+  time & attendance: time and attendance
+  time attendance: time and attendance
+  r&d: research and development
 
   # ---- software engineering ----
   nodejs: node.js
@@ -1474,3 +1782,17 @@ combinations:
     relates_to: color-grading
   - when: [video, editing]
     relates_to: video-editing
+
+  # ---- cross-functional target roles ----
+  - when: [requirements gathering, process mapping]
+    relates_to: business-analysis
+  - when: [roadmap, user research]
+    relates_to: product-management
+  - when: [portfolio, risk management]
+    relates_to: program-portfolio-management
+  - when: [financial planning, data governance]
+    relates_to: data-transformation
+  - when: [tax technology, Power BI]
+    relates_to: tax-technology
+  - when: [time and attendance, HRIS]
+    relates_to: timekeeping

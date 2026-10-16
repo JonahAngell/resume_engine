@@ -20,6 +20,7 @@ type Status = "active" | "archived" | "all";
 type View = "list" | "card";
 const SECTIONS = [
   ["", "All Items", "all-items"],
+  ["resume-variants", "Resume variants", "library"],
   ["profile", "Profile", "profile"],
   ["experience", "Experience", "experience"],
   ["projects", "Projects", "projects"],
@@ -106,6 +107,12 @@ export default function StandaloneLibrary({
     setBusy(true);
     setError("");
     try {
+      if (section === "resume-variants") {
+        setData({ items: [], total_items: 0, total_pages: 1, page: 1 });
+        setSelected([]);
+        setDetail(null);
+        return;
+      }
       const params = new URLSearchParams({
         q: query,
         status,
@@ -114,7 +121,7 @@ export default function StandaloneLibrary({
         page_size: String(pageSize),
       });
       const bulletSections = SECTIONS.map(([key]) => key).filter(
-        (key) => key && key !== section,
+        (key) => key && key !== section && key !== "resume-variants",
       );
       const [items, bulletTotals] = await Promise.all([
         api<any>(`/api/library-management/items?${params}`),
@@ -260,7 +267,8 @@ export default function StandaloneLibrary({
     [data.total_pages, page],
   );
   const entryMode =
-    section === "profile" || (section !== "" && contentView === "entries");
+    section !== "resume-variants" &&
+    (section === "profile" || (section !== "" && contentView === "entries"));
   const sectionCounts = useMemo(() => {
     if (!entryMode) return counts;
     const next: Record<string, number> = {};
@@ -403,7 +411,13 @@ export default function StandaloneLibrary({
                   <AppIcon name={icon} />
                   {label}
                 </span>
-                <strong>{sectionCounts[key || "all"] || 0}</strong>
+                <strong>
+                  {key === "resume-variants"
+                    ? (lib.compositions || []).filter(
+                        (item: any) => item.is_starter && !item.archived_at,
+                      ).length
+                    : sectionCounts[key || "all"] || 0}
+                </strong>
               </button>
             ))}
             <div className="library-tip">
@@ -424,7 +438,9 @@ export default function StandaloneLibrary({
             aria-busy={busy}
           >
             <div className="library-result-toolbar" ref={toolbarRef}>
-              {section !== "" && section !== "profile" && (
+              {section !== "" &&
+                section !== "profile" &&
+                section !== "resume-variants" && (
                 <div
                   className="view-toggle content-toggle"
                   role="group"
@@ -494,7 +510,14 @@ export default function StandaloneLibrary({
               </div>
             </div>
             <div className="library-results-viewport" ref={viewportRef}>
-              {entryMode ? (
+              {section === "resume-variants" ? (
+                <ResumeVariantResults
+                  lib={lib}
+                  onOpenResume={onOpenResume}
+                  reloadLibrary={reloadLibrary}
+                  setError={setError}
+                />
+              ) : entryMode ? (
                 <EntryResults
                   lib={lib}
                   section={section}
@@ -1019,6 +1042,122 @@ function SectionSelect({
   );
 }
 
+function ResumeVariantResults({ lib, onOpenResume, reloadLibrary, setError }: any) {
+  const rows = (lib.compositions || []).filter((item: any) => item.is_starter);
+  if (!rows.length)
+    return (
+      <div className="library-state">
+        <strong>No resume variants</strong>
+        <span>
+          Open a resume and choose Save as resume variant to store a default set.
+        </span>
+      </div>
+    );
+  return (
+    <div className="library-cards">
+      {rows.map((item: any) => (
+        <article key={item.id} className="library-card">
+          <strong>{item.name}</strong>
+          <p>{item.display_title || item.description || "Default set"}</p>
+          {item.is_default_starter && !item.archived_at && (
+            <span className="status-badge default">Default</span>
+          )}
+          {item.archived_at && <span className="status-badge">Archived</span>}
+          <div className="form-actions">
+            {!item.archived_at && (
+              <button type="button" onClick={() => onOpenResume(item.id)}>
+                Open
+              </button>
+            )}
+            {!item.archived_at && !item.is_default_starter && (
+              <button
+                type="button"
+                onClick={() =>
+                  api(`/api/resume-variants/${item.id}/default`, {
+                    method: "POST",
+                  })
+                    .then(() => reloadLibrary())
+                    .catch((error: any) => setError(error.message))
+                }
+              >
+                Make default
+              </button>
+            )}
+            {item.archived_at && (
+              <button
+                type="button"
+                onClick={() =>
+                  api(`/api/compositions/${item.id}/restore`, {
+                    method: "POST",
+                    body: JSON.stringify({ revision: item.revision }),
+                  })
+                    .then(() => reloadLibrary())
+                    .catch((error: any) => setError(error.message))
+                }
+              >
+                Restore
+              </button>
+            )}
+          </div>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function AttachBullet({ detail, mutate }: any) {
+  const [target, setTarget] = useState("");
+  const [options, setOptions] = useState<any[]>([]);
+  useEffect(() => {
+    const params = new URLSearchParams({
+      section: detail.section || "",
+      page: "1",
+      page_size: "100",
+      status: "active",
+      q: "",
+    });
+    api<any>(`/api/library-management/items?${params}`)
+      .then((row) =>
+        setOptions(
+          (row.items || []).filter((item: any) => item.id !== detail.id),
+        ),
+      )
+      .catch(() => setOptions([]));
+  }, [detail.id, detail.section]);
+  if (!options.length) return null;
+  return (
+    <fieldset className="variant-create-card">
+      <legend>Make this bullet a variant of another bullet</legend>
+      <select
+        aria-label="Target bullet"
+        value={target}
+        onChange={(event) => setTarget(event.target.value)}
+      >
+        <option value="">Choose a bullet</option>
+        {options.map((item) => (
+          <option key={item.id} value={item.id}>
+            {(item.body || "Bullet").slice(0, 80)}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        disabled={!target}
+        onClick={() =>
+          mutate(() =>
+            api(`/api/library/bullets/${detail.id}/attach`, {
+              method: "POST",
+              body: JSON.stringify({ target_bullet_id: target }),
+            }),
+          )
+        }
+      >
+        Move onto that bullet
+      </button>
+    </fieldset>
+  );
+}
+
 function Variants({ detail, mutate }: any) {
   const [name, setName] = useState("");
   const [body, setBody] = useState("");
@@ -1073,6 +1212,17 @@ function Variants({ detail, mutate }: any) {
               }
             >
               Duplicate
+            </button>
+            <button
+              type="button"
+              disabled={!!v.archived_at}
+              onClick={() =>
+                mutate(() =>
+                  api(`/api/library/variants/${v.id}/detach`, { method: "POST" }),
+                )
+              }
+            >
+              Make this its own bullet
             </button>
             <button
               onClick={() =>
@@ -1137,6 +1287,7 @@ function Variants({ detail, mutate }: any) {
           </div>
         </article>
       )}
+      <AttachBullet detail={detail} mutate={mutate} />
       <fieldset className="variant-create-card">
         <legend>Add New Variant</legend>
         <input
@@ -1589,9 +1740,10 @@ function recordUsage(lib: any, section: string, detail: any) {
     .filter(Boolean)
     .map((c: any) => row(c, sectionLabel(section)));
 }
-function variantDetail(bullet: any) {
+function variantDetail(bullet: any, section: string) {
   return {
     id: bullet.id,
+    section,
     variants: (bullet.variants || []).map((v: any) => ({
       id: v.variant_id || v.id,
       name: v.variant_name || v.name || "Variant",
@@ -1602,6 +1754,41 @@ function variantDetail(bullet: any) {
     })),
   };
 }
+function fieldVariantText(kind: string, variant: any) {
+  if (kind === "profile")
+    return [variant.display_name, variant.email, variant.phone]
+      .filter(Boolean)
+      .join(" · ");
+  if (kind === "education")
+    return [
+      variant.institution,
+      variant.degree_major || variant.degree,
+      variant.display_date || variant.graduation_date,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  return [variant.item_name || variant.organization, variant.title, variant.date_label]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function FieldVariantList({ kind, detail }: { kind: string; detail: any }) {
+  const rows = (detail.field_variants || []).filter((variant: any) => !variant.archived_at);
+  if (!rows.length) return null;
+  return (
+    <div className="variant-management variant-list">
+      {rows.map((variant: any) => (
+        <article className="variant-card" key={variant.id}>
+          <div className="variant-card-header">
+            <strong>{variant.name}</strong>
+          </div>
+          <p className="variant-wording">{fieldVariantText(kind, variant)}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function EntryDetails({
   lib,
   section: librarySection,
@@ -1706,6 +1893,9 @@ function EntryDetails({
     setDetail(null);
   };
   const bullets = groupEntryBullets(detail);
+  const fieldVariants = (detail.field_variants || []).filter(
+    (variant: any) => !variant.archived_at,
+  );
   const usage = recordUsage(lib, section, detail);
   const refreshAfterVariant = async (fn: () => Promise<any>) => {
     try {
@@ -1758,7 +1948,15 @@ function EntryDetails({
           aria-selected={tab === "variants"}
           onClick={() => setTab("variants")}
         >
-          Variants ({kind === "profile" ? 1 : bullets.reduce((n: number, b: any) => n + (b.variants?.length || 0), 0)})
+          Variants (
+            {(kind === "profile" ? Math.max(fieldVariants.length, 1) : fieldVariants.length) +
+              (kind === "profile"
+                ? 0
+                : bullets.reduce(
+                    (n: number, b: any) => n + (b.variants?.length || 0),
+                    0,
+                  ))}
+          )
         </button>
         <button
           role="tab"
@@ -1800,6 +1998,8 @@ function EntryDetails({
       ) : tab === "variants" ? (
         kind === "profile" ? (
           <div className="variant-management variant-list">
+            <FieldVariantList kind={kind} detail={detail} />
+            <div className="variant-management variant-list">
             <article className="variant-card">
               <div className="variant-card-header">
                 <strong>{detail.label}</strong>
@@ -1813,21 +2013,24 @@ function EntryDetails({
                 <button onClick={duplicateProfile}>Duplicate</button>
               </div>
             </article>
+            </div>
           </div>
-        ) : bullets.length ? (
+        ) : (
           <div className="entry-variants">
+            <FieldVariantList kind={kind} detail={detail} />
             {bullets.map((b: any) => (
               <Variants
                 key={b.id}
-                detail={variantDetail(b)}
+                detail={variantDetail(b, section)}
                 mutate={refreshAfterVariant}
               />
             ))}
-          </div>
-        ) : (
-          <div className="library-state">
-            <strong>This record has no wording variants</strong>
-            <span>Bullets added to this entry will show their variants here.</span>
+            {!fieldVariants.length && !bullets.length && (
+              <div className="library-state">
+                <strong>This record has no wording variants</strong>
+                <span>Bullets added to this entry will show their variants here.</span>
+              </div>
+            )}
           </div>
         )
       ) : (

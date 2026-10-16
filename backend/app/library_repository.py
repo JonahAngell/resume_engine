@@ -107,6 +107,18 @@ async def fetch_library(conn, user_id):
         "SELECT id,label,name,phone,email,linkedin_label,linkedin_url,sort_order,archived_at,created_at,updated_at FROM profiles WHERE user_id=%s ORDER BY sort_order,id",
         (user_id,),
     )
+    profile_variants = await _many(
+        conn,
+        """SELECT id,profile_id,name,display_name,phone,email,linkedin_label,linkedin_url,is_default,archived_at
+           FROM profile_field_variants WHERE user_id=%s ORDER BY sort_order,id""",
+        (user_id,),
+    )
+    for profile in profiles:
+        profile["field_variants"] = [
+            variant
+            for variant in profile_variants
+            if variant["profile_id"] == profile["id"]
+        ]
     summaries = await _many(
         conn,
         "SELECT id,name,body,tags,sort_order,archived_at,created_at,updated_at FROM summary_variants WHERE user_id=%s ORDER BY sort_order,id",
@@ -117,7 +129,19 @@ async def fetch_library(conn, user_id):
         "SELECT id,institution,college_school,location,degree_type,degree_major,degree,graduation_year,graduation_month,display_date,graduation_date,sort_order,archived_at,created_at,updated_at FROM education_items WHERE user_id=%s ORDER BY sort_order,id",
         (user_id,),
     )
+    education_variants = await _many(
+        conn,
+        """SELECT id,education_item_id,name,institution,college_school,location,degree_type,degree_major,degree,
+                  graduation_year,graduation_month,display_date,graduation_date,is_default,archived_at
+           FROM education_item_variants WHERE user_id=%s ORDER BY sort_order,id""",
+        (user_id,),
+    )
     for item in education:
+        item["field_variants"] = [
+            variant
+            for variant in education_variants
+            if variant["education_item_id"] == item["id"]
+        ]
         item["bullets"] = await _many(
             conn,
             "SELECT b.id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.education_item_id=%s ORDER BY b.sort_order,v.sort_order,v.id",
@@ -135,6 +159,14 @@ async def fetch_library(conn, user_id):
             (user_id, group["id"]),
         )
 
+    content_variants = await _many(
+        conn,
+        """SELECT id,content_item_id,name,item_name,subtitle,organization,location,title,date_label,
+                  start_year,start_month,end_year,end_month,is_current,is_default,archived_at
+           FROM content_item_variants WHERE user_id=%s ORDER BY sort_order,id""",
+        (user_id,),
+    )
+
     async def content(kind):
         rows = await _many(
             conn,
@@ -142,6 +174,11 @@ async def fetch_library(conn, user_id):
             (user_id, kind),
         )
         for row in rows:
+            row["field_variants"] = [
+                variant
+                for variant in content_variants
+                if variant["content_item_id"] == row["id"]
+            ]
             row["bullets"] = await _many(
                 conn,
                 "SELECT b.id,b.parent_id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at,v.updated_at variant_updated_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.parent_id=%s ORDER BY b.sort_order,v.sort_order,v.id",
@@ -167,7 +204,7 @@ async def fetch_library(conn, user_id):
     )
     compositions = await _many(
         conn,
-        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,profile_id,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s ORDER BY updated_at DESC,id",
+        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,profile_id,is_starter,is_default_starter,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s ORDER BY updated_at DESC,id",
         (user_id,),
     )
     composition_bullets = await _many(
@@ -205,7 +242,7 @@ async def fetch_library(conn, user_id):
 async def load_composition(conn, user_id, composition_id, include_archived=False):
     return await _one(
         conn,
-        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,summary_variant_id,profile_id,revision,render_payload,interest_layout,section_order,archived_at,created_at,updated_at,autosaved_at FROM resume_compositions WHERE id=%s AND user_id=%s"
+        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,summary_variant_id,profile_id,profile_variant_id,is_starter,is_default_starter,revision,render_payload,interest_layout,section_order,archived_at,created_at,updated_at,autosaved_at FROM resume_compositions WHERE id=%s AND user_id=%s"
         + ("" if include_archived else " AND archived_at IS NULL"),
         (composition_id, user_id),
     )
@@ -238,12 +275,21 @@ async def _profile_label_taken(conn, user_id, label, except_id=None):
 async def _refresh_profile_headers(conn, user_id, profile_id, header):
     compositions = await _many(
         conn,
-        "SELECT id,render_payload FROM resume_compositions WHERE user_id=%s AND profile_id=%s FOR UPDATE",
+        "SELECT id,render_payload,profile_variant_id FROM resume_compositions WHERE user_id=%s AND profile_id=%s FOR UPDATE",
         (user_id, profile_id),
     )
     for composition in compositions:
         resume = composition["render_payload"]
-        resume["header"] = header
+        variant_id = composition.get("profile_variant_id")
+        if variant_id:
+            variant = await _one(
+                conn,
+                "SELECT display_name AS name,phone,email,linkedin_label,linkedin_url FROM profile_field_variants WHERE id=%s",
+                (variant_id,),
+            )
+            resume["header"] = _profile_header(variant) if variant else header
+        else:
+            resume["header"] = header
         await _save_library_refresh(
             conn, user_id, composition["id"], resume, "profile-library-update"
         )
@@ -460,10 +506,35 @@ async def update_education(conn, user_id, resource_id, payload):
                 items = list(comp["render_payload"].get("education", []))
                 selected = await _many(
                     conn,
-                    "SELECT e.* FROM composition_items i JOIN education_items e ON e.id=i.item_id WHERE i.composition_id=%s AND i.section='education' ORDER BY i.sort_order",
+                    """SELECT e.*, v.institution v_institution, v.college_school v_college, v.location v_location,
+                              v.degree_type v_degree_type, v.degree_major v_degree_major, v.degree v_degree,
+                              v.graduation_year v_year, v.graduation_month v_month, v.display_date v_display,
+                              v.graduation_date v_graduation
+                       FROM composition_items i
+                       JOIN education_items e ON e.id=i.item_id
+                       LEFT JOIN education_item_variants v ON v.id=i.variant_id
+                       WHERE i.composition_id=%s AND i.section='education'
+                       ORDER BY i.sort_order""",
                     (comp["id"],),
                 )
-                items = [_education_render(item) for item in selected]
+                rendered = []
+                for item in selected:
+                    if item.get("v_institution") is not None:
+                        item = {
+                            **item,
+                            "institution": item["v_institution"],
+                            "college_school": item["v_college"],
+                            "location": item["v_location"] or "",
+                            "degree_type": item["v_degree_type"],
+                            "degree_major": item["v_degree_major"],
+                            "degree": item["v_degree"] or "",
+                            "graduation_year": item["v_year"],
+                            "graduation_month": item["v_month"],
+                            "display_date": item["v_display"],
+                            "graduation_date": item["v_graduation"] or "",
+                        }
+                    rendered.append(_education_render(item))
+                items = rendered
                 resume = comp["render_payload"]
                 resume["education"] = items
                 resume = await _apply_resume_placements(
