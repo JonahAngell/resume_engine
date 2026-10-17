@@ -20,7 +20,6 @@ from app.library_repository import (
     search,
     set_archive,
 )
-from app.library_service import import_seed
 from async_test_utils import run_async
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,12 +27,52 @@ URL = os.getenv("TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is required")
 
 
-async def apply_migrations(conn, names=None):
+PHASE1D = {
+    "001_phase1b_master_library.sql",
+    "002_phase1c_editing.sql",
+    "003_phase1d_ownership_guards.sql",
+}
+PHASE2 = "004_phase2_historical_library.sql"
+
+
+async def apply_migrations(conn, names=None, after=None):
     paths = sorted((ROOT / "backend/migrations").glob("*.sql"))
     if names is not None:
         paths = [path for path in paths if path.name in names]
+    if after is not None:
+        paths = [path for path in paths if path.name > after]
     for path in paths:
         await conn.execute(path.read_text(encoding="utf-8"))
+
+
+async def seed_phase1d(conn, user_id, payload):
+    """Library rows a Phase 1D user had, written with Phase 1D columns only.
+
+    The current import_seed writes columns from later migrations, so it cannot run here.
+    """
+    header = payload["header"]
+    await conn.execute(
+        "INSERT INTO profiles(user_id,name,phone,email,linkedin_label,linkedin_url) VALUES(%s,%s,%s,%s,%s,%s)",
+        (user_id, header["name"], header.get("phone", ""), header.get("email", ""),
+         header.get("linkedin_label", ""), header.get("linkedin_url", "")),
+    )
+    summary_id = (
+        await (
+            await conn.execute(
+                "INSERT INTO summary_variants(user_id,name,body,sort_order) VALUES(%s,'Seed summary',%s,0) RETURNING id",
+                (user_id, payload["summary"]),
+            )
+        ).fetchone()
+    )[0]
+    return (
+        await (
+            await conn.execute(
+                "INSERT INTO resume_compositions(user_id,name,summary_variant_id,render_payload) "
+                "VALUES(%s,'Seed resume',%s,%s::jsonb) RETURNING id",
+                (user_id, summary_id, json.dumps(payload)),
+            )
+        ).fetchone()
+    )[0]
 
 
 async def exercise_phase2():
@@ -43,27 +82,15 @@ async def exercise_phase2():
     try:
         options = f"-c search_path={schema},public"
         async with await psycopg.AsyncConnection.connect(URL, options=options) as conn:
-            await apply_migrations(
-                conn,
-                {
-                    "001_phase1b_master_library.sql",
-                    "002_phase1c_editing.sql",
-                    "003_phase1d_ownership_guards.sql",
-                },
-            )
+            await apply_migrations(conn, PHASE1D)
             user_a = await ensure_user(
                 conn, CurrentUser("phase2-a", "a", "User A", None)
             )
             user_b = await ensure_user(
                 conn, CurrentUser("phase2-b", "b", "User B", None)
             )
-            imported, composition_id = await import_seed(
-                conn,
-                user_a["id"],
-                ROOT / "seed/jonah-resume.json",
-                "phase2-seed",
-            )
-            assert imported
+            seed = json.loads((ROOT / "seed/jonah-resume.json").read_text(encoding="utf-8"))
+            composition_id = await seed_phase1d(conn, user_a["id"], seed)
 
             # Read only columns available in the Phase 1D schema. The Phase 2
             # repository loader cannot be used until migration 004 adds description.
@@ -80,7 +107,18 @@ async def exercise_phase2():
             original_payload = before[3]
 
             # Apply Phase 2 to populated Phase 1D data and verify backfill compatibility.
-            await apply_migrations(conn, {"004_phase2_historical_library.sql"})
+            await apply_migrations(conn, {PHASE2})
+            backfilled = await (
+                await conn.execute(
+                    "SELECT revision, snapshot FROM composition_revisions WHERE composition_id=%s",
+                    (composition_id,),
+                )
+            ).fetchall()
+            assert [row[0] for row in backfilled] == [1]
+            assert backfilled[0][1]["resume"] == original_payload
+
+            # The current repository code needs every later migration too.
+            await apply_migrations(conn, after=PHASE2)
             after = await load_composition(conn, user_a["id"], composition_id)
             assert after["render_payload"] == original_payload
             migrated = await list_revisions(conn, user_a["id"], composition_id)
