@@ -99,6 +99,49 @@ class VariantSuggestions(BaseModel):
     category: str = ""
     drafts: list[VariantDraft] = []
     dropped: int = 0
+    fits: bool = True
+    reason: str = ""
+
+
+class KeywordRevision(BaseModel):
+    id: str
+    placement_id: str
+    section: str = ""
+    entry: str = ""
+    original: str
+    body: str
+    rationale: str = ""
+
+
+class KeywordNewBullet(BaseModel):
+    id: str
+    parent_id: str
+    section: str
+    entry: str
+    body: str
+    rationale: str = ""
+    placeholders: bool = False
+
+
+class KeywordEntry(BaseModel):
+    parent_id: str
+    section: str
+    entry: str
+
+
+class KeywordAssist(BaseModel):
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    model: str = ""
+    revision: int = 0
+    keyword: str = ""
+    category: str = ""
+    allowed: bool = True
+    revisions: list[KeywordRevision] = []
+    new_bullets: list[KeywordNewBullet] = []
+    entries: list[KeywordEntry] = []
+    no_fit_reason: str = ""
+    dropped: int = 0
 
 
 class CoachSuggestion(BaseModel):

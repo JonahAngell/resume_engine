@@ -880,3 +880,15 @@ def test_skill_group_option_is_add_skill():
     suggestion = result["required"][0]["suggestions"][0]
     assert suggestion["line_id"] == "tool-group-0"
     assert suggestion["action"] == "add_skill"
+
+
+def test_keywords_say_whether_they_belong_in_skills():
+    job = """Product Analyst
+
+Required Qualifications
+- Experience with A/B testing
+- Proficiency in Tableau
+"""
+    match = match_qualifications(job, {"summary": "Analyst"}, [], {})
+    flags = {item["keyword"]: item["skill"] for row in match["required"] for item in row["keywords"]}
+    assert flags == {"A/B testing": False, "Tableau": True}

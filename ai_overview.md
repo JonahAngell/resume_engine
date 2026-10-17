@@ -150,13 +150,14 @@ Design notes and the review behind these features are in `docs/ai_suggestions_bl
 | Path | Role |
 |---|---|
 | `backend/app/ai_variants.py` | Prompt, guardrail filter (`drop_reason`, `filter_drafts`), cache, issued-draft record, `suggest_variants`. |
+| `backend/app/ai_keyword.py` | Work into resume: one keyword across the whole resume (`assist_keyword`, `filter_keyword`, `resume_entries`). |
 | `backend/app/skill_groups.py` | Local group ladder (`recommend_group`), AI fallback (`recommend_with_ai`), `same_skill`. |
 | `backend/app/related_skills.yaml` | `group_hints`, `cluster_hints`, `category_hints` for the hint step. |
 | `backend/app/library_repository.py` | `load_skill_inputs`, `add_skill_to_resume`. |
 | `backend/app/job_repository.py` | `load_variant_inputs` (placement wording and job text). |
 | `backend/app/resume_variants.py` | `save_bullet_edit(..., name=, ai=)` writes the accepted variant. |
 | `backend/migrations/024_bullet_variant_ai_provenance.sql` | `ai_generated`, `ai_model`, `ai_job_id` and the body-change trigger. |
-| `frontend/src/SuggestVariantDialog.tsx`, `frontend/src/AddSkillDialog.tsx` | The two dialogs, opened from the dashboard and the highlight popover (state in `App.tsx`). |
+| `frontend/src/SuggestVariantDialog.tsx`, `frontend/src/AddSkillDialog.tsx`, `frontend/src/KeywordAssistDialog.tsx` | The dialogs, opened from the dashboard and the highlight popover (state in `App.tsx`). `KeywordText.tsx` marks the keyword and `[placeholders]` in drafts. |
 | `backend/app/templates/resume.html` | Preview chip (Suggest / Add to Skills), inside `{% if measure %}` only. |
 | `tests/test_ai_variants*.py`, `tests/test_skill_*.py`, `tests/test_ai_suggestions_contract.py` | Unit, database and contract tests. |
 
@@ -164,32 +165,35 @@ Design notes and the review behind these features are in `docs/ai_suggestions_bl
 
 | Route | Saves | Notes |
 |---|---|---|
-| `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`, `goal` (`concise`/`impact`/`align`). Bullet text is read from the placement. |
+| `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`, `goal` (`concise`/`impact`/`align`), `incorporate_keyword`. Bullet text is read from the placement. In keyword mode every draft must contain the keyword (or a dictionary form of it), and the reply carries `fits`/`reason` when the model says it doesn't fit. |
+| `POST /api/compositions/{cid}/ai-keyword-assist` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`. Returns up to 3 `revisions` (one per placed bullet), up to 2 `new_bullets` (each tied to a role or project), the `entries` a new bullet can go under, `allowed`, `no_fit_reason`. Guarded keywords return `allowed: false` without calling the model. |
+| `POST /api/compositions/{cid}/ai-keyword-assist/accept-new` | bullet + variant + placement | Body: `revision`, `parent_id` (a role or project on this resume), `body`, `source`, `job_id`, `model`. 422 while the body still has a `[placeholder]`; 404 for an entry not on this resume; 409 on a stale revision. Revisions are accepted through `.../ai-variants/accept`. |
 | `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants/accept` | variant + placement | Body: `revision`, `name`, `body`, `source` (`draft`/`edited`/`own`), `job_id`, `model`. 409 on a stale revision, with no variant written. |
 | `POST /api/compositions/{cid}/skills/recommend` | nothing | Body: `keyword`, `allow_ai`. The UI calls with `allow_ai=false` first and again with `true` only when `source == "none"`. |
 | `POST /api/compositions/{cid}/skills` | tool, group, this resume | Body: `revision`, `name`, and `group_id` or `new_group_name`. |
 
 ## Match data
 
-`TagSuggestion` carries `placement_id` (bullet lines) and `action`: `add_skill` for dictionary tools, unknown terms on tool rows, `tool-group-*` lines and the `tools` fallback; `rewrite` for other keywords on a placed bullet. `matchMarks.ts` turns these into `targets` so the preview chip can find a line by id, or by its text when the id is not in the preview.
+Each `RequirementKeyword` carries `skill` (`is_skill_keyword`): skill keywords get Add to Skills, every other missing keyword gets Work into resume. `TagSuggestion` carries `placement_id` (bullet lines) and `action`: `add_skill` for dictionary tools, unknown terms on tool rows, `tool-group-*` lines and the `tools` fallback; `rewrite` for other keywords on a placed bullet. `matchMarks.ts` turns these into `targets` so the preview chip can find a line by id, or by its text when the id is not in the preview.
 
 ## Provenance
 
-`ai_generated` is true only when `source == "draft"` and the body exactly matches a draft this process issued for that placement and job (`issued_draft`). An edited draft stores `ai_model` and `ai_job_id` with `ai_generated = false`. Write my own stores none. Any later body change clears `ai_generated` through the trigger; renames keep it. Duplicating a variant or a bullet copies all three columns. Deleting the job nulls `ai_job_id`. The library shows an "AI-written" badge; nothing is rendered into the resume or PDF.
+`ai_generated` is true only when `source == "draft"` and the body exactly matches a draft this process issued for that placement and job (`issued_draft`). New bullets from Work into resume are issued under `new:{parent_id}`, so moving one to a different entry, or filling in a placeholder, counts as an edit. An edited draft stores `ai_model` and `ai_job_id` with `ai_generated = false`. Write my own stores none. Any later body change clears `ai_generated` through the trigger; renames keep it. Duplicating a variant or a bullet copies all three columns. Deleting the job nulls `ai_job_id`. The library shows an "AI-written" badge; nothing is rendered into the resume or PDF.
 
 ## Guardrails
 
-A draft is dropped when it adds a number (digits or spelled), a dictionary term or capitalised job keyword that the original does not show, a mid-sentence capitalised word or acronym not in the original, or, for `tool`/`credential`/`degree`/`experience_duration`, the keyword itself. Domain, methodology, responsibility and soft-skill keywords may appear. Drafts over 500 characters or 1.6× the original (plus 60), equal to the original, or equal to an earlier draft are dropped. Only counts are logged.
+A draft is dropped when it adds a number (digits or spelled), a dictionary term or capitalised job keyword that the original does not show, a mid-sentence capitalised word or acronym not in the original, or, for `tool`/`credential`/`degree`/`experience_duration`, the keyword itself. Domain, methodology, responsibility and soft-skill keywords may appear. In keyword mode a draft without the keyword is dropped (`missing_keyword`). A new bullet is checked the same way with its entry (title, organization, location and that entry's bullets) as the original, without the length-ratio and unchanged checks, after `[placeholders]` are removed; placeholders are not allowed in revisions. Drafts over 500 characters or 1.6× the original (plus 60), equal to the original, or equal to an earlier draft are dropped. Only counts are logged.
 
 ## Caches
 
-`ai_variants._CACHE` (32) keys on bullet, redacted job, requirement, keyword, category, goal, `VARIANT_PROMPT_VERSION` and model. `skill_groups._CACHE` (64) keys on the canonical keyword, sorted group and tool names, `SKILL_PROMPT_VERSION` and model. Both are per process and cleared on restart.
+`ai_variants._CACHE` (32) keys on bullet, redacted job, requirement, keyword, category, goal, `VARIANT_PROMPT_VERSION`, model and keyword mode. `ai_keyword._CACHE` (16) keys on the full request (keyword, requirement, redacted job, entries, bullets, likely fits), category, revision, `KEYWORD_PROMPT_VERSION` and model. `skill_groups._CACHE` (64) keys on the canonical keyword, sorted group and tool names, `SKILL_PROMPT_VERSION` and model. Both are per process and cleared on restart.
 
 ## Invariants
 
 - Suggestions never change the match score; the next deterministic match decides.
 - No draft is saved without an explicit Accept, and the server reads the bullet from the placement.
 - Missing tools are offered as Add to Skills, never as an AI rewrite.
+- A new AI bullet uses only facts from its entry. Missing numbers are `[placeholders]` the user must replace before the server will save it.
 - Skill group choice uses library, related-skills and hint data first. The model sees only group and tool names and can only pick a listed group or propose a new name.
 - Skill group names are never hardcoded.
 - Adding a skill writes to the library and the current resume only. Other resumes that include the group get a `composition_hidden_tools` row for a new or restored tool, so their payload, revision and history are untouched. A group newly added to the current resume shows only the added skill.
@@ -212,7 +216,7 @@ The Job match tab is a dashboard rail beside the job description and the resume 
 
 ## Clickable highlights
 
-Job description highlights (`JobDocument.tsx`) and resume highlights (`resume.html`, inside `{% if measure %}` only) are focusable buttons. The preview posts `resume-mark-click` with the match ids, the clicked line id and the element rect; `ResumePreview.tsx` maps the rect through the preview zoom. The popover shows Required / Preferred / Responsibility, Matched / Marked / Suggested, the requirement, and actions: Generate AI revision (opens the Suggest wording dialog on that bullet), Add to Skills, Show in dashboard, Show in the other document. A click on one resume line offers that line's revision first.
+Job description highlights (`JobDocument.tsx`) and resume highlights (`resume.html`, inside `{% if measure %}` only) are focusable buttons. The preview posts `resume-mark-click` with the match ids, the clicked line id and the element rect; `ResumePreview.tsx` maps the rect through the preview zoom. The popover shows Required / Preferred / Responsibility, Matched / Marked / Suggested, the requirement, and actions: Work into resume (for a missing keyword that isn't Skills-only; opens `KeywordAssistDialog`), Generate AI revision (opens the Suggest wording dialog on that bullet in keyword mode), Add to Skills, Show in dashboard, Show in the other document. A click on one resume line offers that line's revision first.
 
 ## Endpoints
 
