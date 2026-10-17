@@ -1043,7 +1043,8 @@ def _public_row(row: dict, category: str, label: str, match_mode: str, matched: 
         "matched": matched,
         "manual": manual,
         "detail": detail,
-        "keywords": keywords,
+        # skill: the keyword belongs in Skills, so the UI offers Add to Skills, not AI wording.
+        "keywords": [{**item, "skill": is_skill_keyword(item.get("keyword") or "", category)} for item in keywords],
         "suggestions": suggestions,
     }
 

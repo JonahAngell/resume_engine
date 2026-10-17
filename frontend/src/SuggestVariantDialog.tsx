@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, ApiError } from "./api";
+import KeywordText from "./KeywordText";
 import ModalShell from "./ModalShell";
 import type { CompareJob } from "./matchMarks";
 import type { VariantTarget } from "./match/types";
@@ -13,6 +14,8 @@ type Suggestions = {
   category: string;
   drafts: Draft[];
   dropped: number;
+  fits?: boolean;
+  reason?: string;
 };
 type Goal = "" | "concise" | "impact" | "align";
 
@@ -70,6 +73,7 @@ export default function SuggestVariantDialog({
           requirement: target.requirement,
           category: target.category || "",
           goal: goal || null,
+          incorporate_keyword: !!target.incorporate,
         }),
       },
     )
@@ -88,6 +92,7 @@ export default function SuggestVariantDialog({
   const original = result?.original || target.excerpt;
   const drafts = result?.drafts || [];
   const category = result?.category || target.category;
+  const workIn = !!target.incorporate && !!target.keyword && !GUARDED.has(category);
   const textOf = (index: number) => (index === OWN ? own : edits[index] ?? drafts[index]?.body ?? "");
   const chosenText = selected === null ? "" : textOf(selected).trim();
   const canApply =
@@ -128,7 +133,7 @@ export default function SuggestVariantDialog({
   };
 
   return (
-    <ModalShell title="Suggest wording" close={close} className="assist-dialog">
+    <ModalShell title={workIn ? `Work in ${target.keyword}` : "Suggest wording"} close={close} className="assist-dialog">
       <div className="assist-body">
         <p className="ai-meta">
           For {[job.role || job.title, job.company].filter(Boolean).join(" · ")}
@@ -162,11 +167,22 @@ export default function SuggestVariantDialog({
             )}
           </p>
         )}
+        {workIn && (
+          <p className="assist-note">
+            Each option uses {target.keyword}. Only pick one if it describes work you actually did.
+          </p>
+        )}
         {loading && <p className="ai-meta">Reviewing…</p>}
         {!loading && result && result.status !== "ok" && <p className="ai-meta">{result.detail}</p>}
-        {!loading && result?.status === "ok" && drafts.length === 0 && (
+        {!loading && result?.status === "ok" && drafts.length === 0 && result.fits === false && (
           <p className="ai-meta">
-            No safe rewrites. The model's ideas added facts the bullet doesn't show.
+            The AI doesn't think {target.keyword} fits this bullet{result.reason ? `: ${result.reason}` : "."}
+          </p>
+        )}
+        {!loading && result?.status === "ok" && drafts.length === 0 && result.fits !== false && (
+          <p className="ai-meta">
+            No safe rewrites. The model's ideas added facts the bullet doesn't show
+            {workIn ? ` or left out ${target.keyword}` : ""}.
           </p>
         )}
         <div className="assist-options" role="radiogroup" aria-label="Wording options">
@@ -186,7 +202,11 @@ export default function SuggestVariantDialog({
                   />
                   <span className="assist-option-text">
                     <strong>{draft.name}</strong>
-                    {editing === index ? null : <span>{textOf(index)}</span>}
+                    {editing === index ? null : (
+                      <span>
+                        <KeywordText text={textOf(index)} keyword={workIn ? target.keyword : ""} />
+                      </span>
+                    )}
                     {draft.rationale && <small>{draft.rationale}</small>}
                   </span>
                 </label>

@@ -1,7 +1,8 @@
 """Optional AI rewrites of one placed bullet for one job. Nothing here saves.
 
 The model may reshape wording toward the job, but a draft that adds a number, tool, proper
-noun, or guarded keyword the original bullet does not show is dropped.
+noun, or guarded keyword the original bullet does not show is dropped. In keyword mode every
+draft must also use the job keyword, and the model may say the keyword does not fit.
 """
 
 import hashlib
@@ -16,7 +17,7 @@ from .related_skills import DICTIONARY, category_for_term
 
 logger = logging.getLogger("resume_engine.ai")
 
-VARIANT_PROMPT_VERSION = "1"
+VARIANT_PROMPT_VERSION = "2"
 GOALS = {
     "concise": "Make it shorter and tighter.",
     "impact": "Lead with the outcome the bullet already states.",
@@ -34,6 +35,7 @@ DETAILS = {
     "rate_limited": "The free model is rate limited. The bullet is unchanged.",
     "invalid": "The model response could not be validated. The bullet is unchanged.",
 }
+MAX_REASON = 240
 _CACHE: dict[str, dict] = {}
 _CACHE_MAX = 32
 # placement id -> {folded body: (model, job id)} for drafts this process handed out.
@@ -41,14 +43,18 @@ _ISSUED: dict[str, dict[str, tuple[str, str]]] = {}
 _ISSUED_MAX = 64
 
 VARIANT_SYSTEM = """You rewrite one resume bullet for a specific job posting.
-Return one JSON object with key drafts: a list of 3 to 5 items, each with name, body, and rationale.
+Return one JSON object with keys drafts, fits, and reason.
+drafts: a list of 3 to 5 items, each with name, body, and rationale.
 name: 2 to 4 words describing the angle, for example "Outcome first".
 body: the rewritten bullet, one sentence, no leading bullet character.
 rationale: one short sentence on why this wording suits the requirement.
+fits: false only when keyword_rule asks for the keyword and it cannot honestly describe this bullet's work; then drafts is empty.
+reason: when fits is false, one short sentence why; else "".
 Rules:
 - Every fact must come from the original bullet. Do not add numbers, tools, products, employers, people, places, or certifications it does not state.
 - The posting may guide emphasis and word choice only.
 - Each draft must take a different angle.
+- Follow keyword_rule.
 - Do not return the original wording unchanged."""
 
 VARIANT_SCHEMA = {
@@ -65,7 +71,9 @@ VARIANT_SCHEMA = {
                 },
                 "required": ["name", "body", "rationale"],
             },
-        }
+        },
+        "fits": {"type": "boolean"},
+        "reason": {"type": "string"},
     },
     "required": ["drafts"],
 }
@@ -118,15 +126,39 @@ def _keyword_allowed(keyword: str, category: str) -> bool:
     return bool(keyword) and category not in GUARDED_CATEGORIES
 
 
-def drop_reason(body: str, original: str, keyword: str, category: str, job_terms: list[str]) -> str:
-    """Return why a draft is unsafe, or "" when it may be shown."""
+def has_keyword(text: str, keyword: str) -> bool:
+    """The keyword, or a dictionary form of it ("A/B tests" for "A/B Testing"), appears in text."""
+    if not (keyword or "").strip():
+        return False
+    return _contains(text, keyword) or DICTIONARY.mentions(keyword, text or "")
+
+
+def drop_reason(
+    body: str,
+    original: str,
+    keyword: str,
+    category: str,
+    job_terms: list[str],
+    *,
+    require_keyword: bool = False,
+    fresh: bool = False,
+) -> str:
+    """Return why a draft is unsafe, or "" when it may be shown.
+
+    `fresh` is for a new bullet: `original` is then the entry's text, the only fact source, so
+    the length ratio and unchanged checks do not apply.
+    """
     text = " ".join((body or "").split())
     if not text:
         return "empty"
-    if len(text) > MAX_BODY or len(text) > max(len(original) * LENGTH_RATIO, len(original) + LENGTH_SLACK):
+    if len(text) > MAX_BODY:
         return "length"
-    if _fold(text) == _fold(original):
+    if not fresh and len(text) > max(len(original) * LENGTH_RATIO, len(original) + LENGTH_SLACK):
+        return "length"
+    if not fresh and _fold(text) == _fold(original):
         return "unchanged"
+    if require_keyword and _keyword_allowed(keyword, category) and not has_keyword(text, keyword):
+        return "missing_keyword"
     if _numbers(text) - _numbers(original):
         return "number"
     allowed = _keyword_allowed(keyword, category)
@@ -153,7 +185,9 @@ def drop_reason(body: str, original: str, keyword: str, category: str, job_terms
     return ""
 
 
-def filter_drafts(data: dict, original: str, keyword: str, category: str, job_terms: list[str]) -> tuple[list[dict], int]:
+def filter_drafts(
+    data: dict, original: str, keyword: str, category: str, job_terms: list[str], require_keyword: bool = False
+) -> tuple[list[dict], int]:
     drafts = data.get("drafts") if isinstance(data, dict) else None
     if not isinstance(drafts, list):
         return [], 0
@@ -165,7 +199,7 @@ def filter_drafts(data: dict, original: str, keyword: str, category: str, job_te
             dropped += 1
             continue
         body = " ".join(str(item.get("body") or "").split()).lstrip("•-* ").strip()
-        if _fold(body) in seen or drop_reason(body, original, keyword, category, job_terms):
+        if _fold(body) in seen or drop_reason(body, original, keyword, category, job_terms, require_keyword=require_keyword):
             dropped += 1
             continue
         seen.add(_fold(body))
@@ -177,8 +211,8 @@ def filter_drafts(data: dict, original: str, keyword: str, category: str, job_te
     return kept, dropped
 
 
-def _cache_key(original, job, requirement, keyword, category, goal, model) -> str:
-    raw = json.dumps([original, job, requirement, keyword, category, goal, VARIANT_PROMPT_VERSION, model])
+def _cache_key(original, job, requirement, keyword, category, goal, model, incorporate=False) -> str:
+    raw = json.dumps([original, job, requirement, keyword, category, goal, VARIANT_PROMPT_VERSION, model, incorporate])
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -212,13 +246,15 @@ def issued_draft(placement_id: str, body: str, job_id: str) -> str | None:
     return None
 
 
-def _result(status: str, model: str = "", drafts=None, dropped: int = 0) -> dict:
+def _result(status: str, model: str = "", drafts=None, dropped: int = 0, fits: bool = True, reason: str = "") -> dict:
     return {
         "status": status,
         "detail": DETAILS.get(status, ""),
         "model": model,
         "drafts": drafts or [],
         "dropped": dropped,
+        "fits": fits,
+        "reason": reason,
     }
 
 
@@ -232,6 +268,7 @@ async def suggest_variants(
     job_terms: list[str] | None = None,
     placement_id: str = "",
     job_id: str = "",
+    incorporate_keyword: bool = False,
     complete=None,
 ) -> dict:
     model = model_name()
@@ -244,14 +281,20 @@ async def suggest_variants(
     category = category or category_for_term(keyword) or ""
     goal = goal if goal in GOALS else None
     terms = [term for term in (job_terms or []) if term and term.strip()]
-    key = _cache_key(bullet, job, requirement, keyword, category, goal, model)
+    # Keyword mode only applies to keywords drafts may add; guarded ones keep the old rule.
+    require = bool(incorporate_keyword) and _keyword_allowed(keyword, category)
+    key = _cache_key(bullet, job, requirement, keyword, category, goal, model, require)
     cached = _CACHE.get(key)
     if cached is not None:
         remember_issued(placement_id, cached["drafts"], cached["model"], job_id)
         return json.loads(json.dumps(cached))
 
     guard = (
-        f'Do not add "{keyword}" unless the original bullet already says it.'
+        f'Every draft must use the phrase "{keyword}" (or a close form of it), worked in where it '
+        "describes the work this bullet states. Add no other facts. If it cannot honestly describe "
+        "this work, return no drafts, set fits to false, and give a short reason."
+        if require
+        else f'Do not add "{keyword}" unless the original bullet already says it.'
         if keyword and not _keyword_allowed(keyword, category)
         else f'You may use the words "{keyword}" only if the bullet already shows that work.'
         if keyword
@@ -278,7 +321,9 @@ async def suggest_variants(
     if not isinstance(data, dict):
         return _result("invalid")
     served = getattr(completion, "model", "") or model
-    drafts, dropped = filter_drafts(data, bullet, keyword, category, terms)
+    drafts, dropped = filter_drafts(data, bullet, keyword, category, terms, require)
+    fits = data.get("fits") is not False or bool(drafts)
+    reason = "" if fits else " ".join(str(data.get("reason") or "").split())[:MAX_REASON]
     logger.info(
         "bullet_variants prompt=%s outcome=ok model=%s kept=%s dropped=%s",
         VARIANT_PROMPT_VERSION,
@@ -286,7 +331,7 @@ async def suggest_variants(
         len(drafts),
         dropped,
     )
-    payload = _result("ok", served, drafts, dropped)
+    payload = _result("ok", served, drafts, dropped, fits, reason)
     _CACHE[key] = payload
     while len(_CACHE) > _CACHE_MAX:
         _CACHE.pop(next(iter(_CACHE)))

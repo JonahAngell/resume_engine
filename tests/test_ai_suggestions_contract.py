@@ -49,3 +49,19 @@ def test_migration_adds_provenance_with_body_trigger():
     assert "ai_generated boolean NOT NULL DEFAULT false" in sql
     assert "ON DELETE SET NULL" in sql
     assert "UPDATE OF body ON bullet_variants" in sql
+
+
+def test_keyword_assist_is_offered_only_for_keywords_outside_skills():
+    marks = (ROOT / "frontend/src/matchMarks.ts").read_text(encoding="utf-8")
+    types = (ROOT / "frontend/src/match/types.ts").read_text(encoding="utf-8")
+    popover = (ROOT / "frontend/src/match/MarkPopover.tsx").read_text(encoding="utf-8")
+    assert "!keyword.skill" in marks
+    assert "!item.found && !item.skill" in types
+    assert "item.workIn" in popover and "Work into resume" in popover
+
+
+def test_new_bullets_with_placeholders_cannot_be_saved():
+    dialog = (ROOT / "frontend/src/KeywordAssistDialog.tsx").read_text(encoding="utf-8")
+    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    assert "!placeholder" in dialog
+    assert "PLACEHOLDER.search(body)" in main

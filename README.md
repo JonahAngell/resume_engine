@@ -20,7 +20,7 @@ The rail is Home, Library, Jobs, and Bin.
 - **Editor** is the composition workspace: Resume Details, section cards, bullet rows, undo and redo, revision history, and a live preview with zoom. Target length, date format, and template style are saved with the composition.
 - **Reusable Library** (`#library`) is where entries and bullets are authored. It has list and card views, details, wording variants, tags, usage across resumes, and bulk actions. Edit in Library from the editor can return you to the same resume.
 - **Jobs** (`#jobs`) stores job descriptions. Saving one extracts required and preferred keywords, and locations and salary when the posting states them.
-- **Job match** is a tab in the editor. It scores the open resume against a job description and highlights matching lines in the preview. Choosing a job description in Resume Details links that job and copies its company and role onto the composition. A match request only returns the comparison.
+- **Job match** is a tab in the editor. It scores the open resume against a job description and highlights matching lines in the preview. Choosing a job description in Resume Details links that job and copies its company and role onto the composition. A match request only returns the comparison. Clicking a missing keyword (other than a tool, which goes to Skills) offers **Work into resume**: AI wording that puts the keyword into existing bullets, or a new bullet for a role or project. Nothing saves until you accept, and new bullets can't be saved while they still have a `[placeholder]`.
 - **Bin** is the Home view of archived resumes. Restore puts one back under My Resumes.
 
 ## Templates

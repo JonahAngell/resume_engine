@@ -98,7 +98,8 @@ async def insert_placement(conn,user_id,cid,payload):
         await conn.execute("INSERT INTO composition_bullets(composition_id,bullet_id,variant_id,destination_section,destination_parent_type,destination_parent_id,sort_order,wording_snapshot,snapshot_source_updated_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",(cid,payload.bullet_id,payload.variant_id,payload.destination_section,payload.destination_parent_type,payload.destination_parent_id,order,selected["body"],selected["updated_at"]))
         return await _commit(conn,user_id,locked,"bullet-placement-insert"),None
 
-async def create_and_place(conn,user_id,cid,payload):
+async def create_and_place(conn,user_id,cid,payload,ai=None):
+    # ai: {"generated": bool, "model": str|None, "job_id": UUID|None} for a bullet drafted by the keyword assist.
     async with conn.transaction():
         locked,error=await _lock_composition(conn,user_id,cid,payload.revision)
         if error:return None,error
@@ -106,7 +107,8 @@ async def create_and_place(conn,user_id,cid,payload):
         parent_col={"content_item":"parent_id","education_item":"education_item_id","tool_group":"tool_group_id","interest":"interest_id","custom_entry":"custom_entry_id"}[payload.destination_parent_type]
         label=(await _one(conn,"SELECT phase3c1_parent_label(%s,%s,%s) label",(user_id,payload.destination_parent_type,payload.destination_parent_id)))["label"]
         bullet=await _one(conn,f"INSERT INTO bullets(user_id,{parent_col},section,parent_context,sort_order) VALUES(%s,%s,%s,%s,(SELECT COALESCE(max(sort_order)+1,0) FROM bullets WHERE user_id=%s AND {parent_col}=%s)) RETURNING id",(user_id,payload.destination_parent_id,payload.library_section,label,user_id,payload.destination_parent_id))
-        variant=await _one(conn,"INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order) VALUES(%s,%s,%s,%s,true,0) RETURNING id,body,updated_at",(user_id,bullet["id"],payload.variant_name.strip(),payload.body.strip()))
+        ai=ai or {}
+        variant=await _one(conn,"INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order,ai_generated,ai_model,ai_job_id) VALUES(%s,%s,%s,%s,true,0,%s,%s,%s) RETURNING id,body,updated_at",(user_id,bullet["id"],payload.variant_name.strip(),payload.body.strip(),bool(ai.get("generated")),ai.get("model"),ai.get("job_id")))
         order=(await _one(conn,"SELECT COALESCE(max(sort_order)+1,0) n FROM composition_bullets WHERE composition_id=%s AND destination_parent_type=%s AND destination_parent_id=%s",(cid,payload.destination_parent_type,payload.destination_parent_id)))["n"]
         await conn.execute("INSERT INTO composition_bullets(composition_id,bullet_id,variant_id,destination_section,destination_parent_type,destination_parent_id,sort_order,wording_snapshot,snapshot_source_updated_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",(cid,bullet["id"],variant["id"],payload.destination_section,payload.destination_parent_type,payload.destination_parent_id,order,variant["body"],variant["updated_at"]))
         return await _commit(conn,user_id,locked,"bullet-create-and-place"),None

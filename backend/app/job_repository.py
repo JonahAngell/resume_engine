@@ -294,3 +294,18 @@ async def load_variant_inputs(conn, user_id, composition_id: UUID, placement_id:
     if not job:
         return None, "job"
     return {"original": placement["wording"], "description": job["body"] or ""}, None
+
+
+async def load_entry_section(conn, user_id, composition_id: UUID, parent_id: UUID):
+    """The section of a role or project on this resume, or None when it is not one."""
+    composition = await load_composition(conn, user_id, composition_id, include_archived=False)
+    if not composition:
+        return None, "resume"
+    payload = composition["render_payload"] or {}
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    for section in ("work_experience", "projects", "leadership"):
+        for entry in payload.get(section) or []:
+            if isinstance(entry, dict) and str(entry.get("id") or "") == str(parent_id):
+                return section, None
+    return None, "entry"
