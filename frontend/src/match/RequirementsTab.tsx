@@ -5,6 +5,7 @@ import {
   groupLabel,
   rewriteTargets,
   skillKeywords,
+  workInKeywords,
   type AssistRequest,
   type JobMatch,
   type RequirementKeyword,
@@ -50,18 +51,32 @@ export function RowActions({
   if (row.matched && !row.manual) return null;
   const rewrites = row.matched ? [] : rewriteTargets(row);
   const skills = row.matched ? [] : skillKeywords(row);
+  const workIn = workInKeywords(row);
   return (
     <div className="row-actions">
+      {workIn.slice(0, compact ? 1 : workIn.length).map((keyword) => (
+        <button
+          key={`work-${keyword}`}
+          type="button"
+          className="primary"
+          disabled={state.busy}
+          onClick={() =>
+            onAssist({ kind: "keyword", keyword, requirement: row.text, category: row.category || row.kind || "" })
+          }
+        >
+          Work {keyword} into resume
+        </button>
+      ))}
       {skills.map((keyword) => (
         <button key={`skill-${keyword}`} type="button" disabled={state.busy} onClick={() => onAssist({ kind: "skill", keyword })}>
           Add {keyword} to Skills
         </button>
       ))}
-      {rewrites.slice(0, compact ? 1 : rewrites.length).map((target) => (
+      {rewrites.slice(0, compact ? (workIn.length ? 0 : 1) : rewrites.length).map((target) => (
         <button
           key={`rewrite-${target.placementId}-${target.keyword}`}
           type="button"
-          className="primary"
+          className={workIn.length ? "" : "primary"}
           disabled={state.busy}
           title={target.excerpt}
           onClick={() => onAssist({ kind: "rewrite", target })}

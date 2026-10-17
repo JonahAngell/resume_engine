@@ -22,8 +22,11 @@ export type MarkItem = {
   status: "matched" | "suggested";
   manual: boolean;
   requirement: string;
+  category: string;
   rewrites: VariantTarget[];
   addSkill: boolean;
+  /** Offer Work into resume: a missing keyword that isn't Skills-only. */
+  workIn: boolean;
 };
 
 export type CompareJob = {
@@ -88,15 +91,17 @@ function addMark(map: Map<string, MatchMark>, mark: MatchMark) {
   current.targets = mergeTargets(current.targets, mark.targets);
 }
 
-function rowItem(row: RequirementRow, keyword: string, found: boolean): MarkItem {
+function rowItem(row: RequirementRow, keyword: string, found: boolean, workIn = false): MarkItem {
   const key = keyword.trim().toLowerCase();
   const mine = (row.suggestions || []).filter((item) => item.keyword.trim().toLowerCase() === key);
+  const category = row.category || row.kind || "";
   return {
     keyword,
     group: row.group,
     status: found ? "matched" : "suggested",
     manual: !!row.manual,
     requirement: row.text,
+    category,
     rewrites: found
       ? []
       : mine
@@ -107,9 +112,11 @@ function rowItem(row: RequirementRow, keyword: string, found: boolean): MarkItem
             excerpt: item.bullet_excerpt,
             keyword: item.keyword,
             requirement: row.text,
-            category: row.category || row.kind || "",
+            category,
+            incorporate: true,
           })),
     addSkill: !found && mine.some((item) => item.action === "add_skill"),
+    workIn: !found && workIn,
   };
 }
 
@@ -158,7 +165,7 @@ export function buildMatchMarks(rows: RequirementRow[]): MatchMark[] {
                 excerpt: item.bullet_excerpt || "",
                 action: item.action as LineAction,
               })),
-        items: [rowItem(row, term, found)],
+        items: [rowItem(row, term, found, !keyword.skill)],
       });
     }
   }

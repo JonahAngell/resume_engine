@@ -31,6 +31,8 @@ export type RequirementKeyword = {
   where?: string;
   relation?: string;
   evidence?: KeywordEvidence | null;
+  /** The keyword belongs in Skills (a tool): offer Add to Skills, never AI wording. */
+  skill?: boolean;
 };
 
 export type TagSuggestion = {
@@ -98,12 +100,52 @@ export type VariantTarget = {
   keyword: string;
   requirement: string;
   category: string;
+  /** Drafts must work the keyword in, or say it doesn't fit this bullet. */
+  incorporate?: boolean;
 };
 
-/** Opens Add to Skills or Suggest wording from anywhere on the Job match tab. */
+/** Opens Add to Skills, Suggest wording or Work into resume from anywhere on the Job match tab. */
 export type AssistRequest =
   | { kind: "skill"; keyword: string }
-  | { kind: "rewrite"; target: VariantTarget };
+  | { kind: "rewrite"; target: VariantTarget }
+  | { kind: "keyword"; keyword: string; requirement: string; category: string };
+
+export type KeywordRevision = {
+  id: string;
+  placement_id: string;
+  section: string;
+  entry: string;
+  original: string;
+  body: string;
+  rationale: string;
+};
+
+export type KeywordNewBullet = {
+  id: string;
+  parent_id: string;
+  section: string;
+  entry: string;
+  body: string;
+  rationale: string;
+  placeholders: boolean;
+};
+
+export type KeywordEntry = { parent_id: string; section: string; entry: string };
+
+export type KeywordAssistResult = {
+  status: AiStatus;
+  detail: string;
+  model: string;
+  revision: number;
+  keyword: string;
+  category: string;
+  allowed: boolean;
+  revisions: KeywordRevision[];
+  new_bullets: KeywordNewBullet[];
+  entries: KeywordEntry[];
+  no_fit_reason: string;
+  dropped: number;
+};
 
 export type DashboardTab = "overview" | "requirements" | "coach" | "ats";
 
@@ -194,7 +236,20 @@ export function rewriteTargets(row: RequirementRow): VariantTarget[] {
       keyword: item.keyword,
       requirement: row.text,
       category: row.category || row.kind || "",
+      incorporate: true,
     }));
+}
+
+/** Missing keywords the AI may work into bullets: everything except Skills-only terms. */
+export function workInKeywords(row: RequirementRow): string[] {
+  if (row.matched || row.kind === "education" || row.kind === "degree") return [];
+  return [
+    ...new Set(
+      (row.keywords || [])
+        .filter((item) => !item.found && !item.skill && item.keyword.trim())
+        .map((item) => item.keyword),
+    ),
+  ];
 }
 
 export function skillKeywords(row: RequirementRow): string[] {

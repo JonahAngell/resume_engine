@@ -9,6 +9,7 @@ import JobDocument from "./JobDocument";
 import { activeIdsForTerms, buildMatchMarks, type MarkItem } from "./matchMarks";
 import AddSkillDialog from "./AddSkillDialog";
 import SuggestVariantDialog from "./SuggestVariantDialog";
+import KeywordAssistDialog from "./KeywordAssistDialog";
 import MatchDashboard from "./match/MatchDashboard";
 import MarkPopover, { type PopoverAnchor } from "./match/MarkPopover";
 import { useJobMatch } from "./match/useJobMatch";
@@ -1442,6 +1443,23 @@ export default function App() {
                 setComp(next);
                 await loadLibrary();
               }}
+              onAddSkill={(keyword) => setAssist({ kind: "skill", keyword })}
+              close={() => setAssist(null)}
+            />
+          )}
+          {assist?.kind === "keyword" && compareJob && (
+            <KeywordAssistDialog
+              compositionId={comp.id}
+              revision={comp.revision}
+              job={compareJob}
+              keyword={assist.keyword}
+              requirement={assist.requirement}
+              category={assist.category}
+              onApplied={async (next) => {
+                setComp(next);
+                await loadLibrary();
+              }}
+              onRevise={(target) => setAssist({ kind: "rewrite", target })}
               onAddSkill={(keyword) => setAssist({ kind: "skill", keyword })}
               close={() => setAssist(null)}
             />
