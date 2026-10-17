@@ -98,14 +98,26 @@ export default function MarkPopover({
             </span>
           </p>
           <p className="mark-requirement">{item.requirement}</p>
-          {item.status === "suggested" && !item.rewrites.length && !item.addSkill && (
+          {item.status === "suggested" && !item.rewrites.length && !item.addSkill && !item.workIn && (
             <p className="mark-hint">Not found in this resume yet. Mark it as a match from the dashboard if you cover it in other words.</p>
           )}
           <div className="mark-actions">
-            {item.rewrites.map((target) => (
+            {item.workIn && (
               <button
                 type="button"
                 className="primary"
+                title={`Suggest bullets that use ${item.keyword}`}
+                onClick={() =>
+                  onAssist({ kind: "keyword", keyword: item.keyword, requirement: item.requirement, category: item.category })
+                }
+              >
+                Work into resume
+              </button>
+            )}
+            {item.rewrites.map((target) => (
+              <button
+                type="button"
+                className={item.workIn ? "" : "primary"}
                 key={target.placementId}
                 title={target.excerpt}
                 onClick={() => onAssist({ kind: "rewrite", target })}

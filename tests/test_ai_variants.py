@@ -130,3 +130,53 @@ def test_part_of_a_soft_keyword_is_allowed_but_tools_are_not():
     original = "Turns crew schedules into decisions"
     assert drop_reason("Turns crew schedules into forecasting decisions", original, "Financial Forecasting", "domain", []) == ""
     assert drop_reason("Turns crew schedules into Python decisions", original, "Python Scripting", "domain", []) == "tool"
+
+
+def test_keyword_mode_drops_drafts_without_the_keyword():
+    data = {"drafts": [draft("Led budgeting reviews for regional teams"), draft("Led budgeting reviews and financial forecasting for regional teams")]}
+    kept, dropped = filter_drafts(data, ORIGINAL, "Financial Forecasting", "domain", [], require_keyword=True)
+    assert [item["body"] for item in kept] == ["Led budgeting reviews and financial forecasting for regional teams"]
+    assert dropped == 1
+    assert drop_reason("Led budgeting reviews for regional teams", ORIGINAL, "Financial Forecasting", "domain", [], require_keyword=True) == "missing_keyword"
+
+
+def test_keyword_mode_accepts_a_dictionary_form_of_the_keyword():
+    original = "Improved onboarding flows to lift conversion"
+    body = "Ran A/B testing on onboarding flows to lift conversion"
+    assert drop_reason(body, original, "A/B Testing", "methodology", ["A/B Testing"], require_keyword=True) == ""
+
+
+def test_keyword_mode_never_lets_a_guarded_keyword_in():
+    body = "Owned budgeting reviews for regional teams in Anaplan"
+    assert drop_reason(body, ORIGINAL, "Anaplan", "tool", ["Anaplan"], require_keyword=True) == "guarded_keyword"
+
+
+def test_keyword_mode_prompt_asks_for_the_keyword_and_reports_no_fit():
+    async def complete(messages, schema, name):
+        complete.calls.append(messages)
+        return AiCompletion({"drafts": [], "fits": False, "reason": "These reviews were not forecasts."}, "m:free")
+
+    complete.calls = []
+    result = asyncio.run(
+        suggest_variants(ORIGINAL, JOB, "Financial forecasting", "Financial Forecasting", "domain",
+                         incorporate_keyword=True, complete=complete)
+    )
+    rule = json.loads(complete.calls[0][1]["content"])["keyword_rule"]
+    assert 'must use the phrase "Financial Forecasting"' in rule
+    assert result["fits"] is False and result["reason"] == "These reviews were not forecasts."
+
+
+def test_keyword_mode_is_cached_apart_from_plain_drafts():
+    complete = reply("Led budgeting reviews and financial forecasting for regional teams")
+    for incorporate in (False, True, True):
+        asyncio.run(suggest_variants(ORIGINAL, JOB, "req", "Financial Forecasting", "domain",
+                                     incorporate_keyword=incorporate, complete=complete))
+    assert len(complete.calls) == 2
+
+
+def test_guarded_keyword_ignores_keyword_mode():
+    complete = reply("Led budgeting reviews for regional teams")
+    result = asyncio.run(suggest_variants(ORIGINAL, JOB, "req", "PMP", "credential", incorporate_keyword=True, complete=complete))
+    assert "Do not add" in json.loads(complete.calls[0][1]["content"])["keyword_rule"]
+    assert [item["body"] for item in result["drafts"]] == ["Led budgeting reviews for regional teams"]
+    assert result["fits"] is True

@@ -49,6 +49,8 @@ from .editing_repository import (
 from .editing_schemas import (
     AiVariantAccept,
     AiVariantRequest,
+    KeywordAssistRequest,
+    KeywordBulletAccept,
     AtsScoreRequest,
     SkillAddWrite,
     SkillRecommendRequest,
@@ -167,8 +169,9 @@ from .library_service import import_seed
 from .resume_import import ImportDraft, parse_upload
 from .resume_import_commit import commit_import
 from .ai_review import review_resume
-from .ai_schemas import AiReview, AtsScore, CoachResult, VariantSuggestions
+from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, VariantSuggestions
 from .ai_coach import coach_resume
+from .ai_keyword import PLACEHOLDER, assist_keyword, new_bullet_key
 from .ai_variants import issued_draft, job_tool_terms, suggest_variants
 from .ats_score import score_resume
 from .job_match import is_skill_keyword, match_qualifications
@@ -183,6 +186,7 @@ from .job_repository import (
     link_job_composition,
     list_job_descriptions,
     load_ai_review_inputs,
+    load_entry_section,
     load_variant_inputs,
     update_job_description,
 )
@@ -1472,8 +1476,67 @@ async def suggest_bullet_variants(cid: UUID, placement_id: UUID, req: AiVariantR
         job_terms,
         placement_id=str(placement_id),
         job_id=str(req.job_id),
+        incorporate_keyword=req.incorporate_keyword,
     )
     return {**result, "original": inputs["original"], "category": category}
+
+
+def _keyword_category(keyword: str, category: str) -> str:
+    return "tool" if is_skill_keyword(keyword, category) else (category or category_for_term(keyword) or "")
+
+
+@app.post("/api/compositions/{cid}/ai-keyword-assist", response_model=KeywordAssist)
+async def keyword_assist(cid: UUID, req: KeywordAssistRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    inputs = await _review_inputs(req.job_id, cid, identity)
+    return await assist_keyword(
+        inputs["description"],
+        inputs["resume"],
+        inputs["bullets"],
+        req.keyword,
+        req.requirement,
+        _keyword_category(req.keyword, req.category),
+        inputs["revision"],
+        job_id=str(req.job_id),
+    )
+
+
+ENTRY_TARGETS = {
+    "work_experience": "experience",
+    "projects": "projects",
+    "leadership": "leadership",
+}
+
+
+@app.post("/api/compositions/{cid}/ai-keyword-assist/accept-new", response_model=CompositionState)
+async def accept_keyword_bullet(cid: UUID, req: KeywordBulletAccept, identity: CurrentUser = Depends(resolve_current_user)):
+    body = " ".join(req.body.split())
+    if PLACEHOLDER.search(body):
+        raise HTTPException(422, "Replace the [placeholders] with your own details before saving.")
+    async with connection() as c:
+        u = await owner(identity, c)
+        section, error = await load_entry_section(c, u["id"], cid, req.parent_id)
+        if error == "resume":
+            raise HTTPException(404, "Resume not found")
+        if error:
+            raise HTTPException(404, "Entry not found")
+        ai = None
+        if req.source != "own" and req.job_id:
+            if not await get_job_description(c, u["id"], req.job_id):
+                raise HTTPException(404, "Job description not found")
+            # Only text this server handed out, unchanged, counts as AI-written.
+            served = issued_draft(new_bullet_key(req.parent_id), body, str(req.job_id))
+            generated = req.source == "draft" and served is not None
+            ai = {"generated": generated, "model": served or req.model or None, "job_id": req.job_id}
+        payload = BulletCreateAndPlace(
+            revision=req.revision,
+            body=body,
+            library_section=ENTRY_TARGETS[section],
+            destination_section=section,
+            destination_parent_type="content_item",
+            destination_parent_id=req.parent_id,
+        )
+        row, error = await create_and_place(c, u["id"], cid, payload, ai=ai)
+        return _placement_result(row, error)
 
 
 @app.post("/api/compositions/{cid}/bullet-placements/{placement_id}/ai-variants/accept", response_model=CompositionState)

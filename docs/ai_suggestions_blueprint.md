@@ -119,7 +119,7 @@ Flow:
 
 1. Gate: same empty-key and `is_free_model` checks as `review_resume`; return `unavailable` without a network call.
 2. Input: `redact_job(job_text)` truncated to 12,000 chars; original bullet with emails, URLs and phones stripped (reuse the redaction helpers); requirement and keyword; goal.
-3. System prompt: rewrite only the given bullet; facts must come from the bullet; the job may guide emphasis and word choice; for guarded categories never add the keyword; return `{"drafts":[{name, body, rationale}]}`, 3 to 5 items, each a distinct angle.
+3. System prompt: rewrite only the given bullet; facts must come from the bullet (keyword mode, added later: every draft must also use the keyword, or the model says it doesn't fit; see `docs/keyword_incorporation_plan.md`); the job may guide emphasis and word choice; for guarded categories never add the keyword; return `{"drafts":[{name, body, rationale}]}`, 3 to 5 items, each a distinct angle.
 4. Call `complete(...)` with the `complete=` injection hook, as `ai_review` does, so tests never hit OpenRouter.
 5. Filter (see B3), dedupe, cap 5. Zero survivors gives `status: "ok"` and an empty list; the dialog then offers Write my own.
 6. Cache on success. Log counts and latency to `resume_engine.ai`, never text.

@@ -79,6 +79,7 @@ class RequirementKeyword(BaseModel):
     where: str = ""
     relation: str = ""
     evidence: Evidence | None = None
+    skill: bool = False
 
 
 class TagSuggestion(BaseModel):

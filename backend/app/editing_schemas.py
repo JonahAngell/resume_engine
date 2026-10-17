@@ -298,6 +298,25 @@ class AiVariantRequest(BaseModel):
     requirement: str = Field(default="", max_length=2000)
     category: AiKeywordCategory = ""
     goal: AiGoal | None = None
+    incorporate_keyword: bool = False
+
+
+class KeywordAssistRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: UUID
+    keyword: str = Field(min_length=1, max_length=200)
+    requirement: str = Field(default="", max_length=2000)
+    category: AiKeywordCategory = ""
+
+
+class KeywordBulletAccept(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    parent_id: UUID
+    body: str = Field(min_length=1, max_length=2000)
+    source: Literal["draft", "edited", "own"]
+    job_id: UUID | None = None
+    model: str = Field(default="", max_length=200)
 
 
 class AiVariantAccept(BaseModel):
