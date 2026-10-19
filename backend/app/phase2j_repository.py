@@ -133,6 +133,30 @@ async def replace_placement(conn,user_id,cid,placement_id,payload):
         if not row:return None,"missing"
         return await _commit(conn,user_id,locked,"bullet-placement-replace"),None
 
+async def replace_placements(conn,user_id,cid,payload):
+    """Switch several placements to other library wording in one revision. Each new bullet must
+    share its placement's role or project, and a bullet may appear once per resume."""
+    async with conn.transaction():
+        locked,error=await _lock_composition(conn,user_id,cid,payload.revision)
+        if error:return None,error
+        rows=await _many(conn,"SELECT cb.id,cb.bullet_id,COALESCE(b.parent_id,b.education_item_id) parent FROM composition_bullets cb LEFT JOIN bullets b ON b.id=cb.bullet_id WHERE cb.composition_id=%s FOR UPDATE OF cb",(cid,))
+        current={str(x["id"]):x for x in rows}
+        final={pid:str(x["bullet_id"]) for pid,x in current.items()}
+        chosen=[]
+        for item in payload.items:
+            placement=current.get(str(item.placement_id))
+            if not placement:return None,"missing"
+            selected=await _bullet_variant(conn,user_id,item.bullet_id,item.variant_id,True)
+            if not selected:return None,"missing"
+            parent=await _one(conn,"SELECT COALESCE(parent_id,education_item_id) parent FROM bullets WHERE id=%s",(item.bullet_id,))
+            if not parent or str(parent["parent"])!=str(placement["parent"]):return None,"section"
+            final[str(item.placement_id)]=str(item.bullet_id)
+            chosen.append((item,selected))
+        if len(set(final.values()))!=len(final):return None,"duplicate"
+        for item,selected in chosen:
+            await conn.execute("UPDATE composition_bullets SET bullet_id=%s,variant_id=%s,wording_snapshot=%s,snapshot_source_updated_at=%s,updated_at=now() WHERE id=%s AND composition_id=%s",(item.bullet_id,item.variant_id,selected["body"],selected["updated_at"],item.placement_id,cid))
+        return await _commit(conn,user_id,locked,"bullet-placement-replace"),None
+
 async def reorder_placements(conn,user_id,cid,payload):
     async with conn.transaction():
         locked,error=await _lock_composition(conn,user_id,cid,payload.revision)

@@ -203,3 +203,36 @@ class AtsScore(BaseModel):
     disclaimer: str
     revision: int = 0
 
+
+
+class VariantPickCandidate(BaseModel):
+    key: str
+    bullet_id: str
+    variant_id: str
+    name: str = ""
+    body: str
+    current: bool = False
+    score: int | None = None
+    reason: str = ""
+    keyword_hits: list[str] = []
+
+
+class VariantPickSlot(BaseModel):
+    placement_id: str
+    parent_id: str
+    section: str = ""
+    parent_label: str = ""
+    current_key: str
+    best_key: str
+    recommend: bool = False
+    candidates: list[VariantPickCandidate]
+
+
+class VariantPick(BaseModel):
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    model: str = ""
+    method: Literal["ai", "keywords"] = "keywords"
+    revision: int = 0
+    slots: list[VariantPickSlot] = []
+    dropped: int = 0

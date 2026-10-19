@@ -329,6 +329,26 @@ class AiVariantAccept(BaseModel):
     model: str = Field(default="", max_length=200)
 
 
+class VariantPickRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: UUID
+    placement_ids: list[UUID] = Field(default_factory=list, max_length=60)
+    use_ai: bool = True
+
+
+class PlacementSwap(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    placement_id: UUID
+    bullet_id: UUID
+    variant_id: UUID
+
+
+class BulletPlacementReplaceMany(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    items: list[PlacementSwap] = Field(min_length=1, max_length=60)
+
+
 class AtsScoreRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     composition_id: UUID
