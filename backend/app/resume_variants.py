@@ -1,6 +1,7 @@
 """Resume variants, field variants, and bullet save/conversion choices."""
 
 import json
+from dataclasses import dataclass, field
 from .editing_repository import many, one, render_historical
 from .library_repository import (
     _custom_render,
@@ -50,8 +51,40 @@ async def default_starter(conn, user_id):
     )
 
 
+@dataclass
+class Selection:
+    """Which library records a new resume starts with, and the wording each one uses.
+
+    ``items`` maps an item type (content_item, education_item, tool_group, interest,
+    custom_section) to ``{item_id: variant_id | None}``; ``bullets`` maps bullet ids
+    the same way. ``None`` as a variant means the record's default wording.
+    """
+
+    items: dict = field(default_factory=dict)
+    bullets: dict = field(default_factory=dict)
+    summary_id: object = None
+    profile_id: object = None
+    profile_variant_id: object = None
+
+
+def _picked(selection, item_type):
+    """(filter_on, ids, variant_ids) for one item type; no selection means everything."""
+    if selection is None:
+        return False, [], []
+    chosen = selection.bullets if item_type == "bullet" else selection.items.get(item_type, {})
+    ids = list(chosen)
+    return True, ids, [chosen[i] for i in ids]
+
+
 async def apply_library_defaults(conn, user_id, composition_id):
     """Fill a new resume with the library's default profile, summary, entries, and wording."""
+    return await apply_library_selection(conn, user_id, composition_id)
+
+
+async def apply_library_selection(
+    conn, user_id, composition_id, selection=None, source="library-defaults"
+):
+    """Fill a new resume from the library: everything, or only the records in ``selection``."""
     async with conn.transaction():
         row = await one(
             conn,
@@ -60,16 +93,31 @@ async def apply_library_defaults(conn, user_id, composition_id):
         )
         if not row:
             return None
-        profile_variant = await one(
-            conn,
-            """SELECT v.id,v.profile_id,v.display_name AS name,v.phone,v.email,
-                      v.linkedin_label,v.linkedin_url
-               FROM profile_field_variants v
-               JOIN profiles p ON p.id=v.profile_id AND p.user_id=v.user_id
-               WHERE v.user_id=%s AND v.is_default AND v.archived_at IS NULL AND p.archived_at IS NULL
-               ORDER BY v.sort_order,v.id LIMIT 1""",
-            (user_id,),
-        )
+        profile_variant = None
+        if selection is not None and selection.profile_id:
+            profile_variant = await one(
+                conn,
+                """SELECT v.id,v.profile_id,v.display_name AS name,v.phone,v.email,
+                          v.linkedin_label,v.linkedin_url
+                   FROM profile_field_variants v
+                   JOIN profiles p ON p.id=v.profile_id AND p.user_id=v.user_id
+                   WHERE v.user_id=%s AND v.profile_id=%s AND v.archived_at IS NULL
+                     AND p.archived_at IS NULL
+                   ORDER BY (v.id IS NOT DISTINCT FROM %s) DESC, v.is_default DESC, v.sort_order, v.id
+                   LIMIT 1""",
+                (user_id, selection.profile_id, selection.profile_variant_id),
+            )
+        if not profile_variant:
+            profile_variant = await one(
+                conn,
+                """SELECT v.id,v.profile_id,v.display_name AS name,v.phone,v.email,
+                          v.linkedin_label,v.linkedin_url
+                   FROM profile_field_variants v
+                   JOIN profiles p ON p.id=v.profile_id AND p.user_id=v.user_id
+                   WHERE v.user_id=%s AND v.is_default AND v.archived_at IS NULL AND p.archived_at IS NULL
+                   ORDER BY (v.profile_id IS NOT DISTINCT FROM %s) DESC, v.sort_order,v.id LIMIT 1""",
+                (user_id, selection.profile_id if selection else None),
+            )
         profile = None
         if profile_variant:
             profile_id, profile_variant_id = profile_variant["profile_id"], profile_variant["id"]
@@ -79,19 +127,31 @@ async def apply_library_defaults(conn, user_id, composition_id):
                 conn,
                 """SELECT id,name,phone,email,linkedin_label,linkedin_url
                    FROM profiles WHERE user_id=%s AND archived_at IS NULL
-                   ORDER BY (lower(label)='default') DESC, sort_order, id LIMIT 1""",
-                (user_id,),
+                   ORDER BY (id IS NOT DISTINCT FROM %s) DESC,
+                            (lower(label)='default') DESC, sort_order, id LIMIT 1""",
+                (user_id, selection.profile_id if selection else None),
             )
             profile_id = profile["id"] if profile else None
             profile_variant_id = None
             header = _profile_header(profile) if profile else row["render_payload"].get("header") or {}
-        summary = await one(
-            conn,
-            """SELECT id,body FROM summary_variants
-               WHERE user_id=%s AND archived_at IS NULL
-               ORDER BY (lower(name)='default') DESC, sort_order, id LIMIT 1""",
-            (user_id,),
-        )
+        if selection is None:
+            summary = await one(
+                conn,
+                """SELECT id,body FROM summary_variants
+                   WHERE user_id=%s AND archived_at IS NULL
+                   ORDER BY (lower(name)='default') DESC, sort_order, id LIMIT 1""",
+                (user_id,),
+            )
+        elif selection.summary_id:
+            summary = await one(
+                conn,
+                """SELECT id,body FROM summary_variants
+                   WHERE user_id=%s AND id=%s AND archived_at IS NULL""",
+                (user_id, selection.summary_id),
+            )
+        else:
+            summary = None
+        content_on, content_ids, content_variants = _picked(selection, "content_item")
         await conn.execute(
             """INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order)
                SELECT %s, CASE c.kind
@@ -101,46 +161,63 @@ async def apply_library_defaults(conn, user_id, composition_id):
                       c.id, v.id,
                       row_number() OVER (PARTITION BY c.kind ORDER BY c.sort_order, c.id) - 1
                FROM content_items c
+               LEFT JOIN unnest(%s::uuid[], %s::uuid[]) AS pick(item_id, variant_id)
+                 ON pick.item_id=c.id
                LEFT JOIN LATERAL (
                  SELECT id FROM content_item_variants
-                 WHERE content_item_id=c.id AND user_id=c.user_id AND archived_at IS NULL AND is_default
-                 ORDER BY sort_order, id LIMIT 1
+                 WHERE content_item_id=c.id AND user_id=c.user_id AND archived_at IS NULL
+                   AND (is_default OR id=pick.variant_id)
+                 ORDER BY (id IS NOT DISTINCT FROM pick.variant_id) DESC, sort_order, id LIMIT 1
                ) v ON true
                WHERE c.user_id=%s AND c.archived_at IS NULL
-                 AND c.kind IN ('project','employment','leadership')""",
-            (composition_id, user_id),
+                 AND c.kind IN ('project','employment','leadership')
+                 AND (NOT %s OR pick.item_id IS NOT NULL)""",
+            (composition_id, content_ids, content_variants, user_id, content_on),
         )
+        education_on, education_ids, education_variants = _picked(selection, "education_item")
         await conn.execute(
             """INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order)
                SELECT %s,'education',e.id,v.id,
                       row_number() OVER (ORDER BY e.sort_order, e.id) - 1
                FROM education_items e
+               LEFT JOIN unnest(%s::uuid[], %s::uuid[]) AS pick(item_id, variant_id)
+                 ON pick.item_id=e.id
                LEFT JOIN LATERAL (
                  SELECT id FROM education_item_variants
-                 WHERE education_item_id=e.id AND user_id=e.user_id AND archived_at IS NULL AND is_default
-                 ORDER BY sort_order, id LIMIT 1
+                 WHERE education_item_id=e.id AND user_id=e.user_id AND archived_at IS NULL
+                   AND (is_default OR id=pick.variant_id)
+                 ORDER BY (id IS NOT DISTINCT FROM pick.variant_id) DESC, sort_order, id LIMIT 1
                ) v ON true
-               WHERE e.user_id=%s AND e.archived_at IS NULL""",
-            (composition_id, user_id),
+               WHERE e.user_id=%s AND e.archived_at IS NULL
+                 AND (NOT %s OR pick.item_id IS NOT NULL)""",
+            (composition_id, education_ids, education_variants, user_id, education_on),
         )
+        groups_on, group_ids, _ = _picked(selection, "tool_group")
         await conn.execute(
             """INSERT INTO composition_items(composition_id,section,item_id,sort_order)
                SELECT %s,'tool_groups',g.id, row_number() OVER (ORDER BY g.sort_order, g.id) - 1
-               FROM tool_groups g WHERE g.user_id=%s AND g.archived_at IS NULL""",
-            (composition_id, user_id),
+               FROM tool_groups g WHERE g.user_id=%s AND g.archived_at IS NULL
+                 AND (NOT %s OR g.id = ANY(%s::uuid[]))""",
+            (composition_id, user_id, groups_on, group_ids),
         )
+        interests_on, interest_ids, _ = _picked(selection, "interest")
         await conn.execute(
             """INSERT INTO composition_items(composition_id,section,item_id,sort_order)
                SELECT %s,'personal_interests',i.id, row_number() OVER (ORDER BY i.sort_order, i.id) - 1
-               FROM interests i WHERE i.user_id=%s AND i.archived_at IS NULL""",
-            (composition_id, user_id),
+               FROM interests i WHERE i.user_id=%s AND i.archived_at IS NULL
+                 AND (NOT %s OR i.id = ANY(%s::uuid[]))""",
+            (composition_id, user_id, interests_on, interest_ids),
         )
+        custom_on, custom_ids, _ = _picked(selection, "custom_section")
         await conn.execute(
             """INSERT INTO composition_custom_sections(composition_id,section_id,sort_order)
                SELECT %s,s.id, row_number() OVER (ORDER BY s.sort_order, s.id) - 1
-               FROM custom_sections s WHERE s.user_id=%s AND s.archived_at IS NULL""",
-            (composition_id, user_id),
+               FROM custom_sections s WHERE s.user_id=%s AND s.archived_at IS NULL
+                 AND (NOT %s OR s.id = ANY(%s::uuid[]))""",
+            (composition_id, user_id, custom_on, custom_ids),
         )
+        bullets_on, bullet_ids, bullet_variants = _picked(selection, "bullet")
+        # Bullets only land under parents the resume actually includes.
         await conn.execute(
             """INSERT INTO composition_bullets(
                  composition_id,bullet_id,variant_id,destination_section,destination_parent_type,
@@ -150,32 +227,27 @@ async def apply_library_defaults(conn, user_id, composition_id):
                       row_number() OVER (PARTITION BY src.parent_id ORDER BY b.sort_order, b.id) - 1,
                       v.body,v.updated_at
                FROM bullets b
+               LEFT JOIN unnest(%s::uuid[], %s::uuid[]) AS pick(item_id, variant_id)
+                 ON pick.item_id=b.id
                JOIN LATERAL (
                  SELECT id,body,updated_at FROM bullet_variants
                  WHERE bullet_id=b.id AND user_id=b.user_id AND archived_at IS NULL
-                 ORDER BY is_default DESC, sort_order, id LIMIT 1
+                 ORDER BY (id IS NOT DISTINCT FROM pick.variant_id) DESC, is_default DESC, sort_order, id
+                 LIMIT 1
                ) v ON true
                JOIN (
-                 SELECT id parent_id,'content_item' parent_type,
-                        CASE kind WHEN 'project' THEN 'projects'
-                                  WHEN 'employment' THEN 'work_experience'
-                                  ELSE 'leadership' END section
-                 FROM content_items
-                 WHERE user_id=%s AND archived_at IS NULL AND kind IN ('project','employment','leadership')
-                 UNION ALL
-                 SELECT id,'education_item','education' FROM education_items
-                 WHERE user_id=%s AND archived_at IS NULL
-                 UNION ALL
-                 SELECT id,'tool_group','tool_groups' FROM tool_groups
-                 WHERE user_id=%s AND archived_at IS NULL
-                 UNION ALL
-                 SELECT id,'interest','personal_interests' FROM interests
-                 WHERE user_id=%s AND archived_at IS NULL
+                 SELECT i.item_id parent_id,
+                        CASE i.section WHEN 'education' THEN 'education_item'
+                                       WHEN 'tool_groups' THEN 'tool_group'
+                                       WHEN 'personal_interests' THEN 'interest'
+                                       ELSE 'content_item' END parent_type,
+                        i.section
+                 FROM composition_items i WHERE i.composition_id=%s
                  UNION ALL
                  SELECT e.id,'custom_entry','custom_sections'
-                 FROM custom_section_entries e
-                 JOIN custom_sections s ON s.id=e.section_id
-                 WHERE e.user_id=%s AND e.archived_at IS NULL AND s.archived_at IS NULL
+                 FROM composition_custom_sections x
+                 JOIN custom_section_entries e ON e.section_id=x.section_id
+                 WHERE x.composition_id=%s AND e.user_id=%s AND e.archived_at IS NULL
                ) src ON (
                  (src.parent_type='content_item' AND b.parent_id=src.parent_id) OR
                  (src.parent_type='education_item' AND b.education_item_id=src.parent_id) OR
@@ -183,8 +255,18 @@ async def apply_library_defaults(conn, user_id, composition_id):
                  (src.parent_type='interest' AND b.interest_id=src.parent_id) OR
                  (src.parent_type='custom_entry' AND b.custom_entry_id=src.parent_id)
                )
-               WHERE b.user_id=%s AND b.archived_at IS NULL""",
-            (composition_id, user_id, user_id, user_id, user_id, user_id, user_id),
+               WHERE b.user_id=%s AND b.archived_at IS NULL
+                 AND (NOT %s OR pick.item_id IS NOT NULL)""",
+            (
+                composition_id,
+                bullet_ids,
+                bullet_variants,
+                composition_id,
+                composition_id,
+                user_id,
+                user_id,
+                bullets_on,
+            ),
         )
         resume = dict(row["render_payload"])
         for section in ("projects", "work_experience", "leadership"):
@@ -292,11 +374,12 @@ async def apply_library_defaults(conn, user_id, composition_id):
         )
         await conn.execute(
             """INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot)
-               VALUES(%s,%s,%s,'library-defaults',%s::jsonb)""",
+               VALUES(%s,%s,%s,%s,%s::jsonb)""",
             (
                 composition_id,
                 user_id,
                 saved["revision"],
+                source,
                 json.dumps({"resume": resume, "name": saved["name"]}),
             ),
         )
