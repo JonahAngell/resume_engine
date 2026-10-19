@@ -234,7 +234,9 @@ async def _placed_bullets(conn, user_id, composition_id: UUID):
         conn,
         """SELECT cb.bullet_id::text AS id,
                   cb.id::text AS placement_id,
+                  cb.variant_id::text AS variant_id,
                   cb.destination_parent_id::text AS parent_id,
+                  cb.destination_parent_type AS parent_type,
                   COALESCE(cb.wording_snapshot, v.body, '') AS wording,
                   COALESCE(cb.destination_section, '') AS section,
                   (ROW_NUMBER() OVER (
@@ -252,8 +254,8 @@ async def _placed_bullets(conn, user_id, composition_id: UUID):
            LEFT JOIN library_bullet_tags bt ON bt.bullet_id = b.id
            LEFT JOIN library_tags t ON t.id = bt.tag_id AND t.user_id = %s
            WHERE cb.composition_id = %s
-           GROUP BY cb.id, cb.bullet_id, cb.destination_parent_id, cb.wording_snapshot, v.body,
-                    cb.destination_section, cb.sort_order
+           GROUP BY cb.id, cb.bullet_id, cb.variant_id, cb.destination_parent_id, cb.destination_parent_type,
+                    cb.wording_snapshot, v.body, cb.destination_section, cb.sort_order
            ORDER BY cb.sort_order, cb.id""",
         (user_id, user_id, composition_id),
     )
@@ -266,7 +268,10 @@ async def _placed_bullets(conn, user_id, composition_id: UUID):
             {
                 "id": row["id"],
                 "placement_id": row["placement_id"],
+                "variant_id": row["variant_id"],
                 "parent_id": row["parent_id"],
+                "parent_type": row["parent_type"],
+                "destination_section": row["section"],
                 "line_index": row["line_index"],
                 "wording": row["wording"] or "",
                 "section": SECTION_LABELS.get(row["section"], row["section"]),
@@ -439,3 +444,50 @@ async def load_pick_inputs(conn, user_id, composition_id: UUID, job_id: UUID, pl
         "placed_bullet_ids": [row["bullet_id"] for row in placed],
         "revision": int(composition.get("revision") or 0),
     }, None
+
+
+async def load_chat_inputs(conn, user_id, composition_id: UUID, job_id: UUID | None):
+    """The resume, its placed bullets, the user's active library bullets and, when one is
+    chosen, the selected job. No other job is read."""
+    if job_id:
+        inputs, error = await load_ai_review_inputs(conn, user_id, job_id, composition_id)
+        if error:
+            return None, error
+    else:
+        composition = await load_composition(conn, user_id, composition_id, include_archived=False)
+        if not composition:
+            return None, "resume"
+        payload = composition["render_payload"] or {}
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        inputs = {
+            "description": "",
+            "resume": payload,
+            "bullets": await _placed_bullets(conn, user_id, composition_id),
+            "review": {},
+            "revision": int(composition.get("revision") or 0),
+            "job": None,
+            "composition": composition,
+        }
+    inputs["library"] = await _many(
+        conn,
+        """SELECT b.id::text AS bullet_id,
+                  v.id::text AS variant_id,
+                  COALESCE(b.parent_id, b.education_item_id)::text AS parent_id,
+                  COALESCE(NULLIF(concat_ws(' · ', ci.title, ci.organization), ''), ci.name, ei.institution, '') AS parent_label,
+                  v.body
+           FROM bullets b
+           JOIN bullet_variants v ON v.bullet_id = b.id AND v.user_id = b.user_id
+           LEFT JOIN content_items ci ON ci.id = b.parent_id
+           LEFT JOIN education_items ei ON ei.id = b.education_item_id
+           WHERE b.user_id = %s
+             AND b.archived_at IS NULL
+             AND v.archived_at IS NULL
+             AND COALESCE(b.parent_id, b.education_item_id) IS NOT NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM composition_bullets cb WHERE cb.composition_id = %s AND cb.variant_id = v.id
+             )
+           ORDER BY COALESCE(b.parent_id, b.education_item_id), b.sort_order, v.sort_order, v.id""",
+        (user_id, composition_id),
+    )
+    return inputs, None

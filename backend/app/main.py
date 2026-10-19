@@ -176,11 +176,12 @@ from .library_service import import_seed
 from .resume_import import ImportDraft, parse_upload
 from .resume_import_commit import commit_import
 from .ai_review import review_resume
-from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, KeywordDefinition, ResumeRecommendRequest, ResumeRecommendResult, VariantPick, VariantSuggestions
+from .ai_schemas import AiReview, AtsScore, ChatRequest, ChatTurn, CoachResult, KeywordAssist, KeywordDefinition, ResumeRecommendRequest, ResumeRecommendResult, VariantPick, VariantSuggestions
 from .ai_define import define_keyword
 from .ai_variant_pick import pick_variants
 from .ai_condense import condense_resume
 from .ai_schemas import CondenseResult
+from .ai_chat import chat_turn
 from .ai_coach import coach_resume
 from .ai_keyword import PLACEHOLDER, assist_keyword, new_bullet_key
 from .ai_variants import issued_draft, job_tool_terms, suggest_variants
@@ -197,6 +198,7 @@ from .job_repository import (
     link_job_composition,
     list_job_descriptions,
     load_ai_review_inputs,
+    load_chat_inputs,
     load_entry_section,
     load_pick_inputs,
     load_condense_inputs,
@@ -2014,6 +2016,27 @@ async def ai_coach_job(job_id: UUID, req: JobMatchRequest, identity: CurrentUser
         inputs["review"],
         inputs["revision"],
         job_id=str(job_id),
+    )
+
+
+@app.post("/api/compositions/{cid}/ai-chat", response_model=ChatTurn)
+async def ai_chat(cid: UUID, req: ChatRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        inputs, error = await load_chat_inputs(c, u["id"], cid, req.job_id)
+    if error == "resume":
+        raise HTTPException(404, "Resume not found")
+    if error:
+        raise HTTPException(404, "Job description not found")
+    return await chat_turn(
+        [message.model_dump() for message in req.messages],
+        inputs["description"],
+        inputs["resume"],
+        inputs["bullets"],
+        inputs["review"],
+        inputs["library"],
+        inputs["revision"],
+        job_id=str(req.job_id or ""),
     )
 
 
