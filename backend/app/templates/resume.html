@@ -711,6 +711,71 @@
           state.state = "measured";
           state.actual_page_count = descriptors.length;
           state.pages = descriptors;
+          // Line metrics for the shrink-to-fit tools: lines per bullet and per entry, used
+          // height per page, and roughly how many characters fit on one bullet line.
+          // Pages after the first are hidden once paginated; show them all while measuring.
+          const sheets = [...pages.children];
+          const shown = sheets.map((sheet) => sheet.dataset.activePage);
+          sheets.forEach((sheet) => (sheet.dataset.activePage = "true"));
+          try {
+            const lineTops = (el) => {
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const tops = [];
+              for (const rect of range.getClientRects()) {
+                if (rect.width < 1 || rect.height < 1) continue;
+                if (!tops.some((top) => Math.abs(top - rect.top) < rect.height / 2)) tops.push(rect.top);
+              }
+              return tops.length;
+            };
+            const bulletLines = {};
+            for (const li of pages.querySelectorAll("li[data-bullet-id]")) {
+              const id = li.dataset.bulletId;
+              bulletLines[id] = (bulletLines[id] || 0) + Math.max(1, lineTops(li));
+            }
+            const sample = pages.querySelector("li[data-bullet-id]") || pages.querySelector(".item");
+            let lineHeight = 0;
+            let charsPerLine = 0;
+            if (sample) {
+              const style = getComputedStyle(sample);
+              lineHeight = parseFloat(style.lineHeight) || (parseFloat(style.fontSize) || 12) * 1.2;
+              const probe = document.createElement("span");
+              probe.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap";
+              probe.textContent =
+                "Led a cross-functional team to deliver analytics dashboards, cutting reporting time by 40%.";
+              sample.append(probe);
+              const average = probe.getBoundingClientRect().width / probe.textContent.length;
+              probe.remove();
+              const width =
+                sample.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+              // Real text wraps a little early (wide letters, whole words), so leave a margin.
+              if (average > 0) charsPerLine = Math.floor((width / average) * 0.93);
+            }
+            const itemLines = {};
+            for (const item of pages.querySelectorAll("article.item[data-item-id]")) {
+              const id = item.dataset.itemId;
+              const height = item.getBoundingClientRect().height;
+              if (lineHeight) itemLines[id] = (itemLines[id] || 0) + Math.max(1, Math.round(height / lineHeight));
+            }
+            state.bullet_lines = bulletLines;
+            state.item_lines = itemLines;
+            state.line_height = lineHeight;
+            state.chars_per_line = charsPerLine;
+            state.page_lines = [...pages.children].map((sheet) => {
+              const box = sheet.querySelector(".page-content");
+              if (!box || !lineHeight) return 0;
+              const top = box.getBoundingClientRect().top;
+              let bottom = top;
+              for (const child of box.children) bottom = Math.max(bottom, child.getBoundingClientRect().bottom);
+              return Math.ceil((bottom - top) / lineHeight);
+            });
+          } catch (metricsError) {
+            state.bullet_lines = {};
+          }
+          sheets.forEach((sheet, index) => {
+            if (shown[index] === undefined) delete sheet.dataset.activePage;
+            else sheet.dataset.activePage = shown[index];
+          });
           const showPage = (index) => { const safe=Math.max(0,Math.min(descriptors.length-1,Number(index)||0)); [...pages.children].forEach((p,i)=>p.dataset.activePage=String(i===safe)); };
           {% if measure %}
           showPage(0);

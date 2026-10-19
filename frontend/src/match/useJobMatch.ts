@@ -95,6 +95,7 @@ export function useJobMatch({
     dismissed: job.keyword_review?.dismissed || [],
     added: job.keyword_review?.added || [],
     matched: job.keyword_review?.matched || [],
+    skipped: job.keyword_review?.skipped || [],
   });
 
   const saveReview = async (review: KeywordReview) => {
@@ -144,6 +145,18 @@ export function useJobMatch({
     });
   };
 
+  /** Toggle a keyword in keyword_review.skipped. It stops highlighting but still counts as missing. */
+  const skipKeyword = (keyword: string, value = true) => {
+    if (!selected || !keyword.trim()) return;
+    const review = reviewOf(selected);
+    const skipped = review.skipped.some((text) => sameText(text, keyword));
+    if (value === skipped) return;
+    saveReview({
+      ...review,
+      skipped: value ? [...review.skipped, keyword.trim()] : review.skipped.filter((text) => !sameText(text, keyword)),
+    });
+  };
+
   const addTag = async (bulletId: string, keyword: string) => {
     if (!selected || !keyword) return;
     setBusy(true);
@@ -176,6 +189,7 @@ export function useJobMatch({
     refresh,
     dismissRequirement,
     markRequirement,
+    skipKeyword,
     addTag,
   };
 }

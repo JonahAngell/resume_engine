@@ -17,12 +17,17 @@ from .related_skills import DICTIONARY, category_for_term
 
 logger = logging.getLogger("resume_engine.ai")
 
-VARIANT_PROMPT_VERSION = "2"
+VARIANT_PROMPT_VERSION = "3"
 GOALS = {
     "concise": "Make it shorter and tighter.",
     "impact": "Lead with the outcome the bullet already states.",
     "align": "Use the job's wording for the requirement where the bullet already supports it.",
+    "one_line": (
+        "Fit on one resume line: at most max_chars characters. Cut filler words and soft phrasing; "
+        "keep the action, the outcome, and every number that matters."
+    ),
 }
+ONE_LINE_CHARS = 95
 GUARDED_CATEGORIES = {"tool", "credential", "degree", "experience_duration"}
 MAX_DRAFTS = 5
 MAX_BODY = 500
@@ -186,7 +191,13 @@ def drop_reason(
 
 
 def filter_drafts(
-    data: dict, original: str, keyword: str, category: str, job_terms: list[str], require_keyword: bool = False
+    data: dict,
+    original: str,
+    keyword: str,
+    category: str,
+    job_terms: list[str],
+    require_keyword: bool = False,
+    max_chars: int | None = None,
 ) -> tuple[list[dict], int]:
     drafts = data.get("drafts") if isinstance(data, dict) else None
     if not isinstance(drafts, list):
@@ -199,7 +210,8 @@ def filter_drafts(
             dropped += 1
             continue
         body = " ".join(str(item.get("body") or "").split()).lstrip("•-* ").strip()
-        if _fold(body) in seen or drop_reason(body, original, keyword, category, job_terms, require_keyword=require_keyword):
+        too_long = max_chars is not None and len(body) > max_chars
+        if too_long or _fold(body) in seen or drop_reason(body, original, keyword, category, job_terms, require_keyword=require_keyword):
             dropped += 1
             continue
         seen.add(_fold(body))
@@ -211,8 +223,10 @@ def filter_drafts(
     return kept, dropped
 
 
-def _cache_key(original, job, requirement, keyword, category, goal, model, incorporate=False) -> str:
-    raw = json.dumps([original, job, requirement, keyword, category, goal, VARIANT_PROMPT_VERSION, model, incorporate])
+def _cache_key(original, job, requirement, keyword, category, goal, model, incorporate=False, max_chars=None) -> str:
+    raw = json.dumps(
+        [original, job, requirement, keyword, category, goal, VARIANT_PROMPT_VERSION, model, incorporate, max_chars]
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
@@ -269,6 +283,7 @@ async def suggest_variants(
     placement_id: str = "",
     job_id: str = "",
     incorporate_keyword: bool = False,
+    max_chars: int | None = None,
     complete=None,
 ) -> dict:
     model = model_name()
@@ -280,10 +295,12 @@ async def suggest_variants(
     job = redact_job(job_text or "")[:12000]
     category = category or category_for_term(keyword) or ""
     goal = goal if goal in GOALS else None
+    # Only the one-line goal has a hard length budget.
+    max_chars = (max_chars or ONE_LINE_CHARS) if goal == "one_line" else None
     terms = [term for term in (job_terms or []) if term and term.strip()]
     # Keyword mode only applies to keywords drafts may add; guarded ones keep the old rule.
     require = bool(incorporate_keyword) and _keyword_allowed(keyword, category)
-    key = _cache_key(bullet, job, requirement, keyword, category, goal, model, require)
+    key = _cache_key(bullet, job, requirement, keyword, category, goal, model, require, max_chars)
     cached = _CACHE.get(key)
     if cached is not None:
         remember_issued(placement_id, cached["drafts"], cached["model"], job_id)
@@ -306,8 +323,10 @@ async def suggest_variants(
         "keyword": keyword,
         "keyword_rule": guard,
         "goal": GOALS.get(goal or "", "Offer a mix of angles."),
-        "posting": job,
+        "posting": job or "No job chosen. Keep the bullet's own emphasis.",
     }
+    if max_chars:
+        request["max_chars"] = max_chars
     messages = [
         {"role": "system", "content": VARIANT_SYSTEM},
         {"role": "user", "content": json.dumps(request, ensure_ascii=False)},
@@ -321,7 +340,7 @@ async def suggest_variants(
     if not isinstance(data, dict):
         return _result("invalid")
     served = getattr(completion, "model", "") or model
-    drafts, dropped = filter_drafts(data, bullet, keyword, category, terms, require)
+    drafts, dropped = filter_drafts(data, bullet, keyword, category, terms, require, max_chars)
     fits = data.get("fits") is not False or bool(drafts)
     reason = "" if fits else " ".join(str(data.get("reason") or "").split())[:MAX_REASON]
     logger.info(

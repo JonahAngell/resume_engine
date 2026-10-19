@@ -86,13 +86,18 @@ def _keyword_for(row: dict, wanted: str) -> str:
         if wanted and _fold(item.get("keyword")) == _fold(wanted):
             return item.get("keyword") or ""
     for item in keywords:
-        if not item.get("found"):
+        if not item.get("found") and not item.get("skipped"):
             return item.get("keyword") or ""
     return keywords[0].get("keyword", "") if keywords else ""
 
 
 def _keyword_found(row: dict, keyword: str) -> bool:
     return any(_fold(item.get("keyword")) == _fold(keyword) and item.get("found") for item in row.get("keywords") or [])
+
+
+def _keyword_skipped(row: dict, keyword: str) -> bool:
+    """The user said they lack this keyword, so the coach never suggests it."""
+    return any(_fold(item.get("keyword")) == _fold(keyword) and item.get("skipped") for item in row.get("keywords") or [])
 
 
 def _card_id(*parts) -> str:
@@ -116,6 +121,9 @@ def filter_coach(data: dict, bullets: list[dict], summary: str, rows: list[dict]
             continue
         category = row.get("category") or row.get("kind") or ""
         keyword = _keyword_for(row, _clip(item.get("keyword"), 120))
+        if keyword and _keyword_skipped(row, keyword):
+            dropped += 1
+            continue
         priority = item.get("priority") if item.get("priority") in PRIORITY_ORDER else "medium"
         card = {
             "kind": kind,
@@ -227,7 +235,7 @@ async def coach_resume(
     job_terms = job_tool_terms(description or "")
     requirements = [
         {"text": row["text"], "group": row["group"], "matched": bool(row.get("matched")),
-         "keywords": [item.get("keyword") for item in row.get("keywords") or []]}
+         "keywords": [item.get("keyword") for item in row.get("keywords") or [] if not item.get("skipped")]}
         for row in rows
     ][:60]
     key = hashlib.sha256(

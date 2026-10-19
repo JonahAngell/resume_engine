@@ -4,8 +4,10 @@ import {
   AiDraftPanel,
   JobSelect,
   LibraryReviewDialog,
+  LineBudget,
   PickBadges,
   ReviewBanner,
+  ShrinkBanner,
   acceptAiWording,
   conflictMessage,
   useVariantPick,
@@ -101,12 +103,14 @@ function entryDraft(section: string, item?: any) {
 function BulletEditDialog({
   initial,
   placementId,
+  lines,
   ai,
   close,
   onSave,
 }: {
   initial: string;
   placementId: string;
+  lines: number | null;
   ai?: AiJobContext;
   close: () => void;
   onSave: (body: string) => Promise<void | false>;
@@ -138,6 +142,7 @@ function BulletEditDialog({
         return onSave(body.trim());
       }}
     >
+      {ai && <ShrinkBanner ai={ai} />}
       {ai && <ReviewBanner ai={ai} />}
       <label>
         Bullet
@@ -150,6 +155,7 @@ function BulletEditDialog({
           }}
         />
       </label>
+      <LineBudget ai={ai} body={body} lines={body.trim() === initial.trim() ? lines : null} />
       {aiDraft && (
         <p className="ai-meta">
           From AI: {aiDraft.draft.name}.{" "}
@@ -664,6 +670,7 @@ export function EditorLibraryDialogs({
       <BulletEditDialog
         initial={dialog.placement.wording_snapshot || ""}
         placementId={String(dialog.placement.id)}
+        lines={ai?.lineCount?.(dialog.placement) ?? null}
         ai={ai}
         close={close}
         onSave={(body) => actions.saveBullet(dialog.placement, body)}

@@ -24,6 +24,8 @@ class KeywordReview(BaseModel):
     dismissed: list[str] = []
     added: list[AddedRequirement] = []
     matched: list[str] = []
+    # Keywords the user lacks: hidden from highlights, still missing in scores.
+    skipped: list[str] = []
 
 
 class JobDescriptionWrite(BaseModel):
