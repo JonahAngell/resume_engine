@@ -309,3 +309,71 @@ async def load_entry_section(conn, user_id, composition_id: UUID, parent_id: UUI
             if isinstance(entry, dict) and str(entry.get("id") or "") == str(parent_id):
                 return section, None
     return None, "entry"
+
+
+async def load_pick_inputs(conn, user_id, composition_id: UUID, job_id: UUID, placement_ids: list[UUID] | None = None):
+    """Placed bullets (or the listed ones) with their parent label, and the active library
+    bullets of those parents. The client never supplies wording."""
+    composition = await load_composition(conn, user_id, composition_id, include_archived=False)
+    if not composition:
+        return None, "resume"
+    job = await get_job_description(conn, user_id, job_id)
+    if not job:
+        return None, "job"
+    wanted = [str(item) for item in placement_ids or []]
+    placements = await _many(
+        conn,
+        """SELECT cb.id::text AS placement_id,
+                  cb.bullet_id::text AS bullet_id,
+                  cb.variant_id::text AS variant_id,
+                  COALESCE(b.parent_id, b.education_item_id)::text AS parent_id,
+                  COALESCE(cb.destination_section, '') AS section,
+                  COALESCE(NULLIF(concat_ws(' · ', ci.title, ci.organization), ''), ci.name, ei.institution, '') AS parent_label,
+                  COALESCE(cb.wording_snapshot, v.body, '') AS body,
+                  COALESCE(v.name, '') AS variant_name
+           FROM composition_bullets cb
+           JOIN bullets b ON b.id = cb.bullet_id AND b.user_id = %s
+           LEFT JOIN bullet_variants v ON v.id = cb.variant_id
+           LEFT JOIN content_items ci ON ci.id = b.parent_id
+           LEFT JOIN education_items ei ON ei.id = b.education_item_id
+           WHERE cb.composition_id = %s
+             AND COALESCE(b.parent_id, b.education_item_id) IS NOT NULL
+             AND (cardinality(%s::uuid[]) = 0 OR cb.id = ANY(%s::uuid[]))
+           ORDER BY cb.destination_section, cb.destination_parent_id, cb.sort_order, cb.id""",
+        (user_id, composition_id, wanted, wanted),
+    )
+    if wanted and not placements:
+        return None, "placement"
+    parents = sorted({row["parent_id"] for row in placements})
+    library = await _many(
+        conn,
+        """SELECT b.id::text AS bullet_id,
+                  v.id::text AS variant_id,
+                  COALESCE(b.parent_id, b.education_item_id)::text AS parent_id,
+                  v.name,
+                  v.body
+           FROM bullets b
+           JOIN bullet_variants v ON v.bullet_id = b.id AND v.user_id = b.user_id
+           WHERE b.user_id = %s
+             AND b.archived_at IS NULL
+             AND v.archived_at IS NULL
+             AND COALESCE(b.parent_id, b.education_item_id) = ANY(%s::uuid[])
+           ORDER BY b.sort_order, v.sort_order, v.id""",
+        (user_id, parents),
+    )
+    # The whole-resume review also needs every placed bullet id, not only the listed ones.
+    if wanted:
+        placed = await _many(
+            conn,
+            "SELECT bullet_id::text AS bullet_id FROM composition_bullets WHERE composition_id = %s",
+            (composition_id,),
+        )
+    else:
+        placed = placements
+    return {
+        "description": job["body"] or "",
+        "placements": placements,
+        "library": library,
+        "placed_bullet_ids": [row["bullet_id"] for row in placed],
+        "revision": int(composition.get("revision") or 0),
+    }, None

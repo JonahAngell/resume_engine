@@ -250,3 +250,31 @@ Bands: Strong ≥ 75, Fair ≥ 55, otherwise Needs work. The UI always shows the
 - The ATS score is deterministic and never uses AI.
 - Coach suggestions save nothing until a card is accepted, and pass the same fabrication guard as single-bullet drafts.
 - Nothing from the clickable-highlight code reaches the PDF render.
+
+# AI in the editor's bullet dialogs
+
+The Edit (pencil) and Switch (replace) buttons on a bullet in the main editor open dialogs with AI for one job. The job picker in each dialog shares its selection with the Job match tab (`useJobMatch`), so it defaults to the job linked to the resume.
+
+## Files
+
+| Path | Role |
+|---|---|
+| `backend/app/ai_variant_pick.py` | `pick_variants`: builds one slot per placed bullet with its library alternatives, scores them by job keywords, and asks the model to score them when AI is available. |
+| `backend/app/job_repository.py` | `load_pick_inputs`: placements, parent labels and the active library bullets of those parents. |
+| `backend/app/phase2j_repository.py` | `replace_placements`: switches several placements in one revision. |
+| `frontend/src/editor/AiBulletTools.tsx` | Job picker, Tailor every bullet banner, AI draft panel, ranking badges, `LibraryReviewDialog`. |
+| `frontend/src/editor/EditorLibraryDialogs.tsx` | `BulletEditDialog` (AI wording panel) and `BulletSwitchDialog` (ranked library, New wording with AI, Write new). |
+| `tests/test_ai_variant_pick.py`, `tests/test_ai_variant_pick_api_integration.py` | Unit and database tests. |
+
+## Endpoints
+
+| Route | Saves | Notes |
+|---|---|---|
+| `POST /api/compositions/{cid}/ai-variant-pick` | nothing | Body: `job_id`, `placement_ids` (empty means every placed bullet), `use_ai`. Returns `slots` with `candidates` (current first before ranking), `best_key`, `recommend`, and `method` (`ai` or `keywords`). |
+| `POST /api/compositions/{cid}/bullet-placements/replace-many` | placements | Body: `revision`, `items` of `placement_id`, `bullet_id`, `variant_id`. One revision. 422 when a bullet belongs to another entry, 409 for a duplicate bullet or a stale revision. |
+
+New wording reuses `.../ai-variants` and `.../ai-variants/accept`, so drafts keep the same guardrails and provenance. In the Edit dialog, saving AI wording goes through accept (a new variant for this resume) instead of the save-mode chooser.
+
+## Ranking
+
+Candidates for a placement are the other active variants of its bullet plus unused bullets of the same role, project or school, capped at 8 per slot and 40 slots. Every candidate gets `keyword_hits` from `extract_keywords` on the job. With AI, the model scores each candidate 0 to 100 and gives a reason; it can only choose among library text, so there is no fabrication guard. A switch is recommended when the best AI score beats the current by `AI_MARGIN` (8), or, by keywords, when the best has more hits. An unused bullet is never recommended for two slots. When the model fails or scores nothing, the keyword ranking is returned with the error status. `ai_variant_pick._CACHE` (16) keys on the redacted job, slot candidates, `PICK_PROMPT_VERSION` and model.

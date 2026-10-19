@@ -49,6 +49,8 @@ from .editing_repository import (
 from .editing_schemas import (
     AiVariantAccept,
     AiVariantRequest,
+    BulletPlacementReplaceMany,
+    VariantPickRequest,
     KeywordAssistRequest,
     KeywordBulletAccept,
     AtsScoreRequest,
@@ -169,7 +171,8 @@ from .library_service import import_seed
 from .resume_import import ImportDraft, parse_upload
 from .resume_import_commit import commit_import
 from .ai_review import review_resume
-from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, VariantSuggestions
+from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, VariantPick, VariantSuggestions
+from .ai_variant_pick import pick_variants
 from .ai_coach import coach_resume
 from .ai_keyword import PLACEHOLDER, assist_keyword, new_bullet_key
 from .ai_variants import issued_draft, job_tool_terms, suggest_variants
@@ -187,6 +190,7 @@ from .job_repository import (
     list_job_descriptions,
     load_ai_review_inputs,
     load_entry_section,
+    load_pick_inputs,
     load_variant_inputs,
     update_job_description,
 )
@@ -203,6 +207,7 @@ from .phase2j_repository import (
     create_and_place,
     remove_placement,
     replace_placement,
+    replace_placements,
     reorder_placements,
     update_usage,
     usage_rows,
@@ -1429,6 +1434,12 @@ async def create_bullet_placement(cid: UUID, req: BulletCreateAndPlace, identity
         u=await owner(identity,c); row,error=await create_and_place(c,u["id"],cid,req)
         return _placement_result(row,error)
 
+@app.post("/api/compositions/{cid}/bullet-placements/replace-many", response_model=CompositionState)
+async def change_bullet_placements(cid: UUID, req: BulletPlacementReplaceMany, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u=await owner(identity,c); row,error=await replace_placements(c,u["id"],cid,req)
+        return _placement_result(row,error)
+
 @app.put("/api/compositions/{cid}/bullet-placements/order", response_model=CompositionState)
 async def order_bullet_placements(cid: UUID, req: BulletPlacementReorder, identity: CurrentUser = Depends(resolve_current_user)):
     async with connection() as c:
@@ -1483,6 +1494,28 @@ async def suggest_bullet_variants(cid: UUID, placement_id: UUID, req: AiVariantR
 
 def _keyword_category(keyword: str, category: str) -> str:
     return "tool" if is_skill_keyword(keyword, category) else (category or category_for_term(keyword) or "")
+
+
+@app.post("/api/compositions/{cid}/ai-variant-pick", response_model=VariantPick)
+async def pick_bullet_variants(cid: UUID, req: VariantPickRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    """Rank library wording for the listed placements, or every placed bullet, against one job."""
+    async with connection() as c:
+        u = await owner(identity, c)
+        inputs, error = await load_pick_inputs(c, u["id"], cid, req.job_id, req.placement_ids)
+    if error == "resume":
+        raise HTTPException(404, "Resume not found")
+    if error == "placement":
+        raise HTTPException(404, "Bullet not found")
+    if error:
+        raise HTTPException(404, "Job description not found")
+    return await pick_variants(
+        inputs["description"],
+        inputs["placements"],
+        inputs["library"],
+        inputs["revision"],
+        use_ai=req.use_ai,
+        placed_ids=inputs["placed_bullet_ids"],
+    )
 
 
 @app.post("/api/compositions/{cid}/ai-keyword-assist", response_model=KeywordAssist)

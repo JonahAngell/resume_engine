@@ -5266,3 +5266,183 @@ mark.doc-hit:focus-visible {
   }
 }
 
+
+/* AI tools in the editor's bullet dialogs */
+.ai-review-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 10px;
+  padding: 10px 12px;
+  border: 1px solid #d9cdf5;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #f6f1ff, #eef4fd);
+}
+.ai-review-banner > div {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.ai-review-banner > div span {
+  color: #4b5b78;
+}
+.ai-review-banner button {
+  flex: none;
+}
+.ai-spark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #6b4fc8;
+  color: #fff;
+  font-size: 14px;
+}
+.ai-panel {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e1e8f2;
+}
+.ai-panel h3 span,
+.ai-action span {
+  color: #6b4fc8;
+}
+.ai-job-select {
+  display: grid;
+  gap: 4px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.ai-job-select select {
+  font: inherit;
+  font-weight: 400;
+  min-width: 0;
+}
+.ai-action {
+  justify-self: start;
+  border-color: #b9a6ee;
+}
+.ai-draft-panel {
+  display: grid;
+  gap: 8px;
+}
+.ai-draft-option {
+  grid-template-columns: minmax(0, 1fr) auto;
+  cursor: default;
+}
+.ai-draft-option > button {
+  align-self: center;
+}
+.switch-rank-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+.switch-rank-bar .ai-job-select {
+  flex: 1 1 240px;
+}
+.bullet-switch-dialog .picker-results {
+  max-height: 360px;
+}
+.entry-picker-result.pick-best {
+  border-color: #6b4fc8;
+  background: #f8f5ff;
+}
+.entry-picker-result .ai-meta {
+  font-size: 12px;
+}
+.pick-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.pick-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #eef2f8;
+  color: #33496d;
+  font-size: 11px;
+  font-weight: 600;
+}
+.pick-badge.best {
+  background: #6b4fc8;
+  color: #fff;
+}
+.pick-badge.score {
+  background: #e8f5ec;
+  color: #1d6b3a;
+}
+.pick-badge.keywords {
+  background: #fff3d1;
+  color: #5c4300;
+}
+.library-review-dialog {
+  width: min(760px, 96vw);
+}
+.review-summary {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7f9fc;
+}
+.review-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.review-group {
+  display: grid;
+  gap: 8px;
+}
+.review-group h3 small {
+  color: #61708a;
+  font-weight: 400;
+}
+.review-slot {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #d5deeb;
+  border-radius: 8px;
+}
+.review-slot.switching {
+  border-color: #6b4fc8;
+  background: #fbf9ff;
+}
+.review-switch input {
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin-top: 3px;
+}
+.review-texts {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.review-texts p {
+  margin: 0;
+}
+.review-texts > .link-button {
+  justify-self: start;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .ai-review-banner {
+    flex-wrap: wrap;
+  }
+  .ai-review-banner button {
+    width: 100%;
+  }
+}
