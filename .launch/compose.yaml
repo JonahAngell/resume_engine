@@ -1,0 +1,10 @@
+services:
+  app:
+    ports:
+      - "80:8080"
+    environment:
+      GOTENBERG_URL: http://gotenberg:3000
+    depends_on:
+      - gotenberg
+  gotenberg:
+    image: gotenberg/gotenberg:8
