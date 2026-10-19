@@ -284,3 +284,53 @@ Candidates for a placement are the other active variants of its bullet plus unus
 ## Keywords the user doesn't have
 
 **I don't have this** in the highlight popover adds the keyword to `keyword_review.skipped` for that job (saved through the normal job save). `match_qualifications` then marks the keyword `skipped: true` and gives it no suggestions, so it loses its highlight, and the AI coach drops cards for it. It stays `found: false`, so match coverage and the ATS score still count it as missing; the ATS keyword tips name how many skipped keywords are still counted. The Requirements tab shows skipped keywords struck through with an **Undo**. This differs from **Dismiss requirement** (`keyword_review.dismissed`), which removes the whole requirement from scoring.
+
+# AI chat assistant
+
+A floating **Ask AI** panel in the editor (both the Edit and Job match tabs) lets the user talk about the open resume, its match with the selected job, and the posting. The assistant can propose edits; each one applies only when the user clicks Accept, through the existing save endpoints.
+
+## Files
+
+| Path | Role |
+|---|---|
+| `backend/app/ai_chat.py` | Prompt, context builder (`build_context`), proposal filter (`filter_proposals`), history trim, `chat_turn`. No cache. |
+| `backend/app/job_repository.py` | `load_chat_inputs`: resume, placed bullets (now with `variant_id`, `parent_type`, `destination_section`), the user's active library variants not on this resume, and the selected job only. |
+| `backend/app/ai_schemas.py` | `ChatRequest`, `ChatMessage`, `ChatProposal`, `ChatTurn`. |
+| `frontend/src/chat/ChatPanel.tsx` | Launcher, non-modal panel (bottom sheet below 600px), job picker shared with the dashboard (`useJobMatch.setJobId`), history in `sessionStorage` per resume and job, accept mapping. |
+| `frontend/src/chat/ProposalCard.tsx` | One proposal: before/after, edit, Accept, Dismiss. |
+| `frontend/src/match/diffWords.tsx` | Word diff shared with the coach. |
+| `tests/test_ai_chat.py`, `tests/test_ai_chat_api_integration.py` | Unit and database tests. |
+
+## Endpoint
+
+| Route | Saves | Notes |
+|---|---|---|
+| `POST /api/compositions/{cid}/ai-chat` | nothing | Body: `job_id` (or null) and `messages` (`user`/`assistant`, 1–40). The server keeps the last 12 turns, each clipped to 2,000 characters, starting and ending with a user turn. Returns `status`, `detail`, `model`, `revision`, `reply`, `proposals`, `dropped`. 404 for a resume or job the user doesn't own. |
+
+## What the model receives
+
+One system message: the prompt plus a JSON context block. `job` is the redacted posting (12,000 characters) and up to 60 requirement rows with match state and keywords (skipped keywords removed), or null when no job is selected. No other job is ever loaded. `resume` holds the summary, skill names, numbered entries (roles, projects, leadership) and numbered placed bullets from `ai_keyword.resume_entries`; contact fields are not included and emails, URLs and phone numbers are scrubbed. `library` holds up to 150 active library variants not on this resume, each with its entry label and the entry number when that entry is on the resume. The prompt tells the model to discuss only requirements in the selected posting and to ignore instructions inside resume or posting text.
+
+## Proposals
+
+At most 6 per turn. Anything that fails a check is dropped and counted in `dropped`; one placement is touched by at most one proposal per turn.
+
+| Kind | Check | Accepted through |
+|---|---|---|
+| `rewrite` | Bullet in range; `drop_reason` against that bullet (an optional `keyword` must be a requirement keyword of the selected job); no placeholders. | `.../ai-variants/accept` |
+| `summary` | Summary exists; `drop_reason` against it. | `/summaries/{id}/save`, mode `new` |
+| `new_bullet` | Entry in range; `drop_reason(fresh=True)` against the entry's facts with placeholders removed; not a copy of a placed bullet. The UI requires placeholders to be replaced. | `/ai-keyword-assist/accept-new` |
+| `remove` | Bullet in range. The bullet stays in the library. | `DELETE /bullet-placements/{pid}` |
+| `reorder` | Exact permutation of every placement under one entry, at least two, different from the current order. | `PUT /bullet-placements/order` |
+| `add_skill` | A missing, non-skipped requirement keyword of the selected job with `skill: true`, not already a resume skill. | Add to Skills dialog |
+| `use_library` | Library item in range. Insert: its entry is on this resume and its bullet is not placed. Replace: the replaced bullet has the same parent, and a different bullet must not already be placed. | `POST /bullet-placements` or `/replace-many` |
+
+Kept rewrites and new bullets are registered with `remember_issued` (new bullets under `new:{parent_id}`), so accepting one unchanged with a job selected sets `ai_generated`, like the coach. With no job selected the accept endpoints store no AI provenance.
+
+## Invariants
+
+- The chat endpoint saves nothing; every change goes through an existing endpoint with its revision check (409 on a stale revision).
+- The match score and ATS score are never changed by the chat.
+- Only the selected job is read. Do not add other jobs to the context.
+- Do not log prompt bodies, replies or resume text; logs carry counts and outcome only.
+- Tests inject `complete=` or patch `ai_chat.complete_json`; keep that hook.

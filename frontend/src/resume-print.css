@@ -5703,3 +5703,235 @@ mark.doc-hit:focus-visible {
   min-height: 0;
   margin: 2px 0 0;
 }
+
+/* AI chat assistant (floating panel) */
+.chat-launcher {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  box-shadow: 0 10px 28px #1f2a4440;
+}
+.chat-panel {
+  --dash-line: #d9e2ef;
+  --dash-muted: #5c6e91;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  width: min(420px, calc(100vw - 40px));
+  height: min(680px, calc(100vh - 40px));
+  border: 1px solid #cbd7e7;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 48px #1f2a4440;
+  color: #1f2a44;
+  overflow: hidden;
+}
+.chat-head {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--dash-line);
+  background: #f7f9fc;
+}
+.chat-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-title h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.chat-context {
+  display: grid;
+  justify-items: start;
+  gap: 2px;
+  margin: 0;
+  color: var(--dash-muted);
+  font-size: 12.5px;
+}
+.chat-context > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.chat-picker {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.chat-picker > .link-button {
+  justify-self: start;
+}
+.chat-messages {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  overflow-y: auto;
+}
+.chat-empty {
+  display: grid;
+  gap: 10px;
+  color: #4b5b78;
+  font-size: 13.5px;
+}
+.chat-empty p {
+  margin: 0;
+}
+.chat-starters {
+  display: grid;
+  gap: 6px;
+}
+.chat-starters button {
+  text-align: left;
+  font-size: 13px;
+}
+.chat-message {
+  display: grid;
+  gap: 8px;
+}
+.chat-bubble {
+  max-width: 88%;
+  margin: 0;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.from-user .chat-bubble {
+  justify-self: end;
+  background: #1f2a44;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.from-assistant .chat-bubble {
+  justify-self: start;
+  background: #f1f4f9;
+  border-bottom-left-radius: 4px;
+}
+.chat-message.failed .chat-bubble {
+  background: #fdf1ef;
+  color: #8a2f25;
+}
+.chat-typing {
+  color: var(--dash-muted);
+  font-style: italic;
+}
+.chat-proposals {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.chat-proposal {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--dash-line);
+  border-radius: 12px;
+  background: #fff;
+}
+.chat-proposal.done {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f7f9fc;
+}
+.chat-outcome {
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--dash-muted);
+}
+.chat-proposal.applied .chat-outcome {
+  color: #1d7a46;
+}
+.chat-proposal .row-actions {
+  flex-wrap: wrap;
+}
+.chat-removed del {
+  color: #8a2f25;
+}
+.chat-reorder {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.chat-reorder ol {
+  margin: 0;
+  padding: 8px 10px 8px 28px;
+  border-radius: 8px;
+  background: #f5f7fb;
+}
+.chat-reorder ol + .coach-label + ol {
+  background: #f0f8f3;
+}
+.chat-note {
+  margin: 0;
+  color: var(--dash-muted);
+  font-size: 12px;
+}
+.chat-error {
+  margin: 0 14px 8px;
+}
+.chat-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 14px 6px;
+  border-top: 1px solid var(--dash-line);
+}
+.chat-composer textarea {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  font: inherit;
+  font-size: 13.5px;
+  box-sizing: border-box;
+}
+.chat-footnote {
+  padding: 0 14px 10px;
+}
+@media (max-width: 600px) {
+  .chat-launcher {
+    right: 16px;
+    bottom: 16px;
+  }
+  .chat-panel {
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 85vh;
+    height: 85dvh;
+    border-radius: 16px 16px 0 0;
+  }
+}
+@media print {
+  .chat-launcher,
+  .chat-panel {
+    display: none !important;
+  }
+}
