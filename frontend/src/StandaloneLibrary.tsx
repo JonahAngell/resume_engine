@@ -15,12 +15,17 @@ import {
   profileWriteError,
 } from "./LibraryEntryForms";
 import ChoiceList from "./ChoiceList";
+import {
+  DefaultSetResults,
+  SetMembershipEditor,
+  bulletVariantOptions,
+} from "./DefaultSets";
 
 type Status = "active" | "archived" | "all";
 type View = "list" | "card";
 const SECTIONS = [
   ["", "All Items", "all-items"],
-  ["resume-variants", "Resume variants", "library"],
+  ["default-sets", "Defaults sets", "library"],
   ["profile", "Profile", "profile"],
   ["experience", "Experience", "experience"],
   ["projects", "Projects", "projects"],
@@ -68,7 +73,7 @@ export default function StandaloneLibrary({
   const [entryDetail, setEntryDetail] = useState<any>(null);
   const [entryConfirmed, setEntryConfirmed] = useState<any>(null);
   const [entryTab, setEntryTab] = useState<
-    "details" | "bullets" | "variants" | "usage"
+    "details" | "bullets" | "variants" | "usage" | "sets"
   >("details");
   const [createKind, setCreateKind] = useState<LibraryEntryKind | null>(
     initialTarget?.createKind || null,
@@ -96,7 +101,7 @@ export default function StandaloneLibrary({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [bulkDialog, setBulkDialog] = useState<"tag" | "move" | null>(null);
+  const [bulkDialog, setBulkDialog] = useState<"tag" | "move" | "set" | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const resultsRef = useRef<HTMLElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -107,7 +112,7 @@ export default function StandaloneLibrary({
     setBusy(true);
     setError("");
     try {
-      if (section === "resume-variants") {
+      if (section === "default-sets") {
         setData({ items: [], total_items: 0, total_pages: 1, page: 1 });
         setSelected([]);
         setDetail(null);
@@ -121,7 +126,7 @@ export default function StandaloneLibrary({
         page_size: String(pageSize),
       });
       const bulletSections = SECTIONS.map(([key]) => key).filter(
-        (key) => key && key !== section && key !== "resume-variants",
+        (key) => key && key !== section && key !== "default-sets",
       );
       const [items, bulletTotals] = await Promise.all([
         api<any>(`/api/library-management/items?${params}`),
@@ -267,7 +272,7 @@ export default function StandaloneLibrary({
     [data.total_pages, page],
   );
   const entryMode =
-    section !== "resume-variants" &&
+    section !== "default-sets" &&
     (section === "profile" || (section !== "" && contentView === "entries"));
   const sectionCounts = useMemo(() => {
     if (!entryMode) return counts;
@@ -389,6 +394,7 @@ export default function StandaloneLibrary({
             </button>
             <button onClick={() => setBulkDialog("tag")}>Tag</button>
             <button onClick={() => setBulkDialog("move")}>Move Section</button>
+            <button onClick={() => setBulkDialog("set")}>Defaults set</button>
             <button onClick={() => setSelected([])}>Clear</button>
           </div>
         )}
@@ -412,10 +418,8 @@ export default function StandaloneLibrary({
                   {label}
                 </span>
                 <strong>
-                  {key === "resume-variants"
-                    ? (lib.compositions || []).filter(
-                        (item: any) => item.is_starter && !item.archived_at,
-                      ).length
+                  {key === "default-sets"
+                    ? (lib.default_sets || []).length
                     : sectionCounts[key || "all"] || 0}
                 </strong>
               </button>
@@ -440,7 +444,7 @@ export default function StandaloneLibrary({
             <div className="library-result-toolbar" ref={toolbarRef}>
               {section !== "" &&
                 section !== "profile" &&
-                section !== "resume-variants" && (
+                section !== "default-sets" && (
                 <div
                   className="view-toggle content-toggle"
                   role="group"
@@ -510,10 +514,10 @@ export default function StandaloneLibrary({
               </div>
             </div>
             <div className="library-results-viewport" ref={viewportRef}>
-              {section === "resume-variants" ? (
-                <ResumeVariantResults
+              {section === "default-sets" ? (
+                <DefaultSetResults
                   lib={lib}
-                  onOpenResume={onOpenResume}
+                  query={query}
                   reloadLibrary={reloadLibrary}
                   setError={setError}
                 />
@@ -642,7 +646,7 @@ export default function StandaloneLibrary({
                 </div>
               )}
             </div>
-            {!entryMode && (
+            {!entryMode && section !== "default-sets" && (
               <nav
                 ref={paginationRef}
                 className="library-pagination"
@@ -726,14 +730,16 @@ export default function StandaloneLibrary({
                   role="tablist"
                   aria-label="Bullet detail views"
                 >
-                  {["details", "variants", "usage"].map((x) => (
+                  {["details", "variants", "usage", "sets"].map((x) => (
                     <button
                       role="tab"
                       key={x}
                       aria-selected={tab === x}
                       onClick={() => setTab(x)}
                     >
-                      {x[0].toUpperCase() + x.slice(1)}
+                      {x === "sets"
+                        ? "Defaults sets"
+                        : x[0].toUpperCase() + x.slice(1)}
                       {x === "variants"
                         ? ` (${detail.variants.length})`
                         : x === "usage"
@@ -971,12 +977,39 @@ export default function StandaloneLibrary({
                 {tab === "usage" && (
                   <Usage rows={detail.usage} onOpenResume={onOpenResume} />
                 )}
+                {tab === "sets" && (
+                  <SetMembershipEditor
+                    lib={lib}
+                    itemType="bullet"
+                    itemId={detail.id}
+                    label="Include this bullet in"
+                    variants={bulletVariantOptions(detail.variants || [])}
+                    reloadLibrary={reloadLibrary}
+                    setError={setError}
+                  />
+                )}
               </>
             )}
           </aside>
         </div>
       </section>
-      {bulkDialog && (
+      {bulkDialog === "set" && (
+        <BulkSetDialog
+          sets={lib.default_sets || []}
+          count={selected.length}
+          close={() => setBulkDialog(null)}
+          apply={(setId: string, action: "add" | "remove") => {
+            setBulkDialog(null);
+            mutate(() =>
+              api(`/api/default-sets/${setId}/bulk`, {
+                method: "POST",
+                body: JSON.stringify({ action, bullet_ids: selected }),
+              }),
+            );
+          }}
+        />
+      )}
+      {bulkDialog && bulkDialog !== "set" && (
         <BulkDialog
           kind={bulkDialog}
           close={() => setBulkDialog(null)}
@@ -1037,69 +1070,6 @@ function SectionSelect({
           <AppIcon name={icon} />
           {label}
         </button>
-      ))}
-    </div>
-  );
-}
-
-function ResumeVariantResults({ lib, onOpenResume, reloadLibrary, setError }: any) {
-  const rows = (lib.compositions || []).filter((item: any) => item.is_starter);
-  if (!rows.length)
-    return (
-      <div className="library-state">
-        <strong>No resume variants</strong>
-        <span>
-          Open a resume and choose Save as resume variant to store a default set.
-        </span>
-      </div>
-    );
-  return (
-    <div className="library-cards">
-      {rows.map((item: any) => (
-        <article key={item.id} className="library-card">
-          <strong>{item.name}</strong>
-          <p>{item.display_title || item.description || "Default set"}</p>
-          {item.is_default_starter && !item.archived_at && (
-            <span className="status-badge default">Default</span>
-          )}
-          {item.archived_at && <span className="status-badge">Archived</span>}
-          <div className="form-actions">
-            {!item.archived_at && (
-              <button type="button" onClick={() => onOpenResume(item.id)}>
-                Open
-              </button>
-            )}
-            {!item.archived_at && !item.is_default_starter && (
-              <button
-                type="button"
-                onClick={() =>
-                  api(`/api/resume-variants/${item.id}/default`, {
-                    method: "POST",
-                  })
-                    .then(() => reloadLibrary())
-                    .catch((error: any) => setError(error.message))
-                }
-              >
-                Make default
-              </button>
-            )}
-            {item.archived_at && (
-              <button
-                type="button"
-                onClick={() =>
-                  api(`/api/compositions/${item.id}/restore`, {
-                    method: "POST",
-                    body: JSON.stringify({ revision: item.revision }),
-                  })
-                    .then(() => reloadLibrary())
-                    .catch((error: any) => setError(error.message))
-                }
-              >
-                Restore
-              </button>
-            )}
-          </div>
-        </article>
       ))}
     </div>
   );
@@ -1978,6 +1948,13 @@ function EntryDetails({
         >
           Usage ({usage.length})
         </button>
+        <button
+          role="tab"
+          aria-selected={tab === "sets"}
+          onClick={() => setTab("sets")}
+        >
+          Defaults sets
+        </button>
       </div>
       {tab === "details" ? (
         <>
@@ -2046,6 +2023,42 @@ function EntryDetails({
             )}
           </div>
         )
+      ) : tab === "sets" ? (
+        <div className="entry-sets">
+          <SetMembershipEditor
+            lib={lib}
+            itemType={setItemType(kind)}
+            itemId={detail.id}
+            label={`Include this ${sectionLabel(section).toLowerCase()} entry in`}
+            variants={
+              ["employment", "project", "leadership", "education", "profile"].includes(kind)
+                ? fieldVariants.map((v: any) => ({ id: v.id, label: v.name }))
+                : undefined
+            }
+            reloadLibrary={reloadLibrary}
+            setError={setError}
+          />
+          {bullets.length > 0 && (
+            <>
+              <h3>Bullets</h3>
+              <p className="set-hint">
+                A bullet is used only in sets that also include this entry.
+              </p>
+              {bullets.map((b: any) => (
+                <SetMembershipEditor
+                  key={b.id}
+                  lib={lib}
+                  itemType="bullet"
+                  itemId={b.id}
+                  label={b.variants.find((v: any) => v.is_default)?.body || b.body}
+                  variants={bulletVariantOptions(b.variants)}
+                  reloadLibrary={reloadLibrary}
+                  setError={setError}
+                />
+              ))}
+            </>
+          )}
+        </div>
       ) : (
         <Usage
           rows={usage}
@@ -2055,6 +2068,13 @@ function EntryDetails({
       )}
     </>
   );
+}
+function setItemType(kind: string) {
+  if (["employment", "project", "leadership"].includes(kind)) return "content_item";
+  if (kind === "education") return "education_item";
+  if (kind === "tool-group") return "tool_group";
+  if (kind === "custom-section") return "custom_section";
+  return kind;
 }
 function EntryCreateDialog({ kind, lib, close, saved, setError }: any) {
   const [draft, setDraft] = useState(() => cloneBlankDraft(kind));
@@ -2171,6 +2191,40 @@ function BulkDialog({ kind, close, apply }: any) {
           disabled={kind === "tag" && !tags.length}
         >
           Apply
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function BulkSetDialog({ sets, count, close, apply }: any) {
+  const [setId, setSetId] = useState(sets[0]?.id || "");
+  return (
+    <ModalShell title="Defaults set for selected bullets" close={close}>
+      {sets.length ? (
+        <div className="choice-field">
+          <span>Defaults set</span>
+          <ChoiceList
+            label="Defaults set"
+            value={setId}
+            options={sets.map((set: any) => ({ value: set.id, label: set.name }))}
+            onChange={setSetId}
+          />
+          <p className="set-hint">
+            Added bullets use their default wording. A bullet is used only in
+            sets that also include its entry.
+          </p>
+        </div>
+      ) : (
+        <p>Create a defaults set first, under Defaults sets in this Library.</p>
+      )}
+      <div className="form-actions">
+        <button onClick={close}>Cancel</button>
+        <button disabled={!setId} onClick={() => apply(setId, "remove")}>
+          Remove {count} from set
+        </button>
+        <button className="primary" disabled={!setId} onClick={() => apply(setId, "add")}>
+          Add {count} to set
         </button>
       </div>
     </ModalShell>

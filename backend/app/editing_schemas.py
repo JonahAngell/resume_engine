@@ -72,7 +72,10 @@ class CompositionCreate(BaseModel):
     display_title: str = Field(default="", max_length=200)
     target_company: str = Field(default="", max_length=200)
     target_role: str = Field(default="", max_length=200)
-    resume_variant_id: UUID | None = None
+    default_set_id: UUID | None = None
+    # True starts from the whole library even when a default set exists.
+    entire_library: bool = False
+    job_description_id: UUID | None = None
 
 
 class DuplicateComposition(BaseModel):
@@ -254,10 +257,58 @@ class ProfileSaveChoice(BaseModel):
     fields: dict
 
 
-class ResumeVariantWrite(BaseModel):
+class DefaultSetFromComposition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(default="", max_length=120)
+    replace_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def named_or_replacing(self):
+        if not self.replace_id and not self.name.strip():
+            raise ValueError("Name the defaults set")
+        return self
+
+
+class DefaultSetWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=120)
-    replace_id: UUID | None = None
+    description: str = Field(default="", max_length=500)
+
+
+DefaultSetItemType = Literal[
+    "content_item",
+    "education_item",
+    "tool_group",
+    "interest",
+    "custom_section",
+    "summary",
+    "profile",
+    "bullet",
+]
+
+
+class DefaultSetMembership(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    set_id: UUID
+    variant_id: UUID | None = None
+
+
+class DefaultSetMembershipsWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    item_type: DefaultSetItemType
+    item_id: UUID
+    memberships: list[DefaultSetMembership] = Field(default_factory=list, max_length=100)
+
+
+class DefaultSetBulk(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    action: Literal["add", "remove"]
+    bullet_ids: list[UUID] = Field(min_length=1, max_length=500)
+
+
+class DefaultSetArchive(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    archived: bool = True
 
 
 class AttachBulletWrite(BaseModel):

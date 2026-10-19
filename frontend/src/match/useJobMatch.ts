@@ -37,7 +37,7 @@ export function useJobMatch({
     setMatch(null);
   }, [compositionId]);
 
-  useEffect(() => {
+  const loadJobs = useCallback(() => {
     let cancelled = false;
     api<JobDescription[]>("/api/job-descriptions")
       .then((rows) => {
@@ -54,6 +54,17 @@ export function useJobMatch({
       cancelled = true;
     };
   }, []);
+
+  useEffect(loadJobs, [loadJobs]);
+
+  // A resume can be linked to a job saved after this list loaded (New from AI Recommendation).
+  const reloadedFor = useRef("");
+  useEffect(() => {
+    if (!loaded || !linkedJobId || reloadedFor.current === linkedJobId) return;
+    if (jobs.some((job) => job.id === linkedJobId)) return;
+    reloadedFor.current = linkedJobId;
+    return loadJobs();
+  }, [loaded, linkedJobId, jobs, loadJobs]);
 
   useEffect(() => {
     if (manual.current || jobs.length === 0) return;

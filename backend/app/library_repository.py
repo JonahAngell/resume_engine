@@ -206,7 +206,7 @@ async def fetch_library(conn, user_id):
     )
     compositions = await _many(
         conn,
-        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,profile_id,is_starter,is_default_starter,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s ORDER BY updated_at DESC,id",
+        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,profile_id,is_starter,is_default_starter,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s AND NOT is_starter ORDER BY updated_at DESC,id",
         (user_id,),
     )
     composition_bullets = await _many(
@@ -224,7 +224,11 @@ async def fetch_library(conn, user_id):
         "SELECT s.composition_id,s.section_id FROM composition_custom_sections s JOIN resume_compositions c ON c.id=s.composition_id WHERE c.user_id=%s",
         (user_id,),
     )
+    from .default_sets import list_members, list_sets
+
     return {
+        "default_sets": await list_sets(conn, user_id),
+        "default_set_members": await list_members(conn, user_id),
         "profiles": profiles,
         "summary_variants": summaries,
         "education": education,
