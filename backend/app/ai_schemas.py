@@ -333,6 +333,8 @@ class ChatProposal(BaseModel):
     order: list[str] = []
     before: list[str] = []
     after: list[str] = []
+    reason: str = ""
+    term: str = ""
 
 
 class ChatTurn(BaseModel):
@@ -342,4 +344,5 @@ class ChatTurn(BaseModel):
     revision: int = 0
     reply: str = ""
     proposals: list[ChatProposal] = []
+    held: list[ChatProposal] = []
     dropped: int = 0

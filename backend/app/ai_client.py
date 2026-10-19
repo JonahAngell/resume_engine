@@ -280,11 +280,12 @@ async def _exchange_within(
     schema: dict,
     name: str,
     use_schema: bool,
+    timeout: float = TIMEOUT_SECONDS,
 ) -> _Exchange:
     try:
         return await asyncio.wait_for(
             _exchange(client, url, headers, model, messages, schema, name, use_schema),
-            timeout=TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except (asyncio.TimeoutError, httpx.TimeoutException):
         return _Exchange("unavailable")
@@ -304,11 +305,17 @@ async def _complete_with(
     schema: dict,
     name: str,
     started: float,
+    timeout: float = TIMEOUT_SECONDS,
+    text_fallback: bool = False,
 ) -> AiCompletion:
-    """One model: a rate-limit retry, then a JSON repair. Raises AiCallError."""
+    """One model: a rate-limit retry, then a JSON repair. Raises AiCallError.
+
+    With `text_fallback`, a model that answers in prose twice returns `{"_text": prose}`
+    instead of failing, so a chat can still show the answer.
+    """
 
     async def call(body: list[dict]) -> _Exchange:
-        outcome = await _exchange_within(client, url, headers, model, body, schema, name, False)
+        outcome = await _exchange_within(client, url, headers, model, body, schema, name, False, timeout)
         if outcome.kind == "unauthorized":
             raise _Unauthorized()
         return outcome
@@ -329,6 +336,7 @@ async def _complete_with(
         _log(served, "ok", started, outcome.usage, provider)
         return AiCompletion(data=data, model=served)
 
+    first = outcome
     repair = [
         *messages,
         {
@@ -341,6 +349,15 @@ async def _complete_with(
         _log(model, "rate_limited", started, outcome.usage, provider)
         raise AiCallError("rate_limited")
     data = _parsed(outcome)
+    if data is None and text_fallback:
+        prose = next(
+            (item for item in (first, outcome) if item.kind == "ok" and not _blocked_model(item.served_model) and item.content.strip()),
+            None,
+        )
+        if prose is not None:
+            served = prose.served_model or model
+            _log(served, "text", started, prose.usage, provider)
+            return AiCompletion(data={"_text": prose.content.strip()}, model=served)
     if data is None:
         status = "unavailable" if outcome.kind == "unavailable" else "invalid"
         _log(outcome.served_model or model, status, started, outcome.usage, provider)
@@ -360,11 +377,19 @@ async def _provider_headers(provider: Provider, client: httpx.AsyncClient) -> di
     return _gateway_headers(token) if token else None
 
 
+def _keep_status(current: str, new: str) -> str:
+    """A later provider's `unavailable` must not hide an earlier model's real answer status."""
+    return current if current in {"invalid", "rate_limited"} and new == "unavailable" else new
+
+
 async def complete_json(
     messages: list[dict],
     schema: dict,
     name: str,
     client: httpx.AsyncClient | None = None,
+    *,
+    timeout: float = TIMEOUT_SECONDS,
+    text_fallback: bool = False,
 ) -> AiCompletion:
     """Return one JSON object from the first provider and model that produce one."""
     started = time.perf_counter()
@@ -374,31 +399,32 @@ async def complete_json(
         raise AiCallError("unavailable")
 
     owns_client = client is None
-    client = client or httpx.AsyncClient(timeout=TIMEOUT_SECONDS)
+    client = client or httpx.AsyncClient(timeout=timeout)
     status = "unavailable"
     try:
         for provider in chain:
             headers = await _provider_headers(provider, client)
             if headers is None:
                 _log(provider.models[0], "no_token", started, provider=provider.name)
-                status = "unavailable"
+                status = _keep_status(status, "unavailable")
                 continue
             for model in provider.models:
                 try:
                     return await _complete_with(
-                        client, provider.name, provider.url, headers, model, messages, schema, name, started
+                        client, provider.name, provider.url, headers, model, messages, schema, name, started,
+                        timeout, text_fallback,
                     )
                 except AiCallError as exc:
-                    status = exc.status
+                    status = _keep_status(status, exc.status)
                 except _Unauthorized:
                     if provider.name == "studioshare":
                         clear_gateway_token()
                     _log(model, "unauthorized", started, provider=provider.name)
-                    status = "unavailable"
+                    status = _keep_status(status, "unavailable")
                     break
                 except httpx.HTTPError:
                     _log(model, "unavailable", started, provider=provider.name)
-                    status = "unavailable"
+                    status = _keep_status(status, "unavailable")
         raise AiCallError(status)
     finally:
         if owns_client:
