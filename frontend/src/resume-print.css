@@ -5469,3 +5469,50 @@ mark.doc-hit:focus-visible {
     width: 100%;
   }
 }
+
+/* Shrink to fit: one-line drafts and the whole-resume review */
+.ai-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.line-budget {
+  margin: -4px 0 0;
+  font-size: 12px;
+}
+.line-budget.over {
+  color: #8a5a00;
+}
+.shrink-banner {
+  border-color: #f0d79a;
+  background: linear-gradient(90deg, #fff8e6, #f6f1ff);
+}
+.shrink-button {
+  white-space: nowrap;
+}
+.shrink-button span {
+  color: #6b4fc8;
+}
+.shrink-button.urgent {
+  border-color: #6b4fc8;
+  background: #6b4fc8;
+  color: #fff;
+}
+.shrink-button.urgent span {
+  color: #fff;
+}
+.shrink-summary.covered {
+  background: #e3f4ea;
+  color: #157347;
+}
+.shrink-draft {
+  width: 100%;
+  min-height: 0;
+  font: inherit;
+  resize: vertical;
+}
+@media (max-width: 560px) {
+  .shrink-button {
+    order: 4;
+  }
+}

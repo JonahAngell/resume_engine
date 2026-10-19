@@ -130,6 +130,10 @@ export default function ResumePreview({
         state: e.data.state,
         pages: e.data.pages,
         message: e.data.message,
+        bulletLines: e.data.bullet_lines || {},
+        itemLines: e.data.item_lines || {},
+        charsPerLine: Number(e.data.chars_per_line) || 0,
+        pageLines: Array.isArray(e.data.page_lines) ? e.data.page_lines : [],
       };
       measured.current = next;
       onFit(next);
