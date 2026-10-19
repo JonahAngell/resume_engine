@@ -236,3 +236,12 @@ class VariantPick(BaseModel):
     revision: int = 0
     slots: list[VariantPickSlot] = []
     dropped: int = 0
+
+
+class KeywordDefinition(BaseModel):
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    keyword: str = ""
+    definition: str = ""
+    in_this_job: str = ""
+    model: str = ""

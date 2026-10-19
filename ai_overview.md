@@ -168,6 +168,7 @@ Design notes and the review behind these features are in `docs/ai_suggestions_bl
 | `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`, `goal` (`concise`/`impact`/`align`), `incorporate_keyword`. Bullet text is read from the placement. In keyword mode every draft must contain the keyword (or a dictionary form of it), and the reply carries `fits`/`reason` when the model says it doesn't fit. |
 | `POST /api/compositions/{cid}/ai-keyword-assist` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`. Returns up to 3 `revisions` (one per placed bullet), up to 2 `new_bullets` (each tied to a role or project), the `entries` a new bullet can go under, `allowed`, `no_fit_reason`. Guarded keywords return `allowed: false` without calling the model. |
 | `POST /api/compositions/{cid}/ai-keyword-assist/accept-new` | bullet + variant + placement | Body: `revision`, `parent_id` (a role or project on this resume), `body`, `source`, `job_id`, `model`. 422 while the body still has a `[placeholder]`; 404 for an entry not on this resume; 409 on a stale revision. Revisions are accepted through `.../ai-variants/accept`. |
+| `POST /api/job-descriptions/{job_id}/define` | nothing | Body: `keyword`, `requirement`. Returns `status`, `detail`, `definition`, `in_this_job`, `model`. 404 for a job the user doesn't own. |
 | `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants/accept` | variant + placement | Body: `revision`, `name`, `body`, `source` (`draft`/`edited`/`own`), `job_id`, `model`. 409 on a stale revision, with no variant written. |
 | `POST /api/compositions/{cid}/skills/recommend` | nothing | Body: `keyword`, `allow_ai`. The UI calls with `allow_ai=false` first and again with `true` only when `source == "none"`. |
 | `POST /api/compositions/{cid}/skills` | tool, group, this resume | Body: `revision`, `name`, and `group_id` or `new_group_name`. |
@@ -206,10 +207,11 @@ The Job match tab is a dashboard rail beside the job description and the resume 
 
 | Path | Role |
 |---|---|
-| `frontend/src/match/useJobMatch.ts` | Jobs, selected job, deterministic match, `markRequirement`, `dismissRequirement`, `addTag`. Called once in `App.tsx`. |
+| `frontend/src/match/useJobMatch.ts` | Jobs, selected job, deterministic match, `markRequirement`, `dismissRequirement`, `skipKeyword`, `addTag`. Called once in `App.tsx`. |
 | `frontend/src/match/MatchDashboard.tsx` | Sticky header (job, match score ring, counters, tabs) and the Overview tab. |
 | `frontend/src/match/RequirementsTab.tsx`, `CoachTab.tsx`, `AtsTab.tsx` | The other three tabs. All panels stay mounted so results survive tab switches. |
-| `frontend/src/match/MarkPopover.tsx` | Popover for a clicked highlight; a bottom sheet below 600px. |
+| `frontend/src/match/MarkPopover.tsx` | Popover for a clicked highlight; a bottom sheet below 600px. Missing keywords get **Define** (AI definition, cached per job and keyword for the session) and **I don't have this**. |
+| `backend/app/ai_define.py` | AI definition of one keyword in the context of its posting. Sends only the redacted posting, never the resume. Cache max 64. |
 | `frontend/src/matchMarks.ts` | Each mark carries `items`: keyword, group, matched or suggested, requirement, rewrite targets, Add to Skills. |
 | `backend/app/ai_coach.py` | Whole-resume review: prompt, `filter_coach`, cache. |
 | `backend/app/ats_score.py` | Deterministic ATS score, methodology and disclaimer. |
@@ -278,3 +280,7 @@ New wording reuses `.../ai-variants` and `.../ai-variants/accept`, so drafts kee
 ## Ranking
 
 Candidates for a placement are the other active variants of its bullet plus unused bullets of the same role, project or school, capped at 8 per slot and 40 slots. Every candidate gets `keyword_hits` from `extract_keywords` on the job. With AI, the model scores each candidate 0 to 100 and gives a reason; it can only choose among library text, so there is no fabrication guard. A switch is recommended when the best AI score beats the current by `AI_MARGIN` (8), or, by keywords, when the best has more hits. An unused bullet is never recommended for two slots. When the model fails or scores nothing, the keyword ranking is returned with the error status. `ai_variant_pick._CACHE` (16) keys on the redacted job, slot candidates, `PICK_PROMPT_VERSION` and model.
+
+## Keywords the user doesn't have
+
+**I don't have this** in the highlight popover adds the keyword to `keyword_review.skipped` for that job (saved through the normal job save). `match_qualifications` then marks the keyword `skipped: true` and gives it no suggestions, so it loses its highlight, and the AI coach drops cards for it. It stays `found: false`, so match coverage and the ATS score still count it as missing; the ATS keyword tips name how many skipped keywords are still counted. The Requirements tab shows skipped keywords struck through with an **Undo**. This differs from **Dismiss requirement** (`keyword_review.dismissed`), which removes the whole requirement from scoring.

@@ -1404,10 +1404,15 @@ export default function App() {
               anchor={popover.anchor}
               items={popoverItems}
               source={popover.source}
+              jobId={matchState.jobId}
               onClose={closePopover}
               onAssist={(request) => {
                 setPopover(null);
                 setAssist(request);
+              }}
+              onSkip={(item) => {
+                setPopover(null);
+                matchState.skipKeyword(item.keyword);
               }}
               onShowInDashboard={(item) => {
                 setPopover(null);
