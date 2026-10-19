@@ -146,6 +146,60 @@ function Overview({
   );
 }
 
+export type BuiltSummary = {
+  status: string;
+  detail: string;
+  method: "ai" | "keywords";
+  entry_count: number;
+  bullet_count: number;
+  entries: { section: string; label: string; bullets: number; reason: string }[];
+};
+
+function BuiltBanner({
+  built,
+  jobTitle,
+  onDismiss,
+}: {
+  built: BuiltSummary;
+  jobTitle: string;
+  onDismiss?: () => void;
+}) {
+  const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+  return (
+    <section className="ai-built-banner" aria-label="How this resume was built">
+      <p>
+        <strong>
+          {built.method === "ai" ? "Built with AI" : "Built by keyword match"}
+          {jobTitle ? ` for ${jobTitle}` : ""}
+        </strong>
+        : {plural(built.entry_count, "entry", "entries")} and {plural(built.bullet_count, "bullet")} from your
+        library. See the suggestions below for ways to strengthen the match.
+      </p>
+      {built.detail && <p>{built.detail}</p>}
+      {built.entries.length > 0 && (
+        <details>
+          <summary>What was included</summary>
+          <ul>
+            {built.entries.map((entry, index) => (
+              <li key={index}>
+                {entry.label} · {plural(entry.bullets, "bullet")}
+                {entry.reason ? ` — ${entry.reason}` : ""}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {onDismiss && (
+        <div className="banner-actions">
+          <button type="button" onClick={onDismiss}>
+            Dismiss
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function MatchDashboard({
   state,
   compositionId,
@@ -159,6 +213,10 @@ export default function MatchDashboard({
   onActive,
   onAssist,
   onApplied,
+  autoCoach = false,
+  onAutoCoachDone,
+  built = null,
+  onDismissBuilt,
 }: {
   state: JobMatchState;
   compositionId: string;
@@ -172,6 +230,10 @@ export default function MatchDashboard({
   onActive: (ids: string[]) => void;
   onAssist: (request: AssistRequest) => void;
   onApplied: (composition: any) => void;
+  autoCoach?: boolean;
+  onAutoCoachDone?: () => void;
+  built?: BuiltSummary | null;
+  onDismissBuilt?: () => void;
 }) {
   const { match, jobs, loaded, jobId, error, selected } = state;
   const counts = match ? keywordCounts(match) : null;
@@ -254,6 +316,7 @@ export default function MatchDashboard({
           </button>
         </div>
       )}
+      {built && <BuiltBanner built={built} jobTitle={selected?.title || ""} onDismiss={onDismissBuilt} />}
       {!loaded ? (
         <p className="empty-state">Loading…</p>
       ) : jobs.length === 0 ? (
@@ -280,6 +343,8 @@ export default function MatchDashboard({
               onApplied={onApplied}
               onAssist={onAssist}
               onActive={onActive}
+              autoRun={autoCoach}
+              onAutoRunDone={onAutoCoachDone}
             />
           </div>
           <div className="dash-panel" role="tabpanel" id="dash-panel-ats" aria-labelledby="dash-tab-ats" hidden={tab !== "ats"}>

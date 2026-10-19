@@ -39,6 +39,7 @@ import type { AiJobContext } from "./editor/AiBulletTools";
 import { DragHandle, dragRowClass, useRowDrag } from "./editor/useRowDrag";
 import OptionGrid from "./OptionGrid";
 import ImportResumeDialog from "./ImportResumeDialog";
+import NewResumeDialog, { type RecommendResult } from "./NewResumeDialog";
 
 import primaryLogo from "./assets/logo-primary-480.png";
 import compactLogo from "./assets/logo-compact.png";
@@ -59,8 +60,6 @@ type Comp = {
   section_sort_modes: Record<string, "automatic" | "manual">;
   summary_variant_id?: string | null;
   profile_id?: string | null;
-  is_starter?: boolean;
-  is_default_starter?: boolean;
   revision: number;
   archived_at?: string | null;
   created_at?: string | null;
@@ -107,8 +106,13 @@ export default function App() {
   const [fit, setFit] = useState<Fit | null>(null);
   const [status, setStatus] = useState("Loading…");
   const [error, setError] = useState("");
-  const [starterPicker, setStarterPicker] = useState(false);
-  const [resumeVariantDialog, setResumeVariantDialog] = useState(false);
+  const [newResumeOpen, setNewResumeOpen] = useState(false);
+  const [defaultSetDialog, setDefaultSetDialog] = useState(false);
+  // Shown on Job match after "New from AI Recommendation" builds a resume.
+  const [aiBuilt, setAiBuilt] = useState<
+    (Omit<RecommendResult, "composition"> & { compositionId: string }) | null
+  >(null);
+  const [autoCoach, setAutoCoach] = useState(false);
   const [previewRevision, setPreviewRevision] = useState<any>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -365,32 +369,42 @@ export default function App() {
         x.organization === item.organization && x.title === item.title,
     );
   };
-  const createBlankComposition = async (resumeVariantId?: string) => {
-    const starters = (lib.compositions || []).filter(
-      (item: any) => item.is_starter && !item.archived_at,
+  const openNewResume = () => setNewResumeOpen(true);
+  const openCreated = async (next: Comp) => {
+    setComp(next);
+    await loadLibrary();
+    setPreviewRevision(null);
+    setScreen("editor");
+    setNewResumeOpen(false);
+  };
+  const createFromSet = async (defaultSetId: string | null) => {
+    const next = await api<Comp>("/api/compositions", {
+      method: "POST",
+      body: JSON.stringify(
+        defaultSetId ? { default_set_id: defaultSetId } : { entire_library: true },
+      ),
+    });
+    setAiBuilt(null);
+    setEditorTab("edit");
+    await openCreated(next);
+  };
+  const createFromAi = async (result: RecommendResult) => {
+    const { composition, ...summary } = result;
+    setAiBuilt({ ...summary, compositionId: composition.id });
+    setAutoCoach(true);
+    setDashTab("coach");
+    setEditorTab("match");
+    setMatchRailOpen(true);
+    await openCreated(composition);
+  };
+  const manageDefaultSets = () => {
+    setNewResumeOpen(false);
+    sessionStorage.setItem(
+      "resume-engine-library-target",
+      JSON.stringify({ sectionKey: "default-sets", entryId: null, contentView: "entries" }),
     );
-    const variantId =
-      typeof resumeVariantId === "string" ? resumeVariantId : undefined;
-    const hasDefault = starters.some((item: any) => item.is_default_starter);
-    if (!variantId && starters.length > 1 && !hasDefault) {
-      setStarterPicker(true);
-      return;
-    }
-    try {
-      const next = await api<Comp>("/api/compositions", {
-        method: "POST",
-        body: JSON.stringify(
-          variantId ? { resume_variant_id: variantId } : {},
-        ),
-      });
-      setComp(next);
-      await loadLibrary();
-      setPreviewRevision(null);
-      setScreen("editor");
-      setStarterPicker(false);
-    } catch (e: any) {
-      setError(e.message);
-    }
+    location.hash = "library";
+    setScreen("library");
   };
   const runHistoryAction = async (direction: "undo" | "redo") => {
     try {
@@ -907,24 +921,22 @@ export default function App() {
           save={saveHomeMetadata}
         />
       )}
-      {starterPicker && (
-        <StarterPicker
-          starters={(lib.compositions || []).filter(
-            (item: any) => item.is_starter && !item.archived_at,
-          )}
-          close={() => setStarterPicker(false)}
-          choose={(id: string) => createBlankComposition(id)}
+      {newResumeOpen && (
+        <NewResumeDialog
+          sets={lib.default_sets || []}
+          close={() => setNewResumeOpen(false)}
+          createFromSet={createFromSet}
+          createFromAi={createFromAi}
+          manageSets={manageDefaultSets}
         />
       )}
-      {resumeVariantDialog && comp && (
-        <SaveResumeVariantDialog
-          starters={(lib.compositions || []).filter(
-            (item: any) => item.is_starter && !item.archived_at,
-          )}
+      {defaultSetDialog && comp && (
+        <SaveDefaultSetDialog
+          sets={lib.default_sets || []}
           initialName={comp.display_title || comp.name}
-          close={() => setResumeVariantDialog(false)}
+          close={() => setDefaultSetDialog(false)}
           save={async (name: string, replaceId: string) => {
-            await api(`/api/compositions/${comp.id}/resume-variant`, {
+            await api(`/api/compositions/${comp.id}/default-set`, {
               method: "POST",
               body: JSON.stringify({
                 name,
@@ -932,7 +944,7 @@ export default function App() {
               }),
             });
             await loadLibrary();
-            setResumeVariantDialog(false);
+            setDefaultSetDialog(false);
             setStatus("Saved");
           }}
         />
@@ -1029,7 +1041,7 @@ export default function App() {
         setQuery={setHomeQuery}
         view={homeView}
         setView={changeHomeView}
-        createResume={createBlankComposition}
+        createResume={openNewResume}
         openResume={openComposition}
         renameResume={(item: any) => setHomeDialog({ type: "rename", item })}
         editDetails={(item: any) => setHomeDialog({ type: "details", item })}
@@ -1375,6 +1387,10 @@ export default function App() {
                 onActive={onActiveMatch}
                 onAssist={setAssist}
                 onApplied={(next) => setComp(next)}
+                autoCoach={autoCoach}
+                onAutoCoachDone={() => setAutoCoach(false)}
+                built={aiBuilt?.compositionId === comp.id ? aiBuilt : null}
+                onDismissBuilt={() => setAiBuilt(null)}
               />
             </div>
             {!matchRailShown && (
@@ -1495,12 +1511,6 @@ export default function App() {
             <span className="version-marker sr-only">
               {RESUME_ENGINE_VERSION} Build {RESUME_ENGINE_BUILD}
             </span>
-            {comp.is_starter && (
-              <p className="library-note">
-                This is a resume variant. Changes here update the default set
-                for new resumes. Resumes already created from it stay as they are.
-              </p>
-            )}
             <div className="editor-tab-panel" hidden={editorTab !== "edit"}>
               {error && (
                 <div role="alert" className="error">
@@ -1518,11 +1528,9 @@ export default function App() {
                 className={`save-status ${status.toLowerCase().replaceAll(" ", "-")}`}
               >
                 {status}
-                {!comp.is_starter && (
-                  <button type="button" onClick={() => setResumeVariantDialog(true)}>
-                    Save as resume variant
-                  </button>
-                )}
+                <button type="button" onClick={() => setDefaultSetDialog(true)}>
+                  Save as defaults set
+                </button>
               </div>
               {status === "Conflict" && (
                 <div className="conflict-recovery" role="alert">
@@ -1773,49 +1781,13 @@ function ResumeDetails({ comp, save, savePreferences, status }: any) {
   );
 }
 
-function StarterPicker({
-  starters,
-  close,
-  choose,
-}: {
-  starters: any[];
-  close: () => void;
-  choose: (id: string) => void;
-}) {
-  const [id, setId] = useState(
-    starters.find((item) => item.is_default_starter)?.id || starters[0]?.id || "",
-  );
-  return (
-    <ModalShell title="Choose a resume variant" close={close}>
-      <p>New resumes start from a resume variant. Pick the default set for this one.</p>
-      <label>
-        Resume variant
-        <select value={id} onChange={(event) => setId(event.target.value)}>
-          {starters.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name}
-              {item.is_default_starter ? " (default)" : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-      <div className="form-actions">
-        <button onClick={close}>Cancel</button>
-        <button className="primary" disabled={!id} onClick={() => choose(id)}>
-          Create resume
-        </button>
-      </div>
-    </ModalShell>
-  );
-}
-
-function SaveResumeVariantDialog({
-  starters,
+function SaveDefaultSetDialog({
+  sets,
   initialName,
   close,
   save,
 }: {
-  starters: any[];
+  sets: any[];
   initialName: string;
   close: () => void;
   save: (name: string, replaceId: string) => Promise<void>;
@@ -1825,42 +1797,44 @@ function SaveResumeVariantDialog({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   return (
-    <ModalShell title="Save as resume variant" close={close}>
+    <ModalShell title="Save as defaults set" close={close}>
       <p>
-        Store this resume as a default set. Later edits to either one do not
-        change the other.
+        Add the records and wording on this resume to a defaults set. New
+        resumes can start from it, and you can fine-tune it in the Library.
       </p>
       <label>
-        Name
-        <input value={name} onChange={(event) => setName(event.target.value)} />
-      </label>
-      <label>
-        Replace an existing variant
+        Defaults set
         <select
           value={replaceId}
           onChange={(event) => setReplaceId(event.target.value)}
         >
-          <option value="">Create a new variant</option>
-          {starters.map((item) => (
+          <option value="">Create a new set</option>
+          {sets.map((item) => (
             <option key={item.id} value={item.id}>
-              {item.name}
+              Replace “{item.name}”
             </option>
           ))}
         </select>
       </label>
+      {!replaceId && (
+        <label>
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+      )}
       {error && <p role="alert">{error}</p>}
       <div className="form-actions">
         <button onClick={close}>Cancel</button>
         <button
           className="primary"
-          disabled={busy || !name.trim()}
+          disabled={busy || (!replaceId && !name.trim())}
           onClick={async () => {
             setBusy(true);
             setError("");
             try {
               await save(name.trim(), replaceId);
             } catch (reason: any) {
-              setError(reason.message || "Could not save this resume variant");
+              setError(reason.message || "Could not save this defaults set");
               setBusy(false);
             }
           }}
@@ -1896,7 +1870,6 @@ function HomeScreen({
   const rows = (lib.compositions || []).filter(
     (item: any) =>
       Boolean(item.archived_at) === archived &&
-      !item.is_starter &&
       [
         item.name,
         item.display_title,

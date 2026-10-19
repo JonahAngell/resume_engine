@@ -5469,3 +5469,237 @@ mark.doc-hit:focus-visible {
     width: 100%;
   }
 }
+
+/* New Resume chooser */
+.new-resume-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.new-resume-dialog p {
+  margin: 0;
+}
+.new-resume-choices {
+  display: grid;
+  gap: 10px;
+}
+.new-resume-choices button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px 16px;
+  text-align: left;
+  border-color: #cdd8e6;
+  border-radius: 10px;
+  color: #203a60;
+  background: #f7f9fd;
+}
+.new-resume-choices button:hover,
+.new-resume-choices button:focus-visible {
+  border-color: #426fae;
+  background: #e7eefb;
+}
+.new-resume-choices strong {
+  font-size: 16px;
+}
+.new-resume-choices span {
+  color: #526078;
+  font-size: 14px;
+}
+.new-resume-dialog .link-button {
+  align-self: flex-start;
+}
+.new-resume-dialog .jobs-fields textarea,
+.new-resume-dialog .form-grid textarea {
+  min-height: 180px;
+}
+.new-resume-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 8px;
+  text-align: center;
+  color: #526078;
+}
+.new-resume-progress strong {
+  color: #172033;
+}
+.spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid #cdd8e6;
+  border-top-color: #1e5cc8;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 3s;
+  }
+}
+.ai-built-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #c9d8f0;
+  border-radius: 9px;
+  background: #f1f6fe;
+  color: #203a60;
+  font-size: 14px;
+}
+.ai-built-banner p {
+  margin: 0;
+}
+.ai-built-banner ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.ai-built-banner .banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Defaults sets */
+.default-sets {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.default-set-create {
+  display: flex;
+  gap: 8px;
+}
+.default-set-create label {
+  flex: 1;
+}
+.default-set-create input {
+  width: 100%;
+}
+.set-hint,
+.set-empty {
+  margin: 0;
+  color: #526078;
+  font-size: 13px;
+}
+.default-set-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.default-set-card {
+  border: 1px solid #d6dfec;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+}
+.default-set-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.default-set-card header form {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.default-set-card > p {
+  margin: 4px 0 0;
+  color: #526078;
+  font-size: 13px;
+}
+.default-set-card .form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.set-contents {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e3e9f2;
+}
+.set-contents > label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.set-group,
+.set-membership {
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 0;
+  min-width: 0;
+}
+.set-group legend,
+.set-membership legend {
+  font-weight: 600;
+  font-size: 13px;
+  padding: 0 4px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.set-entry > label,
+.set-entry li label,
+.set-membership-row label {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.set-entry ul {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.set-wording {
+  margin-left: 22px;
+  font-size: 12px;
+  color: #526078;
+}
+.set-membership-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0;
+}
+.set-membership-row select {
+  margin-left: 22px;
+  max-width: calc(100% - 22px);
+}
+.entry-sets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.entry-sets h3 {
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+
+.set-entry input[type="checkbox"],
+.set-membership-row input[type="checkbox"] {
+  flex: none;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  margin: 2px 0 0;
+}
