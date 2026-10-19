@@ -128,6 +128,8 @@ class CompositionSummary(BaseModel):
 
 
 class LibraryResponse(BaseModel):
+    default_sets: list[dict] = []
+    default_set_members: list[dict] = []
     profiles: list[dict] = []
     summary_variants: list[dict]
     education: list[dict]

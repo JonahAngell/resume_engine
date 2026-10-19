@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { AppIcon } from "./AppIcon";
 import { confirmDialog } from "./ConfirmDialog";
+import JobDescriptionFields, { emptyJobDraft, type JobDraft } from "./JobDescriptionFields";
 import compactLogo from "./assets/logo-compact.png";
 
 type JobDescription = {
@@ -33,14 +34,8 @@ type JobAnalysis = {
   eligibility?: AnalysisRow[];
 };
 
-type Draft = {
-  company: string;
-  role: string;
-  title: string;
-  body: string;
-};
-
-const emptyDraft = (): Draft => ({ company: "", role: "", title: "", body: "" });
+type Draft = JobDraft;
+const emptyDraft = emptyJobDraft;
 
 function FactBadges({ locations, salary }: { locations?: string[]; salary?: string }) {
   const places = locations || [];
@@ -631,50 +626,7 @@ export default function JobsPage({
                       }}
                     >
                       <h2>{editing ? "Edit job description" : "New job description"}</h2>
-                      <div className="form-grid">
-                        <label>
-                          Company
-                          <input
-                            value={draft.company}
-                            maxLength={200}
-                            onChange={(event) =>
-                              setDraft({ ...draft, company: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label>
-                          Role
-                          <input
-                            value={draft.role}
-                            maxLength={200}
-                            onChange={(event) =>
-                              setDraft({ ...draft, role: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="full">
-                          Title
-                          <input
-                            value={draft.title}
-                            maxLength={300}
-                            placeholder="Optional. Defaults to company and role."
-                            onChange={(event) =>
-                              setDraft({ ...draft, title: event.target.value })
-                            }
-                          />
-                        </label>
-                        <label className="full">
-                          Job description
-                          <textarea
-                            required
-                            value={draft.body}
-                            maxLength={50000}
-                            onChange={(event) =>
-                              setDraft({ ...draft, body: event.target.value })
-                            }
-                          />
-                        </label>
-                      </div>
+                      <JobDescriptionFields draft={draft} setDraft={setDraft} />
                       <div className="form-actions">
                         <button type="submit" disabled={busy || !draft.body.trim()}>
                           Save
