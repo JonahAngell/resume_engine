@@ -19,6 +19,9 @@ export type ChatProposal = {
   order: string[];
   before: string[];
   after: string[];
+  /** Set on held-back wording: why the guard flagged it. */
+  reason?: string;
+  term?: string;
 };
 
 export type ProposalOutcome = "applied" | "dismissed";
@@ -46,6 +49,7 @@ function title(card: ChatProposal) {
 
 export default function ProposalCard({
   card,
+  held = false,
   outcome,
   saving,
   disabled,
@@ -54,6 +58,8 @@ export default function ProposalCard({
   onDismiss,
 }: {
   card: ChatProposal;
+  /** Wording the guard flagged: shown with its reason, and saved only after the user edits it. */
+  held?: boolean;
   outcome?: ProposalOutcome;
   saving: boolean;
   disabled: boolean;
@@ -62,10 +68,12 @@ export default function ProposalCard({
   onDismiss: () => void;
 }) {
   const editable = card.kind === "rewrite" || card.kind === "summary" || card.kind === "new_bullet";
-  // A new bullet with [placeholders] opens in edit mode: the user must supply the details.
-  const [text, setText] = useState<string | undefined>(card.placeholders ? card.proposed : undefined);
+  // Wording with [placeholders] or held back by the guard opens in edit mode: the user supplies the details.
+  const [text, setText] = useState<string | undefined>(card.placeholders || held ? card.proposed : undefined);
   const value = text ?? card.proposed;
-  const blocked = card.kind === "new_bullet" && PLACEHOLDER.test(value);
+  const placeholders = editable && PLACEHOLDER.test(value);
+  const untouched = held && value.trim() === card.proposed.trim();
+  const blocked = placeholders || untouched;
 
   if (outcome) {
     return (
@@ -77,8 +85,14 @@ export default function ProposalCard({
   }
 
   return (
-    <li className={`chat-proposal kind-${card.kind}`}>
+    <li className={`chat-proposal kind-${card.kind}${held ? " held" : ""}`}>
       <span className="coach-kind">{title(card)}</span>
+      {held && card.reason && (
+        <p className="chat-warning">
+          <span aria-hidden="true">⚠ </span>
+          {card.reason}
+        </p>
+      )}
       {(card.kind === "rewrite" || card.kind === "summary" || (card.kind === "use_library" && card.placement_id)) && (
         <div className="coach-compare">
           <p className="coach-before">
@@ -105,7 +119,7 @@ export default function ProposalCard({
           <textarea rows={3} value={text} onChange={(event) => setText(event.target.value)} />
         </label>
       )}
-      {blocked && <p className="chat-note">Replace the [placeholders] with your own details before adding it.</p>}
+      {placeholders && <p className="chat-note">Replace the [placeholders] with your own details before saving.</p>}
       {card.kind === "remove" && (
         <p className="coach-before chat-removed">
           <span className="coach-label">Remove</span>
@@ -136,9 +150,9 @@ export default function ProposalCard({
           disabled={disabled || blocked || (editable && !value.trim()) || (card.kind === "summary" && !summaryReady)}
           onClick={() => onAccept(value)}
         >
-          {saving ? "Saving…" : card.kind === "add_skill" ? "Choose a group…" : text === undefined ? "Accept" : "Save edit"}
+          {saving ? "Saving…" : card.kind === "add_skill" ? "Choose a group…" : held ? "Save my edit" : text === undefined ? "Accept" : "Save edit"}
         </button>
-        {editable && (
+        {editable && !held && (
           <button type="button" disabled={disabled} onClick={() => setText(text === undefined ? card.proposed : undefined)}>
             {text === undefined ? "Edit" : "Cancel edit"}
           </button>

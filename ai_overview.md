@@ -74,7 +74,9 @@ OpenRouter endpoint: `https://openrouter.ai/api/v1/chat/completions`. Temperatur
 - HTTP 401: the gateway token is rejected; move to the next provider.
 - Other HTTP errors (including 403), timeouts, and transport errors: `unavailable` with no repair call; move to the next model.
 
-These outcomes apply per model. The chain then decides what to try next (see Providers).
+These outcomes apply per model. The chain then decides what to try next (see Providers). A later provider's `unavailable` (no token, 401, 5xx, timeout) does not replace an earlier model's `invalid` or `rate_limited`, so the user sees the real cause. On Launch, `provider=openrouter ... outcome=unauthorized` means the `OPENROUTER_API_KEY` set there is invalid or revoked: remove it or rotate it.
+
+`complete_json` also takes keyword-only `timeout` (default 30 seconds) and `text_fallback` (default off; see the chat section).
 - A 200 whose content is not one JSON object: append `"Return one JSON object only, with no markdown."` and call once more. Still unusable: `invalid`.
 - Markdown fences are stripped. The first `{` through the last `}` is parsed.
 - If the served model name contains `content-safety`, `moderation`, or `guard`, the body is discarded.
@@ -341,7 +343,9 @@ A floating **Ask AI** panel in the editor (both the Edit and Job match tabs) let
 
 | Route | Saves | Notes |
 |---|---|---|
-| `POST /api/compositions/{cid}/ai-chat` | nothing | Body: `job_id` (or null) and `messages` (`user`/`assistant`, 1–40). The server keeps the last 12 turns, each clipped to 2,000 characters, starting and ending with a user turn. Returns `status`, `detail`, `model`, `revision`, `reply`, `proposals`, `dropped`. 404 for a resume or job the user doesn't own. |
+| `POST /api/compositions/{cid}/ai-chat` | nothing | Body: `job_id` (or null) and `messages` (`user`/`assistant`, 1–40). The server keeps the last 12 turns, each clipped to 2,000 characters, starting and ending with a user turn. Earlier assistant turns are sent to the model as `{"reply": ..., "proposals": []}` so it keeps answering in JSON. Returns `status`, `detail`, `model`, `revision`, `reply`, `proposals`, `held`, `dropped`. 404 for a resume or job the user doesn't own. |
+
+The chat calls `complete_json` with `timeout=60` and `text_fallback=True`: when a model answers in prose twice (first answer and JSON repair), the prose becomes the reply with no proposals instead of an error.
 
 ## What the model receives
 
@@ -349,7 +353,9 @@ One system message: the prompt plus a JSON context block. `job` is the redacted 
 
 ## Proposals
 
-At most 6 per turn. Anything that fails a check is dropped and counted in `dropped`; one placement is touched by at most one proposal per turn.
+At most 6 per turn; one placement is touched by at most one proposal per turn. Wording checks use `unsafe_detail(..., open_terms=True)`: non-tool dictionary terms (domain, methodology, responsibility, soft skill such as "business requirements") may appear, and the word "one" is not counted as a number. Added numbers, tools, credentials, degrees, durations, job tool terms and new capitalised words are still flagged. `[placeholders]` are allowed in rewrites, summaries and new bullets (checked with the placeholders removed; a rewrite that only adds a placeholder counts as a change), and the UI blocks saving until they are replaced.
+
+Flagged wording (`number`, `tool`, `guarded_keyword`, `proper_noun`) is **held**, not dropped. The server first sends the model one retry listing each flagged proposal and why; the corrected answer replaces the first when it has proposals. Anything still flagged comes back in `held` with `reason` (a sentence for the user) and `term`. Held cards open in edit mode with the warning, need a change before **Save my edit**, and save with `source: "own"`, so they never count as AI-written and are not registered with `remember_issued`. Proposals that point at something not on the resume (bad numbers, invalid reorders, cross-entry library swaps, missing skills) are dropped and counted in `dropped`.
 
 | Kind | Check | Accepted through |
 |---|---|---|
@@ -370,3 +376,4 @@ Kept rewrites and new bullets are registered with `remember_issued` (new bullets
 - Only the selected job is read. Do not add other jobs to the context.
 - Do not log prompt bodies, replies or resume text; logs carry counts and outcome only.
 - Tests inject `complete=` or patch `ai_chat.complete_json`; keep that hook.
+- Logs: `resume_chat ... kept= held= dropped= retried= reasons=number:1,tool:2`. Counts only.
