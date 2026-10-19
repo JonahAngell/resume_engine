@@ -35,6 +35,7 @@ import { SectionHelp } from "./SectionHelp";
 import { EditorLibraryDialogs } from "./editor/EditorLibraryDialogs";
 import { profilePayload } from "./LibraryEntryForms";
 import { RecordActions } from "./editor/LibraryPickerDialog";
+import type { AiJobContext } from "./editor/AiBulletTools";
 import { DragHandle, dragRowClass, useRowDrag } from "./editor/useRowDrag";
 import OptionGrid from "./OptionGrid";
 import ImportResumeDialog from "./ImportResumeDialog";
@@ -1542,6 +1543,9 @@ export default function App() {
                 chooseLibraryItem={chooseLibraryItem}
                 included={included}
                 openLibraryFromEditor={openLibraryFromEditor}
+                aiJobs={matchState.jobs}
+                aiJobId={matchState.jobId}
+                setAiJobId={matchState.setJobId}
               />
             </div>
           </aside>
@@ -2570,6 +2574,9 @@ function SectionsPanel({
   chooseInterest,
   chooseLibraryItem,
   openLibraryFromEditor,
+  aiJobs,
+  aiJobId,
+  setAiJobId,
 }: any) {
   const [compositionItems, setCompositionItems] = useState<any[]>([]),
     [placements, setPlacements] = useState<any[]>([]),
@@ -3404,6 +3411,19 @@ function SectionsPanel({
       await refreshResume();
     },
   };
+  const aiContext: AiJobContext = {
+    compositionId: comp.id,
+    revision: comp.revision,
+    jobs: aiJobs || [],
+    jobId: aiJobId || "",
+    setJobId: setAiJobId || (() => {}),
+    onApplied: async (next: any) => {
+      setComp(next);
+      await reloadLibrary();
+      setStatus("Saved");
+    },
+    openReview: () => setLibraryDialog({ mode: "ai-review" }),
+  };
   const parentBullets = (section: string, parentId: string) => {
     const source =
       section === "education"
@@ -3625,6 +3645,7 @@ function SectionsPanel({
                           section: key,
                           parentId: id,
                           placementId: b.id,
+                          placement: b,
                           currentBulletId: b.bullet_id,
                         })
                       }
@@ -4242,6 +4263,7 @@ function SectionsPanel({
             new Set(placements.map((row) => String(row.bullet_id)))
           }
           actions={libraryActions}
+          ai={aiContext}
         />
       )}
       {entryDialog && (

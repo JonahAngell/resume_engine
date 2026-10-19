@@ -1,4 +1,17 @@
 import { useState } from "react";
+import ModalShell from "../ModalShell";
+import {
+  AiDraftPanel,
+  JobSelect,
+  LibraryReviewDialog,
+  PickBadges,
+  ReviewBanner,
+  acceptAiWording,
+  conflictMessage,
+  useVariantPick,
+  type AiDraft,
+  type AiJobContext,
+} from "./AiBulletTools";
 import {
   LibraryEntryForm,
   cloneBlankDraft,
@@ -87,34 +100,314 @@ function entryDraft(section: string, item?: any) {
 
 function BulletEditDialog({
   initial,
+  placementId,
+  ai,
   close,
   onSave,
 }: {
   initial: string;
+  placementId: string;
+  ai?: AiJobContext;
   close: () => void;
   onSave: (body: string) => Promise<void | false>;
 }) {
   const [body, setBody] = useState(initial);
+  const [aiDraft, setAiDraft] = useState<{ draft: AiDraft; model: string } | null>(null);
   return (
     <LibraryEditDialog
       title="Edit bullet"
       close={close}
-      note="Choose how to keep this wording when you save."
+      note={
+        aiDraft
+          ? "AI wording is saved as a new variant for this resume. Other resumes aren't changed."
+          : "Choose how to keep this wording when you save."
+      }
       onSave={async () => {
         if (!body.trim()) throw new Error("Bullet text is required.");
         if (body.trim() === initial.trim()) return;
+        if (aiDraft && ai) {
+          try {
+            await ai.onApplied(
+              await acceptAiWording(ai, placementId, aiDraft.draft, body, aiDraft.model),
+            );
+          } catch (reason) {
+            throw new Error(conflictMessage(reason));
+          }
+          return;
+        }
         return onSave(body.trim());
       }}
     >
+      {ai && <ReviewBanner ai={ai} />}
       <label>
         Bullet
         <textarea
           rows={4}
           value={body}
-          onChange={(event) => setBody(event.target.value)}
+          onChange={(event) => {
+            setBody(event.target.value);
+            if (!event.target.value.trim()) setAiDraft(null);
+          }}
         />
       </label>
+      {aiDraft && (
+        <p className="ai-meta">
+          From AI: {aiDraft.draft.name}.{" "}
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => {
+              setAiDraft(null);
+              setBody(initial);
+            }}
+          >
+            Undo
+          </button>
+        </p>
+      )}
+      {ai && (
+        <section className="ai-panel" aria-label="AI wording">
+          <h3 className="assist-section">
+            <span aria-hidden="true">✦</span> AI wording
+          </h3>
+          <JobSelect ai={ai} />
+          <AiDraftPanel
+            ai={ai}
+            placementId={placementId}
+            selected={aiDraft?.draft.body}
+            onPick={(draft, model) => {
+              setAiDraft({ draft, model });
+              setBody(draft.body);
+            }}
+          />
+        </section>
+      )}
     </LibraryEditDialog>
+  );
+}
+
+function BulletSwitchDialog({
+  ai,
+  placement,
+  choices,
+  close,
+  onPick,
+  onCreate,
+}: {
+  ai?: AiJobContext;
+  placement?: any;
+  choices: any[];
+  close: () => void;
+  onPick: (choice: any) => Promise<void>;
+  onCreate: (body: string) => Promise<void>;
+}) {
+  const replacing = !!placement;
+  const [tab, setTab] = useState<"library" | "ai" | "create">("library");
+  const [query, setQuery] = useState("");
+  const [draft, setDraft] = useState("");
+  const [aiDraft, setAiDraft] = useState<{ draft: AiDraft; model: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { result, loading, error: rankError } = useVariantPick(
+    ai || ({ jobId: "" } as AiJobContext),
+    ai && replacing ? [String(placement.id)] : null,
+  );
+  const slot = result?.slots[0];
+  const ranked = new Map((slot?.candidates || []).map((item) => [item.variant_id, item]));
+  const needle = query.trim().toLowerCase();
+  const rows = [
+    ...(slot?.candidates.filter((item) => !item.current).map((item) => ({ ...item, id: `${item.bullet_id}:${item.variant_id}`, variant_name: item.name })) || []),
+    ...choices.filter(
+      (item) => !ranked.has(String(item.variant_id)) && String(item.variant_id) !== String(placement?.variant_id),
+    ),
+  ].filter((item) => !needle || `${item.body} ${item.variant_name || ""}`.toLowerCase().includes(needle));
+  const run = async (work: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await work();
+      close();
+    } catch (reason: any) {
+      setError(conflictMessage(reason));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const tabs: [typeof tab, string][] = [
+    ["library", "Choose from Library"],
+    ...(ai && replacing ? ([["ai", "New wording with AI"]] as [typeof tab, string][]) : []),
+    ["create", "Write new"],
+  ];
+  return (
+    <ModalShell
+      title={replacing ? "Switch bullet" : "Add bullet"}
+      close={close}
+      className="library-picker bullet-switch-dialog"
+    >
+      {ai && <ReviewBanner ai={ai} />}
+      {replacing && (
+        <blockquote className="assist-original">{placement.wording_snapshot}</blockquote>
+      )}
+      <div
+        className="picker-tabs"
+        role="tablist"
+        style={{ gridTemplateColumns: `repeat(${tabs.length}, 1fr)` }}
+      >
+        {tabs.map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={tab === value}
+            onClick={() => setTab(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "library" && (
+        <>
+          {ai && replacing && (
+            <div className="switch-rank-bar">
+              <JobSelect ai={ai} label="Rank for job" />
+              {loading && <span className="ai-meta" role="status">Ranking…</span>}
+              {!loading && result && (
+                <span className="ai-meta">
+                  {result.status !== "ok"
+                    ? result.detail
+                    : result.method === "ai"
+                      ? "Ranked by AI fit and job keywords."
+                      : "Ranked by job keywords."}
+                </span>
+              )}
+              {rankError && <span className="ai-meta">{rankError}</span>}
+            </div>
+          )}
+          {slot && !slot.recommend && slot.candidates.length > 1 && (
+            <p className="ai-meta">The wording on your resume is already the best match for this job.</p>
+          )}
+          <label>
+            Search
+            <input value={query} onChange={(event) => setQuery(event.target.value)} />
+          </label>
+          <div className="picker-results">
+            {rows.length ? (
+              rows.map((item: any) => {
+                const rank = ranked.get(String(item.variant_id));
+                return (
+                  <button
+                    type="button"
+                    key={item.id}
+                    className={`entry-picker-result ${rank && slot?.recommend && rank.key === slot.best_key ? "pick-best" : ""}`}
+                    disabled={busy}
+                    onClick={() =>
+                      run(() =>
+                        onPick({ bullet_id: item.bullet_id, variant_id: item.variant_id }),
+                      )
+                    }
+                  >
+                    <strong>{item.body}</strong>
+                    <span>
+                      {item.variant_name}
+                      {String(item.bullet_id) === String(placement?.bullet_id) ? " · variant of this bullet" : ""}
+                    </span>
+                    {rank && (
+                      <PickBadges
+                        option={rank}
+                        method={result?.method || "keywords"}
+                        best={rank.key === slot?.best_key && slot?.recommend}
+                      />
+                    )}
+                    {rank?.reason && <small className="ai-meta">{rank.reason}</small>}
+                  </button>
+                );
+              })
+            ) : (
+              <p className="library-note">
+                {needle
+                  ? "Nothing in the library matches."
+                  : "No other saved wording for this entry yet."}
+                {ai && replacing && (
+                  <>
+                    {" "}
+                    <button type="button" className="link-button" onClick={() => setTab("ai")}>
+                      Write new wording with AI
+                    </button>
+                  </>
+                )}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+      {tab === "ai" && ai && replacing && (
+        <>
+          <JobSelect ai={ai} />
+          <AiDraftPanel
+            ai={ai}
+            placementId={String(placement.id)}
+            selected={aiDraft?.draft.body}
+            onPick={(next, model) => {
+              setAiDraft({ draft: next, model });
+              setDraft(next.body);
+            }}
+          />
+          {aiDraft && (
+            <label>
+              Wording to use
+              <textarea rows={3} value={draft} onChange={(event) => setDraft(event.target.value)} />
+            </label>
+          )}
+          <p className="library-note">Saved as a new variant of this bullet for this resume. Other resumes aren't changed.</p>
+          <div className="form-actions">
+            <button type="button" onClick={close}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy || !aiDraft || !draft.trim()}
+              onClick={() =>
+                run(async () => {
+                  await ai.onApplied(
+                    await acceptAiWording(ai, String(placement.id), aiDraft!.draft, draft, aiDraft!.model),
+                  );
+                })
+              }
+            >
+              Use this wording
+            </button>
+          </div>
+        </>
+      )}
+      {tab === "create" && (
+        <>
+          <label>
+            Bullet
+            <textarea rows={4} value={draft} onChange={(event) => setDraft(event.target.value)} />
+          </label>
+          <div className="form-actions">
+            <button type="button" onClick={close}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  if (!draft.trim()) throw new Error("Bullet text is required.");
+                  await onCreate(draft.trim());
+                })
+              }
+            >
+              Save to library
+            </button>
+          </div>
+        </>
+      )}
+      {error && <p role="alert">{error}</p>}
+    </ModalShell>
   );
 }
 
@@ -157,7 +450,9 @@ export function EditorLibraryDialogs({
   parentBullets,
   placedBulletIds,
   actions,
+  ai,
 }: {
+  ai?: AiJobContext;
   dialog: any;
   close: () => void;
   lib: any;
@@ -347,26 +642,11 @@ export function EditorLibraryDialogs({
       placed,
     );
     return (
-      <LibraryPickerDialog
-        title={dialog.placementId ? "Replace bullet" : "Add bullet"}
+      <BulletSwitchDialog
+        ai={ai}
+        placement={dialog.placement}
+        choices={choices}
         close={close}
-        items={choices}
-        labelOf={(item) => item.body}
-        detailOf={(item) => item.variant_name}
-        createLabel="Add bullet"
-        initialDraft={{ body: "" }}
-        renderCreate={(draft, setDraft) => (
-          <label>
-            Bullet
-            <textarea
-              rows={4}
-              value={draft.body}
-              onChange={(event) =>
-                setDraft({ ...draft, body: event.target.value })
-              }
-            />
-          </label>
-        )}
         onPick={(item) =>
           actions.pickBullet(
             dialog.section,
@@ -375,10 +655,7 @@ export function EditorLibraryDialogs({
             dialog.placementId,
           )
         }
-        onCreate={async (draft) => {
-          if (!draft.body?.trim()) throw new Error("Bullet text is required.");
-          await actions.createBullet(dialog.section, dialog.parentId, draft.body.trim());
-        }}
+        onCreate={(body) => actions.createBullet(dialog.section, dialog.parentId, body)}
       />
     );
   }
@@ -386,10 +663,15 @@ export function EditorLibraryDialogs({
     return (
       <BulletEditDialog
         initial={dialog.placement.wording_snapshot || ""}
+        placementId={String(dialog.placement.id)}
+        ai={ai}
         close={close}
         onSave={(body) => actions.saveBullet(dialog.placement, body)}
       />
     );
+  }
+  if (dialog.mode === "ai-review" && ai) {
+    return <LibraryReviewDialog ai={ai} close={close} />;
   }
   if (dialog.mode === "manage-skills") {
     const group = (lib.tool_groups || []).find(
