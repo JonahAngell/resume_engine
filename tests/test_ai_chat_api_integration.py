@@ -60,9 +60,10 @@ def test_chat_reads_only_the_selected_job_and_saves_nothing(client, monkeypatch)
     target = next(row for row in placements if row["wording_snapshot"].startswith("Modeled attendance"))
     seen = {}
 
-    async def fake_complete(messages, schema, name):
+    async def fake_complete(messages, schema, name, **options):
         context = json.loads(messages[0]["content"].split("CONTEXT (JSON):\n", 1)[1])
         seen["context"] = context
+        seen["options"] = options
         numbers = [item["number"] for item in context["resume"]["bullets"] if item["text"] == target["wording_snapshot"]]
         proposals = [{"kind": "remove", "bullet": number} for number in numbers]
         return AiCompletion({"reply": "Try this.", "proposals": proposals}, "openrouter/free")
@@ -74,6 +75,7 @@ def test_chat_reads_only_the_selected_job_and_saves_nothing(client, monkeypatch)
         json={"job_id": job["id"], "messages": [{"role": "user", "content": "What should I cut?"}]},
     ).json()
     assert result["status"] == "ok", result
+    assert seen["options"] == {"timeout": 60.0, "text_fallback": True}
     assert "Laminated" not in json.dumps(seen["context"])
     assert "financial forecasting" in seen["context"]["job"]["posting"]
     assert isinstance(seen["context"]["library"], list)

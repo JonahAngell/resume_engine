@@ -5981,3 +5981,15 @@ mark.doc-hit:focus-visible {
     display: none !important;
   }
 }
+.chat-proposal.held {
+  border-color: #f0d28a;
+  background: #fffbf0;
+}
+.chat-warning {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fdf3d7;
+  color: #7a5400;
+  font-size: 12.5px;
+}
