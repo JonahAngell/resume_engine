@@ -157,6 +157,47 @@ async def replace_placements(conn,user_id,cid,payload):
             await conn.execute("UPDATE composition_bullets SET bullet_id=%s,variant_id=%s,wording_snapshot=%s,snapshot_source_updated_at=%s,updated_at=now() WHERE id=%s AND composition_id=%s",(item.bullet_id,item.variant_id,selected["body"],selected["updated_at"],item.placement_id,cid))
         return await _commit(conn,user_id,locked,"bullet-placement-replace"),None
 
+async def apply_condense(conn,user_id,cid,payload,provenance):
+    """Shrink-to-fit changes in one revision: drop entries and placements, and save condensed
+    wording as a new variant of each bullet (other resumes keep theirs). `provenance` maps a
+    placement id to the variant's ai dict."""
+    from .resume_variants import _unique_name
+    async with conn.transaction():
+        locked,error=await _lock_composition(conn,user_id,cid,payload.revision)
+        if error:return None,error
+        rows=await _many(conn,"SELECT id,bullet_id,destination_parent_type,destination_parent_id FROM composition_bullets WHERE composition_id=%s FOR UPDATE",(cid,))
+        current={str(x["id"]):x for x in rows}
+        removing={str(x) for x in payload.remove_bullets}
+        rewriting={str(x.placement_id) for x in payload.rewrites}
+        if len(rewriting)!=len(payload.rewrites) or removing & rewriting:return None,"invalid"
+        if any(pid not in current for pid in removing|rewriting):return None,"missing"
+        entries=await _many(conn,"SELECT section,item_id::text item_id FROM composition_items WHERE composition_id=%s AND section IN ('work_experience','projects','leadership')",(cid,))
+        sections={x["item_id"]:x["section"] for x in entries}
+        dropped={str(x) for x in payload.remove_entries}
+        if any(item not in sections for item in dropped):return None,"missing"
+        resume=locked["render_payload"]
+        for item in dropped:
+            await conn.execute("DELETE FROM composition_items WHERE composition_id=%s AND section=%s AND item_id=%s",(cid,sections[item],item))
+            resume[sections[item]]=[x for x in resume.get(sections[item]) or [] if str(x.get("id"))!=item]
+        for rewrite in payload.rewrites:
+            pid=str(rewrite.placement_id)
+            if str(current[pid]["destination_parent_id"]) in dropped:continue
+            bullet_id=current[pid]["bullet_id"]
+            base=" ".join(rewrite.name.split())[:112] or "Condensed"
+            name=await _unique_name(conn,"SELECT id FROM bullet_variants WHERE bullet_id=%s AND name=%s",(bullet_id,),base)
+            ai=provenance.get(pid) or {}
+            text=" ".join(rewrite.body.split())
+            variant=await _one(conn,"INSERT INTO bullet_variants(user_id,bullet_id,name,body,is_default,sort_order,ai_generated,ai_model,ai_job_id) VALUES(%s,%s,%s,%s,false,(SELECT COALESCE(max(sort_order)+1,0) FROM bullet_variants WHERE bullet_id=%s),%s,%s,%s) RETURNING id",(user_id,bullet_id,name,text,bullet_id,bool(ai.get("generated")),ai.get("model"),ai.get("job_id")))
+            await conn.execute("UPDATE composition_bullets SET variant_id=%s,wording_snapshot=%s,snapshot_source_updated_at=now(),updated_at=now() WHERE id=%s",(variant["id"],text,pid))
+        parents=set()
+        for pid in removing:
+            await conn.execute("DELETE FROM composition_bullets WHERE id=%s AND composition_id=%s",(pid,cid))
+            parents.add((current[pid]["destination_parent_type"],current[pid]["destination_parent_id"]))
+        for parent_type,parent_id in parents:
+            left=await _many(conn,"SELECT id FROM composition_bullets WHERE composition_id=%s AND destination_parent_type=%s AND destination_parent_id=%s ORDER BY sort_order,id",(cid,parent_type,parent_id))
+            for i,x in enumerate(left):await conn.execute("UPDATE composition_bullets SET sort_order=%s,updated_at=now() WHERE id=%s",(i,x["id"]))
+        return await _commit(conn,user_id,locked,"ai-condense"),None
+
 async def reorder_placements(conn,user_id,cid,payload):
     async with conn.transaction():
         locked,error=await _lock_composition(conn,user_id,cid,payload.revision)

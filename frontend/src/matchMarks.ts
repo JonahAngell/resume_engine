@@ -147,6 +147,8 @@ export function buildMatchMarks(rows: RequirementRow[]): MatchMark[] {
       const id = matchMarkId(term);
       if (!id) continue;
       const found = keyword.found || !!row.manual;
+      // The user said they lack it: no yellow highlight. It still counts as missing in scores.
+      if (!found && keyword.skipped) continue;
       const suggestions = (row.suggestions || []).filter(
         (item) => item.keyword.trim().toLowerCase() === term.toLowerCase(),
       );

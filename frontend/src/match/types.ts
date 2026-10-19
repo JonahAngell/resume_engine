@@ -4,6 +4,8 @@ export type KeywordReview = {
   dismissed: string[];
   added: AddedRequirement[];
   matched: string[];
+  /** Keywords the user lacks: no highlight or suggestions, still missing in every score. */
+  skipped: string[];
 };
 
 export type JobDescription = {
@@ -33,6 +35,8 @@ export type RequirementKeyword = {
   evidence?: KeywordEvidence | null;
   /** The keyword belongs in Skills (a tool): offer Add to Skills, never AI wording. */
   skill?: boolean;
+  /** The user marked this keyword as not their experience. */
+  skipped?: boolean;
 };
 
 export type TagSuggestion = {

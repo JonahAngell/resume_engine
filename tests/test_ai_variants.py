@@ -180,3 +180,31 @@ def test_guarded_keyword_ignores_keyword_mode():
     assert "Do not add" in json.loads(complete.calls[0][1]["content"])["keyword_rule"]
     assert [item["body"] for item in result["drafts"]] == ["Led budgeting reviews for regional teams"]
     assert result["fits"] is True
+
+
+def test_one_line_goal_drops_drafts_over_the_character_budget():
+    long_original = "Owned budgeting reviews for regional teams across every quarter and planning cycle this year"
+    complete = reply("Owned budgeting reviews for regional teams", "Owned budgeting reviews for regional teams across every quarter")
+    result = asyncio.run(
+        suggest_variants(long_original, "", "", "", goal="one_line", max_chars=50, placement_id="p1", complete=complete)
+    )
+    assert [item["body"] for item in result["drafts"]] == ["Owned budgeting reviews for regional teams"]
+    assert result["dropped"] == 1
+    sent = json.loads(complete.calls[0][1]["content"])
+    assert sent["max_chars"] == 50
+    assert "one resume line" in sent["goal"]
+    # Without a job the draft is still remembered, under an empty job id, for provenance.
+    assert issued_draft("p1", "Owned budgeting reviews for regional teams", "") == "m:free"
+
+
+def test_one_line_budget_is_cached_separately():
+    complete = reply("Owned budgeting reviews")
+    for limit in (60, 60, 80):
+        asyncio.run(suggest_variants(ORIGINAL, "", "", "", goal="one_line", max_chars=limit, complete=complete))
+    assert len(complete.calls) == 2
+
+
+def test_other_goals_ignore_max_chars():
+    complete = reply("Led budgeting reviews for regional teams")
+    asyncio.run(suggest_variants(ORIGINAL, JOB, "req", "kw", goal="concise", max_chars=30, complete=complete))
+    assert "max_chars" not in json.loads(complete.calls[0][1]["content"])

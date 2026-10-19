@@ -6,7 +6,21 @@ export type Fit = {
   state?: string;
   pages?: any[];
   message?: string;
+  /** Rendered lines per bullet, keyed by the preview's `{parentId}-bullet-{index}` id. */
+  bulletLines?: Record<string, number>;
+  /** Rendered lines per entry, keyed by item id. */
+  itemLines?: Record<string, number>;
+  /** Approximate characters that fit on one bullet line. */
+  charsPerLine?: number;
+  /** Lines of content on each page. */
+  pageLines?: number[];
 };
+
+/** Lines of content past the target page count, or 0 when the resume fits. */
+export function linesOver(fit: Fit | null) {
+  if (!fit?.pageLines || !fit.preferredPageCount) return 0;
+  return fit.pageLines.slice(fit.preferredPageCount).reduce((sum, n) => sum + n, 0);
+}
 export default function FitIndicator({
   fit,
   compact = false,

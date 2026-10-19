@@ -30,6 +30,7 @@ def _normalize(row):
         "dismissed": list(review.get("dismissed") or []),
         "added": list(review.get("added") or []),
         "matched": list(review.get("matched") or []),
+        "skipped": list(review.get("skipped") or []),
     }
     facts = extract_facts(row.get("body") or "")
     row["salary"] = facts["salary"]
@@ -275,8 +276,9 @@ async def _placed_bullets(conn, user_id, composition_id: UUID):
     return placed
 
 
-async def load_variant_inputs(conn, user_id, composition_id: UUID, placement_id: UUID, job_id: UUID):
-    """The placed bullet's current wording and the job text. The client never supplies the bullet."""
+async def load_variant_inputs(conn, user_id, composition_id: UUID, placement_id: UUID, job_id: UUID | None):
+    """The placed bullet's current wording and the job text ("" without a job). The client never
+    supplies the bullet."""
     composition = await load_composition(conn, user_id, composition_id, include_archived=False)
     if not composition:
         return None, "resume"
@@ -290,6 +292,8 @@ async def load_variant_inputs(conn, user_id, composition_id: UUID, placement_id:
     )
     if not placement:
         return None, "placement"
+    if job_id is None:
+        return {"original": placement["wording"], "description": ""}, None
     job = await get_job_description(conn, user_id, job_id)
     if not job:
         return None, "job"
@@ -309,6 +313,64 @@ async def load_entry_section(conn, user_id, composition_id: UUID, parent_id: UUI
             if isinstance(entry, dict) and str(entry.get("id") or "") == str(parent_id):
                 return section, None
     return None, "entry"
+
+
+CONDENSE_ENTRY_SECTIONS = ("work_experience", "projects", "leadership")
+
+
+async def load_condense_inputs(conn, user_id, composition_id: UUID, job_id: UUID | None):
+    """Placed bullets with their preview line id and parent label, and the included roles,
+    projects, and leadership entries. The client never supplies wording."""
+    composition = await load_composition(conn, user_id, composition_id, include_archived=False)
+    if not composition:
+        return None, "resume"
+    description = ""
+    if job_id is not None:
+        job = await get_job_description(conn, user_id, job_id)
+        if not job:
+            return None, "job"
+        description = job["body"] or ""
+    bullets = await _many(
+        conn,
+        """SELECT cb.id::text AS placement_id,
+                  cb.destination_parent_id::text AS parent_id,
+                  COALESCE(cb.destination_section, '') AS section,
+                  COALESCE(NULLIF(concat_ws(' · ', ci.title, ci.organization), ''), ci.name, ei.institution, '') AS parent_label,
+                  COALESCE(cb.wording_snapshot, v.body, '') AS body,
+                  (ROW_NUMBER() OVER (
+                     PARTITION BY cb.destination_parent_id
+                     ORDER BY cb.sort_order, cb.id
+                  ) - 1)::int AS line_index
+           FROM composition_bullets cb
+           JOIN bullets b ON b.id = cb.bullet_id AND b.user_id = %s
+           LEFT JOIN bullet_variants v ON v.id = cb.variant_id
+           LEFT JOIN content_items ci ON ci.id = cb.destination_parent_id
+           LEFT JOIN education_items ei ON ei.id = cb.destination_parent_id
+           JOIN composition_items i ON i.composition_id = cb.composition_id
+                AND i.section = cb.destination_section AND i.item_id = cb.destination_parent_id
+           WHERE cb.composition_id = %s
+           ORDER BY cb.destination_section, cb.destination_parent_id, cb.sort_order, cb.id""",
+        (user_id, composition_id),
+    )
+    for row in bullets:
+        row["line_id"] = f"{row['parent_id']}-bullet-{row['line_index']}"
+    entries = await _many(
+        conn,
+        """SELECT i.item_id::text AS id,
+                  i.section,
+                  COALESCE(NULLIF(concat_ws(' · ', ci.title, ci.organization), ''), ci.name, '') AS label
+           FROM composition_items i
+           JOIN content_items ci ON ci.id = i.item_id AND ci.user_id = %s
+           WHERE i.composition_id = %s AND i.section = ANY(%s)
+           ORDER BY i.section, i.sort_order, i.id""",
+        (user_id, composition_id, list(CONDENSE_ENTRY_SECTIONS)),
+    )
+    return {
+        "description": description,
+        "bullets": bullets,
+        "entries": entries,
+        "revision": int(composition.get("revision") or 0),
+    }, None
 
 
 async def load_pick_inputs(conn, user_id, composition_id: UUID, job_id: UUID, placement_ids: list[UUID] | None = None):

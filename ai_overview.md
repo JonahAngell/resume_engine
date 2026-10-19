@@ -168,6 +168,7 @@ Design notes and the review behind these features are in `docs/ai_suggestions_bl
 | `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`, `goal` (`concise`/`impact`/`align`), `incorporate_keyword`. Bullet text is read from the placement. In keyword mode every draft must contain the keyword (or a dictionary form of it), and the reply carries `fits`/`reason` when the model says it doesn't fit. |
 | `POST /api/compositions/{cid}/ai-keyword-assist` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`. Returns up to 3 `revisions` (one per placed bullet), up to 2 `new_bullets` (each tied to a role or project), the `entries` a new bullet can go under, `allowed`, `no_fit_reason`. Guarded keywords return `allowed: false` without calling the model. |
 | `POST /api/compositions/{cid}/ai-keyword-assist/accept-new` | bullet + variant + placement | Body: `revision`, `parent_id` (a role or project on this resume), `body`, `source`, `job_id`, `model`. 422 while the body still has a `[placeholder]`; 404 for an entry not on this resume; 409 on a stale revision. Revisions are accepted through `.../ai-variants/accept`. |
+| `POST /api/job-descriptions/{job_id}/define` | nothing | Body: `keyword`, `requirement`. Returns `status`, `detail`, `definition`, `in_this_job`, `model`. 404 for a job the user doesn't own. |
 | `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants/accept` | variant + placement | Body: `revision`, `name`, `body`, `source` (`draft`/`edited`/`own`), `job_id`, `model`. 409 on a stale revision, with no variant written. |
 | `POST /api/compositions/{cid}/skills/recommend` | nothing | Body: `keyword`, `allow_ai`. The UI calls with `allow_ai=false` first and again with `true` only when `source == "none"`. |
 | `POST /api/compositions/{cid}/skills` | tool, group, this resume | Body: `revision`, `name`, and `group_id` or `new_group_name`. |
@@ -206,10 +207,11 @@ The Job match tab is a dashboard rail beside the job description and the resume 
 
 | Path | Role |
 |---|---|
-| `frontend/src/match/useJobMatch.ts` | Jobs, selected job, deterministic match, `markRequirement`, `dismissRequirement`, `addTag`. Called once in `App.tsx`. |
+| `frontend/src/match/useJobMatch.ts` | Jobs, selected job, deterministic match, `markRequirement`, `dismissRequirement`, `skipKeyword`, `addTag`. Called once in `App.tsx`. |
 | `frontend/src/match/MatchDashboard.tsx` | Sticky header (job, match score ring, counters, tabs) and the Overview tab. |
 | `frontend/src/match/RequirementsTab.tsx`, `CoachTab.tsx`, `AtsTab.tsx` | The other three tabs. All panels stay mounted so results survive tab switches. |
-| `frontend/src/match/MarkPopover.tsx` | Popover for a clicked highlight; a bottom sheet below 600px. |
+| `frontend/src/match/MarkPopover.tsx` | Popover for a clicked highlight; a bottom sheet below 600px. Missing keywords get **Define** (AI definition, cached per job and keyword for the session) and **I don't have this**. |
+| `backend/app/ai_define.py` | AI definition of one keyword in the context of its posting. Sends only the redacted posting, never the resume. Cache max 64. |
 | `frontend/src/matchMarks.ts` | Each mark carries `items`: keyword, group, matched or suggested, requirement, rewrite targets, Add to Skills. |
 | `backend/app/ai_coach.py` | Whole-resume review: prompt, `filter_coach`, cache. |
 | `backend/app/ats_score.py` | Deterministic ATS score, methodology and disclaimer. |
@@ -278,3 +280,43 @@ New wording reuses `.../ai-variants` and `.../ai-variants/accept`, so drafts kee
 ## Ranking
 
 Candidates for a placement are the other active variants of its bullet plus unused bullets of the same role, project or school, capped at 8 per slot and 40 slots. Every candidate gets `keyword_hits` from `extract_keywords` on the job. With AI, the model scores each candidate 0 to 100 and gives a reason; it can only choose among library text, so there is no fabrication guard. A switch is recommended when the best AI score beats the current by `AI_MARGIN` (8), or, by keywords, when the best has more hits. An unused bullet is never recommended for two slots. When the model fails or scores nothing, the keyword ranking is returned with the error status. `ai_variant_pick._CACHE` (16) keys on the redacted job, slot candidates, `PICK_PROMPT_VERSION` and model.
+
+## Keywords the user doesn't have
+
+**I don't have this** in the highlight popover adds the keyword to `keyword_review.skipped` for that job (saved through the normal job save). `match_qualifications` then marks the keyword `skipped: true` and gives it no suggestions, so it loses its highlight, and the AI coach drops cards for it. It stays `found: false`, so match coverage and the ATS score still count it as missing; the ATS keyword tips name how many skipped keywords are still counted. The Requirements tab shows skipped keywords struck through with an **Undo**. This differs from **Dismiss requirement** (`keyword_review.dismissed`), which removes the whole requirement from scoring.
+
+# Shrink to fit
+
+Two tools help bring a resume back to its target page count. Both work without a job; with one, removals favor the least relevant items.
+
+- **Make it one line** in the bullet Edit dialog asks `.../ai-variants` with `goal: "one_line"` and `max_chars`. The dialog also shows the bullet's current line count and a live character count against the one-line budget.
+- **Shrink to fit** in the preview toolbar (filled when the resume is over its target) and in the Edit dialog's banner opens a review of the whole resume: bullets to condense, bullets to remove and roles, projects or leadership entries to remove. The fewest changes that cover the overflow come pre-selected, condensing first, and the dialog keeps a live total of lines saved. Applying saves everything in one revision.
+
+## Line measurement
+
+`resume.html` adds to the `resume-pages` message: `bullet_lines` (printed lines per `li`, keyed by its `{parentId}-bullet-{index}` id, summed when a bullet splits across pages), `item_lines` (per entry), `page_lines` (lines of content per page) and `chars_per_line` (bullet width over the average character width of a sample sentence, times 0.93 because real text wraps early). All pages are shown while measuring, since pages after the first are hidden once paginated. `linesOver(fit)` in `FitIndicator.tsx` is the sum of `page_lines` past the target. `placementLineId` maps a placement to its preview id the same way `job_repository` numbers `line_index`.
+
+## Files
+
+| Path | Role |
+|---|---|
+| `backend/app/ai_condense.py` | `condense_resume`: prepares bullets and entries with lines and job keyword hits, asks the model, validates, falls back to a heuristic, and pre-selects changes. |
+| `backend/app/ai_variants.py` | `one_line` goal: drafts over `max_chars` (default 95) are dropped on top of the usual fact guard. |
+| `backend/app/job_repository.py` | `load_condense_inputs`: placed bullets with preview line ids and parent labels, included roles, projects and leadership entries. `load_variant_inputs` accepts no job. |
+| `backend/app/phase2j_repository.py` | `apply_condense`: one revision that removes entries and placements and saves condensed wording as new variants. |
+| `frontend/src/editor/AiBulletTools.tsx` | `ShrinkReviewDialog`, `ShrinkBanner`, `LineBudget`, one-line button in `AiDraftPanel`. |
+| `tests/test_ai_condense.py`, `tests/test_ai_condense_api_integration.py` | Unit and database tests. |
+
+## Endpoints
+
+| Route | Saves | Notes |
+|---|---|---|
+| `POST /api/compositions/{cid}/ai-condense` | nothing | Body: optional `job_id`, `bullet_lines`, `item_lines`, `chars_per_line`, `lines_over`, `use_ai`. Returns `items` (`kind`: `condense`, `remove_bullet` or `remove_entry`) with `lines`, `lines_saved`, `reason`, `recommended`, and `method` (`ai` or `heuristic`). |
+| `POST /api/compositions/{cid}/ai-condense/apply` | placements, variants, entries | Body: `revision`, optional `job_id`, `remove_bullets`, `remove_entries`, `rewrites` of `placement_id`, `body`, `name`, `source`. One revision (`ai-condense`). 422 when a bullet is both condensed and removed, 404 for an unknown id, 409 when stale. |
+| `POST .../ai-variants` | nothing | `job_id` is optional only with `goal: "one_line"`; otherwise 422. |
+
+## Guardrails
+
+A condensed bullet must pass `drop_reason` against the original (no new numbers, tools, proper nouns or job tools) and must take at least one fewer line, estimated as `ceil(length / chars_per_line)`. Ids are short keys (`b1`, `e1`) mapped back on the server, so the model can only name bullets and entries it was given. Bullets of a removed entry are not also listed. Condensed drafts are remembered with `remember_issued`, so applying them unchanged marks the new variant `ai_generated`; an edited draft is saved as `edited`. Removing an entry deletes its `composition_items` row only; its placements stay and come back if the entry is added again.
+
+Without AI, or when the model fails, the review lists wrapping bullets sorted by how few characters need cutting to save a line (with no draft; the user writes one inline), and, with a job, bullets and entries that use none of its keywords. `ai_condense._CACHE` (16) keys on the redacted job, bullets with lines, entries, overflow, characters per line, `CONDENSE_PROMPT_VERSION` and model.
