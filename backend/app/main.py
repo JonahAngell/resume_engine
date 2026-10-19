@@ -53,6 +53,7 @@ from .editing_schemas import (
     VariantPickRequest,
     KeywordAssistRequest,
     KeywordBulletAccept,
+    KeywordDefineRequest,
     AtsScoreRequest,
     SkillAddWrite,
     SkillRecommendRequest,
@@ -171,7 +172,8 @@ from .library_service import import_seed
 from .resume_import import ImportDraft, parse_upload
 from .resume_import_commit import commit_import
 from .ai_review import review_resume
-from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, VariantPick, VariantSuggestions
+from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, KeywordDefinition, VariantPick, VariantSuggestions
+from .ai_define import define_keyword
 from .ai_variant_pick import pick_variants
 from .ai_coach import coach_resume
 from .ai_keyword import PLACEHOLDER, assist_keyword, new_bullet_key
@@ -1826,6 +1828,16 @@ async def ai_coach_job(job_id: UUID, req: JobMatchRequest, identity: CurrentUser
         inputs["revision"],
         job_id=str(job_id),
     )
+
+
+@app.post("/api/job-descriptions/{job_id}/define", response_model=KeywordDefinition)
+async def define_job_keyword(job_id: UUID, req: KeywordDefineRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        job = await get_job_description(c, u["id"], job_id)
+    if not job:
+        raise HTTPException(404, "Job description not found")
+    return await define_keyword(job["body"], req.keyword, req.requirement)
 
 
 @app.post("/api/job-descriptions/{job_id}/ats-score", response_model=AtsScore)

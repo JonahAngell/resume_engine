@@ -65,3 +65,12 @@ def test_new_bullets_with_placeholders_cannot_be_saved():
     main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
     assert "!placeholder" in dialog
     assert "PLACEHOLDER.search(body)" in main
+
+
+def test_skipped_keywords_lose_their_highlight_and_round_trip():
+    marks = (ROOT / "frontend/src/matchMarks.ts").read_text(encoding="utf-8")
+    popover = (ROOT / "frontend/src/match/MarkPopover.tsx").read_text(encoding="utf-8")
+    repository = (ROOT / "backend/app/job_repository.py").read_text(encoding="utf-8")
+    assert "!found && keyword.skipped" in marks
+    assert "onSkip(item)" in popover and "/define" in popover
+    assert '"skipped": list(review.get("skipped") or [])' in repository

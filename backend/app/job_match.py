@@ -446,12 +446,14 @@ def match_qualifications(description: str, resume: dict, bullets: list | None = 
     families = classify_families(description)
     education = [item for item in resume.get("education") or [] if isinstance(item, dict)]
     accepted = {_norm(item) for item in review.get("matched") or []}
+    # Keywords the user said they lack: no highlight or suggestions, but they still count as missing.
+    skipped = {_norm(item) for item in review.get("skipped") or []}
     placed = bullets or []
     skill_groups = _skill_candidates(resume)
     candidates = _match_candidates(resume, placed, skill_groups)
     evaluated = {
         key: [
-            _evaluate_requirement(row, candidates, placed, education, accepted, skill_groups)
+            _evaluate_requirement(row, candidates, placed, education, accepted, skill_groups, skipped)
             for row in routed[key]
         ]
         for key in routed
@@ -961,7 +963,16 @@ def _proper_list_items(text: str, from_cue: bool = False) -> list[str]:
     return extras
 
 
-def _evaluate_requirement(row: dict, candidates: list, bullets: list, education: list, accepted: set, skill_groups: list | None = None) -> dict:
+def _evaluate_requirement(
+    row: dict,
+    candidates: list,
+    bullets: list,
+    education: list,
+    accepted: set,
+    skill_groups: list | None = None,
+    skipped: set | None = None,
+) -> dict:
+    skipped = skipped or set()
     manual = _norm(row["text"]) in accepted
     category = row.get("category") or row.get("kind") or "tool"
     if category == "degree" or row.get("kind") in {"education", "degree"}:
@@ -1001,8 +1012,10 @@ def _evaluate_requirement(row: dict, candidates: list, bullets: list, education:
     pending = []
     for keyword in row["keywords"]:
         item = _keyword_payload(keyword, row["text"], candidates)
+        if not item["found"] and _norm(keyword) in skipped:
+            item["skipped"] = True
         keywords.append(item)
-        if not item["found"]:
+        if not item["found"] and not item.get("skipped"):
             pending.append(keyword)
     found_map = {item["keyword"]: item["found"] for item in keywords}
     clauses = row.get("clauses") or [{"mode": row.get("match_mode") or "all", "keywords": list(row["keywords"])}]

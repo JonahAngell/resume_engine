@@ -103,12 +103,16 @@ def _component(cid: str, ratio: float, detail: str, tips: list[str]) -> dict:
 def _keywords(match: dict) -> dict:
     total = found = 0.0
     missing: list[str] = []
+    skipped: set[str] = set()
     for group, weight in (("required", 2.0), ("preferred", 1.0)):
         for row in _rows(match, group):
             for item in row.get("keywords") or []:
                 total += weight
                 if item.get("found") or row.get("manual"):
                     found += weight
+                elif item.get("skipped"):
+                    # The user said they lack it: it still counts as missing, but isn't a tip.
+                    skipped.add((item.get("keyword") or "").lower())
                 elif group == "required":
                     missing.append(item.get("keyword") or "")
     if total == 0:
@@ -118,6 +122,11 @@ def _keywords(match: dict) -> dict:
     if missing:
         names = ", ".join(sorted({name for name in missing if name})[:4])
         tips.append(f"Add missing required keywords where they are true: {names}.")
+    skipped.discard("")
+    if skipped:
+        count = len(skipped)
+        noun = "keyword" if count == 1 else "keywords"
+        tips.append(f"{count} {noun} you marked as not your experience still count as missing.")
     return _component("keywords", ratio, f"{round(ratio * 100)}% of weighted keywords found.", tips)
 
 

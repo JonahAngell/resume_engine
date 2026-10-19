@@ -1,6 +1,19 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { api } from "../api";
 import type { MarkItem } from "../matchMarks";
 import { groupLabel, type AssistRequest } from "./types";
+
+type Definition = {
+  status: "ok" | "unavailable" | "rate_limited" | "invalid";
+  detail: string;
+  definition: string;
+  in_this_job: string;
+};
+type DefineState = { loading: true } | { loading: false; result?: Definition; error?: string };
+
+/** Definitions already fetched this session, by job and keyword. */
+const definitions = new Map<string, Definition>();
+const defineKey = (jobId: string, keyword: string) => `${jobId}:${keyword.trim().toLowerCase()}`;
 
 export type PopoverAnchor = { left: number; top: number; right: number; bottom: number };
 
@@ -11,22 +24,50 @@ export default function MarkPopover({
   anchor,
   items,
   source,
+  jobId,
   onClose,
   onAssist,
+  onSkip,
   onShowInDashboard,
   onShowOther,
 }: {
   anchor: PopoverAnchor;
   items: MarkItem[];
   source: "job" | "resume";
+  jobId: string;
   onClose: () => void;
   onAssist: (request: AssistRequest) => void;
+  /** Hide a missing keyword the user doesn't have. It still counts as missing in scores. */
+  onSkip: (item: MarkItem) => void;
   onShowInDashboard: (item: MarkItem) => void;
   onShowOther: (item: MarkItem) => void;
 }) {
   const card = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [defined, setDefined] = useState<Record<string, DefineState>>(() => {
+    const known: Record<string, DefineState> = {};
+    for (const item of items) {
+      const result = definitions.get(defineKey(jobId, item.keyword));
+      if (result) known[item.keyword] = { loading: false, result };
+    }
+    return known;
+  });
+
+  const define = async (item: MarkItem) => {
+    if (!jobId) return;
+    setDefined((current) => ({ ...current, [item.keyword]: { loading: true } }));
+    try {
+      const result = await api<Definition>(`/api/job-descriptions/${jobId}/define`, {
+        method: "POST",
+        body: JSON.stringify({ keyword: item.keyword, requirement: item.requirement }),
+      });
+      if (result.status === "ok") definitions.set(defineKey(jobId, item.keyword), result);
+      setDefined((current) => ({ ...current, [item.keyword]: { loading: false, result } }));
+    } catch (reason: any) {
+      setDefined((current) => ({ ...current, [item.keyword]: { loading: false, error: reason.message } }));
+    }
+  };
 
   useLayoutEffect(() => {
     const box = card.current?.getBoundingClientRect();
@@ -37,7 +78,7 @@ export default function MarkPopover({
     const top = below + height > innerHeight - MARGIN ? Math.max(MARGIN, anchor.top - GAP - height) : below;
     const left = Math.min(Math.max(MARGIN, anchor.left), innerWidth - width - MARGIN);
     setPosition({ left, top });
-  }, [anchor, items]);
+  }, [anchor, items, defined]);
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
@@ -98,6 +139,7 @@ export default function MarkPopover({
             </span>
           </p>
           <p className="mark-requirement">{item.requirement}</p>
+          <DefinitionView state={defined[item.keyword]} />
           {item.status === "suggested" && !item.rewrites.length && !item.addSkill && !item.workIn && (
             <p className="mark-hint">Not found in this resume yet. Mark it as a match from the dashboard if you cover it in other words.</p>
           )}
@@ -131,6 +173,21 @@ export default function MarkPopover({
                 Add to Skills
               </button>
             )}
+            {item.status === "suggested" && jobId && !defined[item.keyword] && (
+              <button type="button" title={`Explain what ${item.keyword} means`} onClick={() => define(item)}>
+                Define
+              </button>
+            )}
+            {item.status === "suggested" && (
+              <button
+                type="button"
+                className="link-button"
+                title="Hides the highlight. It still counts as missing in your ATS score."
+                onClick={() => onSkip(item)}
+              >
+                I don’t have this
+              </button>
+            )}
             <button type="button" className="link-button" onClick={() => onShowInDashboard(item)}>
               Show in dashboard
             </button>
@@ -140,6 +197,21 @@ export default function MarkPopover({
           </div>
         </section>
       ))}
+    </div>
+  );
+}
+
+function DefinitionView({ state }: { state?: DefineState }) {
+  if (!state) return null;
+  if (state.loading) return <p className="mark-hint" role="status">Looking up a definition…</p>;
+  if (state.error || state.result?.status !== "ok") {
+    return <p className="mark-hint" role="status">{state.error || state.result?.detail || "No definition available."}</p>;
+  }
+  return (
+    <div className="mark-definition" role="status">
+      <p>{state.result.definition}</p>
+      {state.result.in_this_job && <p className="mark-hint">In this job: {state.result.in_this_job}</p>}
+      <p className="mark-hint">AI-generated. Check before relying on it.</p>
     </div>
   );
 }
