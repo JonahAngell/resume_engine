@@ -51,6 +51,8 @@ from .editing_schemas import (
     AiVariantRequest,
     BulletPlacementReplaceMany,
     VariantPickRequest,
+    CondenseApply,
+    CondenseRequest,
     KeywordAssistRequest,
     KeywordBulletAccept,
     KeywordDefineRequest,
@@ -175,6 +177,8 @@ from .ai_review import review_resume
 from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, KeywordDefinition, VariantPick, VariantSuggestions
 from .ai_define import define_keyword
 from .ai_variant_pick import pick_variants
+from .ai_condense import condense_resume
+from .ai_schemas import CondenseResult
 from .ai_coach import coach_resume
 from .ai_keyword import PLACEHOLDER, assist_keyword, new_bullet_key
 from .ai_variants import issued_draft, job_tool_terms, suggest_variants
@@ -193,6 +197,7 @@ from .job_repository import (
     load_ai_review_inputs,
     load_entry_section,
     load_pick_inputs,
+    load_condense_inputs,
     load_variant_inputs,
     update_job_description,
 )
@@ -211,6 +216,7 @@ from .phase2j_repository import (
     replace_placement,
     replace_placements,
     reorder_placements,
+    apply_condense,
     update_usage,
     usage_rows,
 )
@@ -1478,7 +1484,7 @@ async def suggest_bullet_variants(cid: UUID, placement_id: UUID, req: AiVariantR
     if error:
         raise HTTPException(404, "Job description not found")
     category = "tool" if is_skill_keyword(req.keyword, req.category) else (req.category or category_for_term(req.keyword) or "")
-    job_terms = job_tool_terms(inputs["description"])
+    job_terms = job_tool_terms(inputs["description"]) if inputs["description"] else []
     result = await suggest_variants(
         inputs["original"],
         inputs["description"],
@@ -1488,8 +1494,9 @@ async def suggest_bullet_variants(cid: UUID, placement_id: UUID, req: AiVariantR
         req.goal,
         job_terms,
         placement_id=str(placement_id),
-        job_id=str(req.job_id),
+        job_id=str(req.job_id or ""),
         incorporate_keyword=req.incorporate_keyword,
+        max_chars=req.max_chars,
     )
     return {**result, "original": inputs["original"], "category": category}
 
@@ -1579,12 +1586,11 @@ async def accept_bullet_variant(cid: UUID, placement_id: UUID, req: AiVariantAcc
     async with connection() as c:
         u = await owner(identity, c)
         ai = None
-        if req.source != "own" and req.job_id:
-            job = await get_job_description(c, u["id"], req.job_id)
-            if not job:
+        if req.source != "own":
+            if req.job_id and not await get_job_description(c, u["id"], req.job_id):
                 raise HTTPException(404, "Job description not found")
             # Only text this server handed out, unchanged, counts as AI-written.
-            served = issued_draft(str(placement_id), req.body, str(req.job_id))
+            served = issued_draft(str(placement_id), req.body, str(req.job_id or ""))
             generated = req.source == "draft" and served is not None
             ai = {"generated": generated, "model": served or req.model or None, "job_id": req.job_id}
         row, error = await save_bullet_edit(
@@ -1595,6 +1601,52 @@ async def accept_bullet_variant(cid: UUID, placement_id: UUID, req: AiVariantAcc
         if not row:
             raise HTTPException(404, "Bullet not found")
         return state(row)
+
+
+@app.post("/api/compositions/{cid}/ai-condense", response_model=CondenseResult)
+async def condense_composition(cid: UUID, req: CondenseRequest, identity: CurrentUser = Depends(resolve_current_user)):
+    """Suggest bullets to condense and bullets or entries to remove so the resume fits its pages."""
+    async with connection() as c:
+        u = await owner(identity, c)
+        inputs, error = await load_condense_inputs(c, u["id"], cid, req.job_id)
+    if error == "resume":
+        raise HTTPException(404, "Resume not found")
+    if error:
+        raise HTTPException(404, "Job description not found")
+    return await condense_resume(
+        inputs["description"],
+        inputs["bullets"],
+        inputs["entries"],
+        req.bullet_lines,
+        req.item_lines,
+        req.chars_per_line,
+        req.lines_over,
+        inputs["revision"],
+        use_ai=req.use_ai,
+        job_id=str(req.job_id or ""),
+    )
+
+
+@app.post("/api/compositions/{cid}/ai-condense/apply", response_model=CompositionState)
+async def apply_condense_changes(cid: UUID, req: CondenseApply, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        if req.job_id and not await get_job_description(c, u["id"], req.job_id):
+            raise HTTPException(404, "Job description not found")
+        provenance = {}
+        for rewrite in req.rewrites:
+            # Only text this server handed out, unchanged, counts as AI-written.
+            served = issued_draft(str(rewrite.placement_id), rewrite.body, str(req.job_id or ""))
+            generated = rewrite.source == "draft" and served is not None
+            provenance[str(rewrite.placement_id)] = {
+                "generated": generated,
+                "model": served or rewrite.model or None,
+                "job_id": req.job_id,
+            }
+        row, error = await apply_condense(c, u["id"], cid, req, provenance)
+        if error == "invalid":
+            raise HTTPException(422, "A bullet can't be both condensed and removed.")
+        return _placement_result(row, error)
 
 
 @app.post("/api/render", response_class=HTMLResponse)

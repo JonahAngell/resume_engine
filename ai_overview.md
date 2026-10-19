@@ -284,3 +284,39 @@ Candidates for a placement are the other active variants of its bullet plus unus
 ## Keywords the user doesn't have
 
 **I don't have this** in the highlight popover adds the keyword to `keyword_review.skipped` for that job (saved through the normal job save). `match_qualifications` then marks the keyword `skipped: true` and gives it no suggestions, so it loses its highlight, and the AI coach drops cards for it. It stays `found: false`, so match coverage and the ATS score still count it as missing; the ATS keyword tips name how many skipped keywords are still counted. The Requirements tab shows skipped keywords struck through with an **Undo**. This differs from **Dismiss requirement** (`keyword_review.dismissed`), which removes the whole requirement from scoring.
+
+# Shrink to fit
+
+Two tools help bring a resume back to its target page count. Both work without a job; with one, removals favor the least relevant items.
+
+- **Make it one line** in the bullet Edit dialog asks `.../ai-variants` with `goal: "one_line"` and `max_chars`. The dialog also shows the bullet's current line count and a live character count against the one-line budget.
+- **Shrink to fit** in the preview toolbar (filled when the resume is over its target) and in the Edit dialog's banner opens a review of the whole resume: bullets to condense, bullets to remove and roles, projects or leadership entries to remove. The fewest changes that cover the overflow come pre-selected, condensing first, and the dialog keeps a live total of lines saved. Applying saves everything in one revision.
+
+## Line measurement
+
+`resume.html` adds to the `resume-pages` message: `bullet_lines` (printed lines per `li`, keyed by its `{parentId}-bullet-{index}` id, summed when a bullet splits across pages), `item_lines` (per entry), `page_lines` (lines of content per page) and `chars_per_line` (bullet width over the average character width of a sample sentence, times 0.93 because real text wraps early). All pages are shown while measuring, since pages after the first are hidden once paginated. `linesOver(fit)` in `FitIndicator.tsx` is the sum of `page_lines` past the target. `placementLineId` maps a placement to its preview id the same way `job_repository` numbers `line_index`.
+
+## Files
+
+| Path | Role |
+|---|---|
+| `backend/app/ai_condense.py` | `condense_resume`: prepares bullets and entries with lines and job keyword hits, asks the model, validates, falls back to a heuristic, and pre-selects changes. |
+| `backend/app/ai_variants.py` | `one_line` goal: drafts over `max_chars` (default 95) are dropped on top of the usual fact guard. |
+| `backend/app/job_repository.py` | `load_condense_inputs`: placed bullets with preview line ids and parent labels, included roles, projects and leadership entries. `load_variant_inputs` accepts no job. |
+| `backend/app/phase2j_repository.py` | `apply_condense`: one revision that removes entries and placements and saves condensed wording as new variants. |
+| `frontend/src/editor/AiBulletTools.tsx` | `ShrinkReviewDialog`, `ShrinkBanner`, `LineBudget`, one-line button in `AiDraftPanel`. |
+| `tests/test_ai_condense.py`, `tests/test_ai_condense_api_integration.py` | Unit and database tests. |
+
+## Endpoints
+
+| Route | Saves | Notes |
+|---|---|---|
+| `POST /api/compositions/{cid}/ai-condense` | nothing | Body: optional `job_id`, `bullet_lines`, `item_lines`, `chars_per_line`, `lines_over`, `use_ai`. Returns `items` (`kind`: `condense`, `remove_bullet` or `remove_entry`) with `lines`, `lines_saved`, `reason`, `recommended`, and `method` (`ai` or `heuristic`). |
+| `POST /api/compositions/{cid}/ai-condense/apply` | placements, variants, entries | Body: `revision`, optional `job_id`, `remove_bullets`, `remove_entries`, `rewrites` of `placement_id`, `body`, `name`, `source`. One revision (`ai-condense`). 422 when a bullet is both condensed and removed, 404 for an unknown id, 409 when stale. |
+| `POST .../ai-variants` | nothing | `job_id` is optional only with `goal: "one_line"`; otherwise 422. |
+
+## Guardrails
+
+A condensed bullet must pass `drop_reason` against the original (no new numbers, tools, proper nouns or job tools) and must take at least one fewer line, estimated as `ceil(length / chars_per_line)`. Ids are short keys (`b1`, `e1`) mapped back on the server, so the model can only name bullets and entries it was given. Bullets of a removed entry are not also listed. Condensed drafts are remembered with `remember_issued`, so applying them unchanged marks the new variant `ai_generated`; an edited draft is saved as `edited`. Removing an entry deletes its `composition_items` row only; its placements stay and come back if the entry is added again.
+
+Without AI, or when the model fails, the review lists wrapping bullets sorted by how few characters need cutting to save a line (with no draft; the user writes one inline), and, with a job, bullets and entries that use none of its keywords. `ai_condense._CACHE` (16) keys on the redacted job, bullets with lines, entries, overflow, characters per line, `CONDENSE_PROMPT_VERSION` and model.

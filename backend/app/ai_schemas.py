@@ -238,6 +238,35 @@ class VariantPick(BaseModel):
     dropped: int = 0
 
 
+class CondenseItem(BaseModel):
+    kind: Literal["condense", "remove_bullet", "remove_entry"]
+    id: str
+    section: str = ""
+    parent_label: str = ""
+    original: str = ""
+    # Empty for a condense item without a draft: the user shortens it in the Edit dialog.
+    body: str = ""
+    name: str = ""
+    lines: int = 1
+    lines_saved: int = 0
+    reason: str = ""
+    keyword_hits: list[str] = []
+    recommended: bool = False
+
+
+class CondenseResult(BaseModel):
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    model: str = ""
+    method: Literal["ai", "heuristic"] = "heuristic"
+    revision: int = 0
+    lines_over: int = 0
+    chars_per_line: int = 0
+    recommended_lines_saved: int = 0
+    items: list[CondenseItem] = []
+    dropped: int = 0
+
+
 class KeywordDefinition(BaseModel):
     status: Literal["ok", "unavailable", "rate_limited", "invalid"]
     detail: str = ""

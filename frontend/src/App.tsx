@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import FitIndicator, { Fit } from "./FitIndicator";
+import FitIndicator, { Fit, linesOver } from "./FitIndicator";
 import ResumePreview, { type PreviewMarkClick } from "./ResumePreview";
 import { api } from "./api";
 import { RESUME_ENGINE_BUILD, RESUME_ENGINE_VERSION } from "./app-version";
@@ -35,7 +35,7 @@ import { SectionHelp } from "./SectionHelp";
 import { EditorLibraryDialogs } from "./editor/EditorLibraryDialogs";
 import { profilePayload } from "./LibraryEntryForms";
 import { RecordActions } from "./editor/LibraryPickerDialog";
-import type { AiJobContext } from "./editor/AiBulletTools";
+import { ShrinkReviewDialog, placementLineId, type AiJobContext } from "./editor/AiBulletTools";
 import { DragHandle, dragRowClass, useRowDrag } from "./editor/useRowDrag";
 import OptionGrid from "./OptionGrid";
 import ImportResumeDialog from "./ImportResumeDialog";
@@ -105,6 +105,7 @@ export default function App() {
   const [toolbarRenameOpen, setToolbarRenameOpen] = useState(false);
   const [toolbarName, setToolbarName] = useState("");
   const [fit, setFit] = useState<Fit | null>(null);
+  const [shrinkOpen, setShrinkOpen] = useState(false);
   const [status, setStatus] = useState("Loading…");
   const [error, setError] = useState("");
   const [starterPicker, setStarterPicker] = useState(false);
@@ -1081,6 +1082,17 @@ export default function App() {
         </button>
         <span className="preview-toolbar-spacer" />
         <FitIndicator fit={fit} compact />
+        {comp && !previewRevision && (
+          <button
+            type="button"
+            className={`shrink-button ${fit && !fit.fits && linesOver(fit) > 0 ? "urgent" : ""}`}
+            onClick={() => setShrinkOpen(true)}
+            disabled={!fit || fit.state === "measurement-error"}
+            title="Find bullets to condense and items to remove so the resume fits its target length"
+          >
+            <span aria-hidden="true">✦</span> Shrink to fit
+          </button>
+        )}
         <span className="preview-toolbar-spacer" />
         <button
           onClick={() => setZoom((value) => Math.max(50, value - 10))}
@@ -1551,6 +1563,8 @@ export default function App() {
                 aiJobs={matchState.jobs}
                 aiJobId={matchState.jobId}
                 setAiJobId={matchState.setJobId}
+                fit={fit}
+                openShrink={() => setShrinkOpen(true)}
               />
             </div>
           </aside>
@@ -1630,6 +1644,25 @@ export default function App() {
           save={(x: any, setDialogError: any) =>
             duplicate(x.name, setDialogError)
           }
+        />
+      )}
+      {shrinkOpen && comp && (
+        <ShrinkReviewDialog
+          close={() => setShrinkOpen(false)}
+          ai={{
+            compositionId: comp.id,
+            revision: comp.revision,
+            jobs: matchState.jobs || [],
+            jobId: matchState.jobId || "",
+            setJobId: matchState.setJobId,
+            fit,
+            onApplied: async (next: any) => {
+              setComp(next);
+              await loadLibrary();
+              setStatus("Saved");
+            },
+            openReview: () => {},
+          }}
         />
       )}
       {homeDialogs}
@@ -2582,6 +2615,8 @@ function SectionsPanel({
   aiJobs,
   aiJobId,
   setAiJobId,
+  fit,
+  openShrink,
 }: any) {
   const [compositionItems, setCompositionItems] = useState<any[]>([]),
     [placements, setPlacements] = useState<any[]>([]),
@@ -3428,6 +3463,14 @@ function SectionsPanel({
       setStatus("Saved");
     },
     openReview: () => setLibraryDialog({ mode: "ai-review" }),
+    fit,
+    lineCount: (placement: any) => fit?.bulletLines?.[placementLineId(placements, placement)] || null,
+    openShrink: openShrink
+      ? () => {
+          setLibraryDialog(null);
+          openShrink();
+        }
+      : undefined,
   };
   const parentBullets = (section: string, parentId: string) => {
     const source =

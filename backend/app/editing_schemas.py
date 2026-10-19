@@ -285,7 +285,7 @@ class SkillAddWrite(BaseModel):
         return self
 
 
-AiGoal = Literal["concise", "impact", "align"]
+AiGoal = Literal["concise", "impact", "align", "one_line"]
 AiKeywordCategory = Literal[
     "tool", "domain", "responsibility", "methodology", "credential", "degree", "experience_duration", "soft_skill", ""
 ]
@@ -293,12 +293,20 @@ AiKeywordCategory = Literal[
 
 class AiVariantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    job_id: UUID
+    # Only the one-line goal works without a job.
+    job_id: UUID | None = None
     keyword: str = Field(default="", max_length=200)
     requirement: str = Field(default="", max_length=2000)
     category: AiKeywordCategory = ""
     goal: AiGoal | None = None
     incorporate_keyword: bool = False
+    max_chars: int | None = Field(default=None, ge=30, le=200)
+
+    @model_validator(mode="after")
+    def job_unless_one_line(self):
+        if self.job_id is None and self.goal != "one_line":
+            raise ValueError("Choose a job for this suggestion")
+        return self
 
 
 class KeywordAssistRequest(BaseModel):
@@ -340,6 +348,41 @@ class VariantPickRequest(BaseModel):
     job_id: UUID
     placement_ids: list[UUID] = Field(default_factory=list, max_length=60)
     use_ai: bool = True
+
+
+class CondenseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: UUID | None = None
+    # Measured in the preview, keyed by its `{parentId}-bullet-{index}` and item ids.
+    bullet_lines: dict[str, int] = Field(default_factory=dict, max_length=400)
+    item_lines: dict[str, int] = Field(default_factory=dict, max_length=200)
+    chars_per_line: int = Field(default=0, ge=0, le=300)
+    lines_over: int = Field(default=0, ge=0, le=500)
+    use_ai: bool = True
+
+
+class CondenseRewrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    placement_id: UUID
+    body: str = Field(min_length=1, max_length=2000)
+    name: str = Field(default="", max_length=120)
+    source: Literal["draft", "edited"] = "draft"
+    model: str = Field(default="", max_length=200)
+
+
+class CondenseApply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    job_id: UUID | None = None
+    remove_bullets: list[UUID] = Field(default_factory=list, max_length=200)
+    remove_entries: list[UUID] = Field(default_factory=list, max_length=60)
+    rewrites: list[CondenseRewrite] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def something_to_apply(self):
+        if not (self.remove_bullets or self.remove_entries or self.rewrites):
+            raise ValueError("Choose at least one change")
+        return self
 
 
 class PlacementSwap(BaseModel):
