@@ -272,3 +272,45 @@ class ResumeRecommendResult(BaseModel):
     entry_count: int = 0
     bullet_count: int = 0
     composition: CompositionState
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: UUID | None = None
+    messages: list[ChatMessage] = Field(min_length=1, max_length=40)
+
+
+class ChatProposal(BaseModel):
+    id: str
+    kind: Literal["rewrite", "summary", "new_bullet", "remove", "reorder", "add_skill", "use_library"]
+    rationale: str = ""
+    placement_id: str = ""
+    bullet_id: str = ""
+    variant_id: str = ""
+    parent_id: str = ""
+    parent_type: str = ""
+    section: str = ""
+    entry: str = ""
+    keyword: str = ""
+    original: str = ""
+    proposed: str = ""
+    placeholders: bool = False
+    order: list[str] = []
+    before: list[str] = []
+    after: list[str] = []
+
+
+class ChatTurn(BaseModel):
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    model: str = ""
+    revision: int = 0
+    reply: str = ""
+    proposals: list[ChatProposal] = []
+    dropped: int = 0

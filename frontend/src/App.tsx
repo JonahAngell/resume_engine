@@ -17,6 +17,7 @@ import type { AssistRequest, DashboardTab } from "./match/types";
 import JobsPage from "./JobsPage";
 import { AppIcon } from "./AppIcon";
 import ModalShell from "./ModalShell";
+import ChatPanel from "./chat/ChatPanel";
 import OverflowMenu from "./OverflowMenu";
 import RevisionHistoryPanel from "./RevisionHistoryPanel";
 import { chooseSaveMode, confirmDialog } from "./ConfirmDialog";
@@ -1640,6 +1641,14 @@ export default function App() {
           }
         />
       )}
+      <ChatPanel
+        comp={comp}
+        jobState={matchState}
+        onApplied={async (next) => {
+          setComp(next);
+          await loadLibrary();
+        }}
+      />
       {homeDialogs}
     </main>
   );
