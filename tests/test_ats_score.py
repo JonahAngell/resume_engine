@@ -1,3 +1,5 @@
+import json
+
 from app.ats_score import DISCLAIMER, METHODOLOGY, WEIGHTS, score_resume
 
 RESUME = {
@@ -89,3 +91,15 @@ def test_length_penalizes_long_resumes_and_unquantified_bullets():
 
 def test_same_inputs_same_score():
     assert score_resume(MATCH, RESUME, JOB, COMP, 1) == score_resume(MATCH, RESUME, JOB, COMP, 1)
+
+
+def test_skipped_keywords_still_count_as_missing_but_leave_the_tip():
+    skipped = json.loads(json.dumps(MATCH))
+    skipped["required"][1]["keywords"][0]["skipped"] = True
+    plain = score_resume(MATCH, RESUME, JOB, COMP, 1)
+    result = score_resume(skipped, RESUME, JOB, COMP, 1)
+    assert result["score"] == plain["score"]
+    keywords = component(result, "keywords")
+    assert keywords["ratio"] == round(4 / 7, 3)
+    assert not any("Kubernetes" in tip for tip in keywords["tips"])
+    assert any("1 keyword you marked as not your experience" in tip for tip in keywords["tips"])

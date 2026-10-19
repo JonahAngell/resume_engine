@@ -2572,7 +2572,7 @@ textarea:focus-visible {
   height: calc(100vh - 64px);
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(360px, 420px) minmax(0, 1fr);
+  grid-template-columns: clamp(360px, 30vw, 480px) minmax(0, 1fr);
   position: relative;
   overflow: hidden;
   background: #edf2f8;
@@ -4143,6 +4143,12 @@ button[aria-disabled="true"] {
   background: #fff4e8;
   color: #8a4b12;
 }
+.keyword-chip.skipped {
+  color: #7a8599;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px #c9d1de;
+  text-decoration: line-through;
+}
 .keyword-chip.related {
   background: #e7eefb;
   color: #285797;
@@ -4600,6 +4606,7 @@ mark.assist-placeholder {
   --req: #1f2a44;
   --pref: #4f6488;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   color: var(--dash-ink);
 }
@@ -4615,6 +4622,7 @@ mark.assist-placeholder {
   top: -12px;
   z-index: 5;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   margin: -12px -14px 0;
   padding: 12px 14px;
@@ -4628,6 +4636,7 @@ mark.assist-placeholder {
   min-width: 0;
 }
 .dash-job strong {
+  min-width: 0;
   overflow: hidden;
   font-size: 15px;
   text-overflow: ellipsis;
@@ -4728,6 +4737,7 @@ mark.assist-placeholder {
 }
 .dash-panel {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 .dash-panel[hidden] {
@@ -4744,6 +4754,7 @@ mark.assist-placeholder {
 .coach-tab,
 .ats-tab {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 .empty-state {
@@ -5240,6 +5251,18 @@ mark.doc-hit:focus-visible {
 }
 .mark-actions button {
   font-size: 13px;
+}
+.mark-definition {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f4f7fb;
+  font-size: 13px;
+  color: #2c3a52;
+}
+.mark-definition .mark-hint {
+  font-size: 12px;
 }
 .mark-action-note {
   display: block;
