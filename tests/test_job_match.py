@@ -892,3 +892,19 @@ Required Qualifications
     match = match_qualifications(job, {"summary": "Analyst"}, [], {})
     flags = {item["keyword"]: item["skill"] for row in match["required"] for item in row["keywords"]}
     assert flags == {"A/B testing": False, "Tableau": True}
+
+
+def test_review_skipped_keyword_stays_missing_without_suggestions():
+    posting = "Required Qualifications\nDemonstrated experience with Python and SQL\n"
+    resume = {"summary": "", "tool_groups": [{"name": "Tools", "items": ["Excel"]}]}
+    plain = match_qualifications(posting, resume)
+    skipped = match_qualifications(posting, resume, review={"skipped": ["python"]})
+    row = skipped["required"][0]
+    python = next(item for item in row["keywords"] if item["keyword"].lower() == "python")
+    sql = next(item for item in row["keywords"] if item["keyword"].lower() == "sql")
+    assert python["found"] is False and python["skipped"] is True
+    assert "skipped" not in sql
+    assert row["matched"] is False
+    assert all(item["keyword"].lower() != "python" for item in row["suggestions"])
+    assert skipped["scores"] == plain["scores"]
+    assert skipped["required_matched"] == plain["required_matched"]

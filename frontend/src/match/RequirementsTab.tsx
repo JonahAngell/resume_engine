@@ -21,8 +21,9 @@ export function rowIds(row: RequirementRow) {
   return activeIdsForTerms(row.keywords.map((item) => item.keyword));
 }
 
-function chipClass(item: Pick<RequirementKeyword, "found" | "relation">) {
+function chipClass(item: Pick<RequirementKeyword, "found" | "relation" | "skipped">) {
   if (item.found) return "keyword-chip";
+  if (item.skipped) return "keyword-chip skipped";
   if (item.relation === "cluster" || item.relation === "combination") return "keyword-chip related";
   return "keyword-chip missing";
 }
@@ -124,7 +125,11 @@ function RequirementItem({
             {row.match_mode === "any" && row.keywords.length > 1 && <span className="qual-any">Any of</span>}
             {row.keywords.length > 0 ? (
               row.keywords.map((item) => (
-                <span className={chipClass(item)} key={item.keyword} title={item.evidence?.explanation || ""}>
+                <span
+                  className={chipClass(item)}
+                  key={item.keyword}
+                  title={item.skipped ? "Not my experience. Still counts as missing." : item.evidence?.explanation || ""}
+                >
                   {item.keyword}
                 </span>
               ))
@@ -146,6 +151,17 @@ function RequirementItem({
                 <strong>{item.keyword}:</strong> {item.evidence?.explanation}
               </p>
             ))}
+          {!row.matched &&
+            row.keywords
+              .filter((item) => item.skipped)
+              .map((item) => (
+                <p key={`skip-${item.keyword}`} className="req-hint">
+                  <strong>{item.keyword}:</strong> marked as not your experience. It still counts as missing in your scores.{" "}
+                  <button type="button" className="link-button" disabled={state.busy} onClick={() => state.skipKeyword(item.keyword, false)}>
+                    Undo
+                  </button>
+                </p>
+              ))}
           {!row.matched &&
             row.suggestions.map((item, index) => (
               <p key={`${item.keyword}-${item.line_id || index}`} className="req-hint">

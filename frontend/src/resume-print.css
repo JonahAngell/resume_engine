@@ -4143,6 +4143,12 @@ button[aria-disabled="true"] {
   background: #fff4e8;
   color: #8a4b12;
 }
+.keyword-chip.skipped {
+  color: #7a8599;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px #c9d1de;
+  text-decoration: line-through;
+}
 .keyword-chip.related {
   background: #e7eefb;
   color: #285797;
@@ -5240,6 +5246,18 @@ mark.doc-hit:focus-visible {
 }
 .mark-actions button {
   font-size: 13px;
+}
+.mark-definition {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f4f7fb;
+  font-size: 13px;
+  color: #2c3a52;
+}
+.mark-definition .mark-hint {
+  font-size: 12px;
 }
 .mark-action-note {
   display: block;

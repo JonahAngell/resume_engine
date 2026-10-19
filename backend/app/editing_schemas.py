@@ -309,6 +309,12 @@ class KeywordAssistRequest(BaseModel):
     category: AiKeywordCategory = ""
 
 
+class KeywordDefineRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    keyword: str = Field(min_length=1, max_length=200)
+    requirement: str = Field(default="", max_length=2000)
+
+
 class KeywordBulletAccept(BaseModel):
     model_config = ConfigDict(extra="forbid")
     revision: int = Field(ge=1)

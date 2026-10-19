@@ -30,6 +30,7 @@ def _normalize(row):
         "dismissed": list(review.get("dismissed") or []),
         "added": list(review.get("added") or []),
         "matched": list(review.get("matched") or []),
+        "skipped": list(review.get("skipped") or []),
     }
     facts = extract_facts(row.get("body") or "")
     row["salary"] = facts["salary"]
