@@ -12,6 +12,7 @@ type ChatTurn = {
   revision: number;
   reply: string;
   proposals: ChatProposal[];
+  held: ChatProposal[];
   dropped: number;
 };
 
@@ -20,6 +21,7 @@ type ChatEntry = {
   role: "user" | "assistant";
   content: string;
   proposals?: ChatProposal[];
+  held?: ChatProposal[];
   outcomes?: Record<string, ProposalOutcome>;
   model?: string;
   dropped?: number;
@@ -149,6 +151,7 @@ export default function ChatPanel({
               role: "assistant",
               content: turn.reply || "Here are some changes you can review.",
               proposals: turn.proposals,
+              held: turn.held || [],
               outcomes: {},
               model: turn.model,
               dropped: turn.dropped,
@@ -170,7 +173,7 @@ export default function ChatPanel({
       ),
     );
 
-  const accept = async (entry: ChatEntry, card: ChatProposal, text: string) => {
+  const accept = async (entry: ChatEntry, card: ChatProposal, text: string, held = false) => {
     if (card.kind === "add_skill") {
       setSkill({ keyword: card.keyword, entryId: entry.id, proposalId: card.id });
       return;
@@ -178,7 +181,12 @@ export default function ChatPanel({
     const base = `/api/compositions/${comp.id}`;
     const revision = comp.revision;
     const body = text.trim();
-    const source = body === card.proposed.trim() ? "draft" : "edited";
+    // Held-back wording only saves after the user rewrites it, so it is their own, never AI-written.
+    const source = held ? "own" : body === card.proposed.trim() ? "draft" : "edited";
+    if (PLACEHOLDER.test(body)) {
+      setError("Replace the [placeholders] with your own details first.");
+      return;
+    }
     const name = `Chat edit (${job?.company || job?.role || "resume"})`.slice(0, 120);
     const post = (url: string, payload: object, method = "POST") =>
       api(url, { method, body: JSON.stringify({ revision, ...payload }) });
@@ -202,7 +210,6 @@ export default function ChatPanel({
           body,
         });
       } else if (card.kind === "new_bullet") {
-        if (PLACEHOLDER.test(body)) throw new Error("Replace the [placeholders] with your own details first.");
         next = await post(`${base}/ai-keyword-assist/accept-new`, {
           parent_id: card.parent_id,
           body,
@@ -349,17 +356,21 @@ export default function ChatPanel({
             {entries.map((entry) => (
               <div key={entry.id} className={`chat-message from-${entry.role}${entry.failed ? " failed" : ""}`}>
                 <p className="chat-bubble">{entry.content}</p>
-                {(entry.proposals || []).length > 0 && (
+                {(entry.proposals || []).length + (entry.held || []).length > 0 && (
                   <ul className="chat-proposals" aria-label="Suggested changes">
-                    {(entry.proposals || []).map((card) => (
+                    {[
+                      ...(entry.proposals || []).map((card) => [card, false] as const),
+                      ...(entry.held || []).map((card) => [card, true] as const),
+                    ].map(([card, held]) => (
                       <ProposalCard
                         key={card.id}
                         card={card}
+                        held={held}
                         outcome={entry.outcomes?.[card.id]}
                         saving={saving === card.id}
                         disabled={!!saving}
                         summaryReady={!!comp.summary_variant_id}
-                        onAccept={(text) => accept(entry, card, text)}
+                        onAccept={(text) => accept(entry, card, text, held)}
                         onDismiss={() => mark(entry.id, card.id, "dismissed")}
                       />
                     ))}
@@ -367,7 +378,8 @@ export default function ChatPanel({
                 )}
                 {!!entry.dropped && (
                   <p className="chat-note">
-                    {entry.dropped} unsafe or invalid suggestion{entry.dropped === 1 ? " was" : "s were"} filtered out.
+                    {entry.dropped} suggestion{entry.dropped === 1 ? " pointed" : "s pointed"} at something that isn't on this
+                    resume and {entry.dropped === 1 ? "was" : "were"} skipped.
                   </p>
                 )}
               </div>

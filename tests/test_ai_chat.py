@@ -126,7 +126,11 @@ def test_unsafe_proposals_are_dropped():
     result = run(complete)
     assert result["status"] == "ok"
     assert result["proposals"] == []
-    assert result["dropped"] == 11
+    # Wording that claims something new is held back for the user; the rest is structurally invalid.
+    assert [(item["kind"], item["term"]) for item in result["held"]] == [("rewrite", "12"), ("rewrite", "Kubernetes")]
+    assert all(item["reason"].endswith("Edit it before saving.") for item in result["held"])
+    assert result["dropped"] == 9
+    assert issued_draft("p1", "Owned budgeting reviews for 12 regional teams", "j1") is None
 
 
 def test_library_swap_and_insert():
@@ -191,3 +195,73 @@ def test_unavailable_without_a_provider(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     result = asyncio.run(chat_turn(ASK, DESCRIPTION, RESUME, PLACED, {}, LIBRARY, 7))
     assert result["status"] == "unavailable" and result["proposals"] == []
+
+
+def test_chat_guard_allows_plain_skill_phrases_but_holds_tools_and_names():
+    complete = model(
+        {
+            "reply": "Here are bullets for the requirements work.",
+            "proposals": [
+                {"kind": "new_bullet", "entry": 1, "proposed": "Gathered business requirements from regional teams for budgeting reviews"},
+                {"kind": "new_bullet", "entry": 1, "proposed": "Documented requirements for one budgeting review"},
+                {"kind": "new_bullet", "entry": 1, "proposed": "Partnered with Firmware teams on budgeting reviews"},
+                {"kind": "new_bullet", "entry": 1, "proposed": "Built Tableau reports for budgeting reviews"},
+                {"kind": "rewrite", "bullet": 1, "proposed": "Led budgeting reviews for [N] regional teams"},
+            ],
+        }
+    )
+    result = run(complete)
+    kept = result["proposals"]
+    assert [card["kind"] for card in kept] == ["new_bullet", "new_bullet", "rewrite"]
+    assert kept[2]["placeholders"] is True
+    assert [item["term"] for item in result["held"]] == ["Firmware", "Tableau"]
+    assert "Tableau" in result["held"][1]["reason"]
+
+
+def test_held_proposals_get_one_retry_with_the_reasons():
+    first = {"reply": "Try these.", "proposals": [{"kind": "rewrite", "bullet": 1, "proposed": "Owned budgeting reviews for 12 regional teams"}]}
+    fixed = {"reply": "Fixed.", "proposals": [{"kind": "rewrite", "bullet": 1, "proposed": "Led budgeting reviews for [N] regional teams"}]}
+    answers = [first, fixed]
+
+    async def complete(messages, schema, name):
+        complete.calls.append(messages)
+        return AiCompletion(answers.pop(0), "m:free")
+
+    complete.calls = []
+    result = run(complete)
+    assert len(complete.calls) == 2
+    feedback = complete.calls[1][-1]["content"]
+    assert "proposal 1 adds the number 12" in feedback and "[X%]" in feedback
+    assert json.loads(complete.calls[1][-2]["content"])["reply"] == "Try these."
+    assert result["reply"] == "Fixed." and result["held"] == []
+    assert result["proposals"][0]["proposed"] == "Led budgeting reviews for [N] regional teams"
+
+
+def test_no_retry_when_nothing_is_held():
+    complete = model({"reply": "Looks good.", "proposals": []})
+    run(complete)
+    assert len(complete.calls) == 1
+
+
+def test_earlier_answers_are_sent_back_as_json():
+    complete = model({"reply": "ok", "proposals": []})
+    history = [
+        {"role": "user", "content": "Hi"},
+        {"role": "assistant", "content": "Hello, how can I help?"},
+        {"role": "user", "content": "Tighten my summary."},
+    ]
+    run(complete, messages=history)
+    sent = complete.calls[0]
+    assert json.loads(sent[2]["content"]) == {"reply": "Hello, how can I help?", "proposals": []}
+    assert sent[3] == {"role": "user", "content": "Tighten my summary."}
+
+
+def test_prose_fallback_becomes_the_reply():
+    result = run(model({"_text": "Your summary is strong; lead with analytics."}))
+    assert result["status"] == "ok"
+    assert result["reply"] == "Your summary is strong; lead with analytics." and result["proposals"] == []
+
+
+def test_a_rewrite_that_only_adds_a_placeholder_is_kept():
+    result = run(model({"reply": "Add the team count.", "proposals": [{"kind": "rewrite", "bullet": 1, "proposed": "Owned budgeting reviews for [N] regional teams"}]}))
+    assert result["proposals"][0]["placeholders"] is True

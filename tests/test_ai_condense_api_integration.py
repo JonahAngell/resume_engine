@@ -73,7 +73,9 @@ def test_condense_suggests_and_apply_saves_in_one_revision(client, monkeypatch):
         request = json.loads(messages[1]["content"])
         sent.update(request)
         ids = {row["text"]: row["id"] for row in request["bullets"]}
-        entries = {row["entry"]: row["id"] for row in request["entries"]}
+        # Remove a different role than the one being condensed; parent order follows random ids.
+        own = next(row["entry"] for row in request["bullets"] if row["text"] == original)
+        entries = {row["entry"]: row["id"] for row in request["entries"] if row["entry"] != own}
         return AiCompletion(
             {
                 "condense": [{"id": ids[original], "body": shorter, "reason": "Tighter."}],

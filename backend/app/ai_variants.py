@@ -147,47 +147,82 @@ def drop_reason(
     *,
     require_keyword: bool = False,
     fresh: bool = False,
+    open_terms: bool = False,
 ) -> str:
     """Return why a draft is unsafe, or "" when it may be shown.
 
     `fresh` is for a new bullet: `original` is then the entry's text, the only fact source, so
-    the length ratio and unchanged checks do not apply.
+    the length ratio and unchanged checks do not apply. See `unsafe_detail` for `open_terms`.
+    """
+    return unsafe_detail(
+        body, original, keyword, category, job_terms, require_keyword=require_keyword, fresh=fresh, open_terms=open_terms
+    )[0]
+
+
+def _as_written(text: str, folded: str) -> str:
+    match = re.search(r"(?<!\w)" + re.escape(folded) + r"(?!\w)", text, re.IGNORECASE)
+    return match.group(0) if match else folded
+
+
+def unsafe_detail(
+    body: str,
+    original: str,
+    keyword: str,
+    category: str,
+    job_terms: list[str],
+    *,
+    require_keyword: bool = False,
+    fresh: bool = False,
+    open_terms: bool = False,
+) -> tuple[str, str]:
+    """`drop_reason` plus the offending term ("Tableau", "15"), or ("", "") when safe.
+
+    `open_terms` (the chat) lets any non-tool dictionary term shape wording ("business
+    requirements", "stakeholder management") and ignores the word "one". Tools, credentials,
+    degrees, durations, job tool terms, added numbers and new proper nouns stay blocked.
     """
     text = " ".join((body or "").split())
     if not text:
-        return "empty"
+        return "empty", ""
     if len(text) > MAX_BODY:
-        return "length"
+        return "length", ""
     if not fresh and len(text) > max(len(original) * LENGTH_RATIO, len(original) + LENGTH_SLACK):
-        return "length"
+        return "length", ""
     if not fresh and _fold(text) == _fold(original):
-        return "unchanged"
+        return "unchanged", ""
     if require_keyword and _keyword_allowed(keyword, category) and not has_keyword(text, keyword):
-        return "missing_keyword"
-    if _numbers(text) - _numbers(original):
-        return "number"
+        return "missing_keyword", keyword
+    added = _numbers(text) - _numbers(original)
+    if open_terms:
+        added -= {"one"}
+    if added:
+        return "number", sorted(added)[0]
     allowed = _keyword_allowed(keyword, category)
     if keyword and not allowed and _contains(text, keyword) and not _contains(original, keyword):
-        return "guarded_keyword"
+        return "guarded_keyword", keyword
     for term in DICTIONARY.match_terms(text):
         if DICTIONARY.mentions(term, original) or _contains(original, term):
             continue
+        known = category_for_term(term)
+        if open_terms and known and known not in GUARDED_CATEGORIES:
+            continue
         # The allowed keyword, or a word of it ("forecasting" in "Financial Forecasting"), may shape wording.
         part_of_keyword = _contains(keyword, term) or DICTIONARY.canonical(term) == DICTIONARY.canonical(keyword)
-        if allowed and part_of_keyword and category_for_term(term) != "tool":
+        if allowed and part_of_keyword and known != "tool":
             continue
-        return "tool"
+        return "tool", _as_written(text, term)
     for term in job_terms:
         if not _contains(text, term) or _contains(original, term):
             continue
         if allowed and _fold(term) == _fold(keyword) and category_for_term(term) != "tool":
             continue
-        return "tool"
+        return "tool", _as_written(text, term)
     original_words = {word.casefold().rstrip(".,;:") for word in _WORD.findall(original or "")}
     keyword_words = {word.casefold() for word in _WORD.findall(keyword or "")} if allowed else set()
-    if _proper_nouns(text) - original_words - keyword_words:
-        return "proper_noun"
-    return ""
+    extra = _proper_nouns(text) - original_words - keyword_words
+    if extra:
+        return "proper_noun", _as_written(text, sorted(extra)[0])
+    return "", ""
 
 
 def filter_drafts(

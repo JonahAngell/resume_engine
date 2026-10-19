@@ -177,3 +177,36 @@ def test_nothing_configured_is_unavailable_without_a_call(monkeypatch):
         assert exc.status == "unavailable"
     else:
         raise AssertionError("expected unavailable")
+
+
+def test_prose_from_the_gateway_then_openrouter_401_reports_invalid(monkeypatch):
+    """The Studioshare log case: Sonnet answers in prose, a stale OpenRouter key answers 401."""
+    _gateway(monkeypatch)
+    _openrouter(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "gateway.test":
+            return _ok("anthropic/claude-sonnet-4-6", "Here are a few ideas for your resume.")
+        return httpx.Response(401, json={"error": "bad key"})
+
+    try:
+        _call(handler)
+    except AiCallError as exc:
+        assert exc.status == "invalid"
+    else:
+        raise AssertionError("expected AiCallError")
+
+
+def test_text_fallback_returns_prose_instead_of_failing(monkeypatch):
+    _gateway(monkeypatch)
+    transport = httpx.MockTransport(lambda request: _ok("anthropic/claude-sonnet-4-6", "Plain answer, no JSON."))
+
+    async def run():
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await complete_json(
+                [{"role": "user", "content": "Hi"}], {"type": "object"}, "resume_chat", client=client, text_fallback=True
+            )
+
+    result = run_async(run())
+    assert result.data == {"_text": "Plain answer, no JSON."}
+    assert result.model == "anthropic/claude-sonnet-4-6"
