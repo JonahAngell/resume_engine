@@ -82,22 +82,24 @@ from .editing_schemas import (
     EntrySaveChoice,
     SummarySaveChoice,
     ProfileSaveChoice,
-    ResumeVariantWrite,
+    DefaultSetArchive,
+    DefaultSetBulk,
+    DefaultSetFromComposition,
+    DefaultSetMembershipsWrite,
+    DefaultSetWrite,
     AttachBulletWrite,
 )
 from .resume_variants import (
     attach_bullet,
-    apply_library_defaults,
-    copy_resume_variant,
-    default_starter,
+    apply_library_selection,
     detach_variant,
-    save_as_resume_variant,
     save_bullet_edit,
     save_entry_edit,
     save_profile_edit,
     save_summary_edit,
-    set_default_resume_variant,
 )
+from . import default_sets
+from .ai_recommend import recommend_resume
 from .ai_client import providers as ai_providers
 from .identity import CurrentUser, resolve_current_user
 from .library_repository import (
@@ -174,7 +176,7 @@ from .library_service import import_seed
 from .resume_import import ImportDraft, parse_upload
 from .resume_import_commit import commit_import
 from .ai_review import review_resume
-from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, KeywordDefinition, VariantPick, VariantSuggestions
+from .ai_schemas import AiReview, AtsScore, CoachResult, KeywordAssist, KeywordDefinition, ResumeRecommendRequest, ResumeRecommendResult, VariantPick, VariantSuggestions
 from .ai_define import define_keyword
 from .ai_variant_pick import pick_variants
 from .ai_condense import condense_resume
@@ -1078,66 +1080,199 @@ async def edit_item(
         )
 
 
+async def build_resume(
+    c,
+    u,
+    *,
+    selection=None,
+    source="library-defaults",
+    job_description_id=None,
+    name=None,
+    description="",
+    display_title="",
+    target_company="",
+    target_role="",
+):
+    """Create a resume, fill it from the library, and optionally link a job."""
+    if job_description_id and not await get_job_description(c, u["id"], job_description_id):
+        raise HTTPException(404, "Job description not found")
+    resume = Resume(header={"name": u["display_name"]})
+    row = await create_composition(
+        c,
+        u["id"],
+        name,
+        description,
+        resume,
+        display_name=u["display_name"],
+        display_title=display_title,
+        target_company=target_company,
+        target_role=target_role,
+    )
+    row = await apply_library_selection(c, u["id"], row["id"], selection, source)
+    if job_description_id:
+        row, error = await update_composition_metadata(
+            c,
+            u["id"],
+            row["id"],
+            row["revision"],
+            row["name"],
+            row.get("description") or "",
+            row.get("display_title") or "",
+            job_description_id=job_description_id,
+            link_job=True,
+        )
+        if error:
+            raise HTTPException(404, "Job description not found")
+    return row
+
+
 @app.post("/api/compositions", response_model=CompositionState, status_code=201)
 async def new_comp(
     req: CompositionCreate, identity: CurrentUser = Depends(resolve_current_user)
 ):
     async with connection() as c:
         u = await owner(identity, c)
-        starter_id = req.resume_variant_id
-        if starter_id is None:
-            starter = await default_starter(c, u["id"])
-            starter_id = starter["id"] if starter else None
-        if starter_id:
-            row = await copy_resume_variant(
-                c,
-                u["id"],
-                starter_id,
-                req.name,
-                req.description,
-                req.display_title,
-                req.target_company,
-                req.target_role,
-            )
-            if not row:
-                raise HTTPException(404, "Resume variant not found")
-            return state(row)
-        resume = Resume(header={"name": u["display_name"]})
-        row = await create_composition(
+        set_id = req.default_set_id
+        if set_id is None and not req.entire_library:
+            found = await default_sets.default_set(c, u["id"])
+            set_id = found["id"] if found else None
+        selection = None
+        if set_id:
+            selection = await default_sets.load_selection(c, u["id"], set_id)
+            if selection is None:
+                raise HTTPException(404, "Defaults set not found")
+        row = await build_resume(
             c,
-            u["id"],
-            req.name,
-            req.description,
-            resume,
-            display_name=u["display_name"],
+            u,
+            selection=selection,
+            source="default-set" if selection else "library-defaults",
+            job_description_id=req.job_description_id,
+            name=req.name,
+            description=req.description,
             display_title=req.display_title,
             target_company=req.target_company,
             target_role=req.target_role,
         )
-        row = await apply_library_defaults(c, u["id"], row["id"])
         return state(row)
 
 
-@app.post("/api/compositions/{cid}/resume-variant", response_model=CompositionState, status_code=201)
-async def save_resume_variant(cid: UUID, req: ResumeVariantWrite, identity: CurrentUser = Depends(resolve_current_user)):
+@app.post("/api/compositions/ai-recommend", response_model=ResumeRecommendResult, status_code=201)
+async def ai_recommend_resume(
+    req: ResumeRecommendRequest, identity: CurrentUser = Depends(resolve_current_user)
+):
+    """Build a new resume from the library records most relevant to one saved job."""
     async with connection() as c:
         u = await owner(identity, c)
-        row, error = await save_as_resume_variant(c, u["id"], cid, req.name, req.replace_id)
+        job = await get_job_description(c, u["id"], req.job_description_id)
+        if not job:
+            raise HTTPException(404, "Job description not found")
+        library = await fetch_library(c, u["id"])
+    # The model call can take a while; do not hold a pooled connection during it.
+    result = await recommend_resume(job.get("body") or "", library)
+    label = " – ".join(part for part in (job.get("role"), job.get("company")) if part)
+    async with connection() as c:
+        u = await owner(identity, c)
+        row = await build_resume(
+            c,
+            u,
+            selection=result.pop("selection"),
+            source="ai-recommendation",
+            job_description_id=req.job_description_id,
+            name=req.name,
+            display_title=job.get("role") or "",
+        )
+    return {**result, "composition": state(row)}
+
+
+@app.get("/api/default-sets")
+async def list_default_sets(identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        return {
+            "sets": await default_sets.list_sets(c, u["id"], include_archived=True),
+            "members": await default_sets.list_members(c, u["id"]),
+        }
+
+
+@app.post("/api/default-sets", status_code=201)
+async def create_default_set(req: DefaultSetWrite, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await default_sets.create_set(c, u["id"], req.name, req.description)
         if error == "name":
-            raise HTTPException(409, "A resume with that name already exists")
-        if not row:
-            raise HTTPException(404, "Resume not found")
-        return state(row)
+            raise HTTPException(409, "A defaults set with that name already exists")
+        return row
 
 
-@app.post("/api/resume-variants/{cid}/default", response_model=CompositionState)
-async def default_resume_variant(cid: UUID, identity: CurrentUser = Depends(resolve_current_user)):
+@app.put("/api/default-sets/memberships")
+async def save_default_set_memberships(
+    req: DefaultSetMembershipsWrite, identity: CurrentUser = Depends(resolve_current_user)
+):
     async with connection() as c:
         u = await owner(identity, c)
-        row = await set_default_resume_variant(c, u["id"], cid)
+        try:
+            rows = await default_sets.set_memberships(
+                c,
+                u["id"],
+                req.item_type,
+                req.item_id,
+                [(m.set_id, m.variant_id) for m in req.memberships],
+            )
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+        if rows is None:
+            raise HTTPException(404, "Defaults set not found")
+        return rows
+
+
+@app.put("/api/default-sets/{set_id}")
+async def update_default_set(set_id: UUID, req: DefaultSetWrite, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await default_sets.update_set(c, u["id"], set_id, req.name, req.description)
+        if error == "name":
+            raise HTTPException(409, "A defaults set with that name already exists")
+        return row or (_ for _ in ()).throw(HTTPException(404, "Defaults set not found"))
+
+
+@app.post("/api/default-sets/{set_id}/archive")
+async def archive_default_set(set_id: UUID, req: DefaultSetArchive, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await default_sets.archive_set(c, u["id"], set_id, req.archived)
+        if error == "name":
+            raise HTTPException(409, "An active defaults set already uses that name")
+        return row or (_ for _ in ()).throw(HTTPException(404, "Defaults set not found"))
+
+
+@app.post("/api/default-sets/{set_id}/default")
+async def make_default_set(set_id: UUID, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row = await default_sets.set_default(c, u["id"], set_id)
+        return row or (_ for _ in ()).throw(HTTPException(404, "Defaults set not found"))
+
+
+@app.post("/api/default-sets/{set_id}/bulk")
+async def bulk_default_set(set_id: UUID, req: DefaultSetBulk, identity: CurrentUser = Depends(resolve_current_user)):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row = await default_sets.bulk_bullets(c, u["id"], set_id, req.action, req.bullet_ids)
+        return row or (_ for _ in ()).throw(HTTPException(404, "Defaults set not found"))
+
+
+@app.post("/api/compositions/{cid}/default-set", status_code=201)
+async def save_default_set_from_resume(
+    cid: UUID, req: DefaultSetFromComposition, identity: CurrentUser = Depends(resolve_current_user)
+):
+    async with connection() as c:
+        u = await owner(identity, c)
+        row, error = await default_sets.save_from_composition(c, u["id"], cid, req.name, req.replace_id)
+        if error == "name":
+            raise HTTPException(409, "A defaults set with that name already exists")
         if not row:
-            raise HTTPException(404, "Resume variant not found")
-        return state(row)
+            raise HTTPException(404, "Resume or defaults set not found")
+        return row
 
 
 @app.post("/api/compositions/{cid}/bullet-placements/{placement_id}/save", response_model=CompositionState)

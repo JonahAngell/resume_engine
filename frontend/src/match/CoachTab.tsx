@@ -50,6 +50,8 @@ export default function CoachTab({
   onApplied,
   onAssist,
   onActive,
+  autoRun = false,
+  onAutoRunDone,
 }: {
   state: JobMatchState;
   compositionId: string;
@@ -58,6 +60,9 @@ export default function CoachTab({
   onApplied: (composition: any) => void;
   onAssist: (request: AssistRequest) => void;
   onActive: (ids: string[]) => void;
+  /** Start a review on arrival, as after New from AI Recommendation. */
+  autoRun?: boolean;
+  onAutoRunDone?: () => void;
 }) {
   const job = state.compareJob;
   const storageKey = `resume-engine-coach-dismissed:${compositionId}:${job?.id || ""}`;
@@ -95,6 +100,14 @@ export default function CoachTab({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!autoRun || !job || loading || result) return;
+    onAutoRunDone?.();
+    review();
+    // review reads the current job; it only needs to start once per request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRun, job?.id]);
 
   const dismiss = (id: string) => {
     const next = [...new Set([...dismissed, id])];

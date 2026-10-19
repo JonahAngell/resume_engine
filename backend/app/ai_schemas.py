@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .editing_schemas import CompositionState
 from .job_schemas import JobMatch
 
 Category = Literal[
@@ -274,3 +275,29 @@ class KeywordDefinition(BaseModel):
     definition: str = ""
     in_this_job: str = ""
     model: str = ""
+
+
+class ResumeRecommendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_description_id: UUID
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+
+
+class ResumeRecommendEntry(BaseModel):
+    section: str
+    label: str
+    bullets: int = 0
+    reason: str = ""
+
+
+class ResumeRecommendResult(BaseModel):
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    model: str = ""
+    method: Literal["ai", "keywords"] = "keywords"
+    dropped: int = 0
+    keywords: list[str] = []
+    entries: list[ResumeRecommendEntry] = []
+    entry_count: int = 0
+    bullet_count: int = 0
+    composition: CompositionState
