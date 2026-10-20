@@ -10,3 +10,5 @@ test-results/
 .env.*
 !.env.example
 *.zip
+frontend/dist/
+docs/archive/
