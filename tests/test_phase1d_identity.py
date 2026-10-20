@@ -144,3 +144,26 @@ def test_local_identity_refused_for_remote_database(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db:5432/app")
     check_local_auth_safety()
     assert run(resolve_current_user(request(), None)).external_id == "local-user"
+
+
+def test_identity_is_cached_per_token(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "studioshare")
+    monkeypatch.setenv("STUDIOSHARE_API_URL", "https://api.example")
+    calls = []
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers):
+            calls.append(headers["Authorization"])
+            return httpx.Response(200, json={"id": "7", "username": "a"})
+
+    with patch("app.identity.httpx.AsyncClient", return_value=Client()):
+        run(resolve_current_user(request("one"), None))
+        run(resolve_current_user(request("one"), None))
+        run(resolve_current_user(request("two"), None))
+    assert calls == ["Bearer one", "Bearer two"]

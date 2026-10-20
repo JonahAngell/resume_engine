@@ -97,7 +97,8 @@ def test_composition_job_link_migration_is_additive():
     assert "link_job" in repository
     assert "WHERE job_description_id=%s AND user_id=%s" in jobs
     compare = jobs.split("async def compare_job_description", 1)[1].split("async def ", 1)[0]
-    assert "SET composition_id=%s" in compare
+    assert "link_job_composition(conn, user_id, job_id, composition_id)" in compare
+    assert "SET composition_id=%s WHERE id=%s AND user_id=%s" in jobs
     assert "resume_compositions" not in compare
 
 

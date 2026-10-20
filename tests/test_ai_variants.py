@@ -208,3 +208,15 @@ def test_other_goals_ignore_max_chars():
     complete = reply("Led budgeting reviews for regional teams")
     asyncio.run(suggest_variants(ORIGINAL, JOB, "req", "kw", goal="concise", max_chars=30, complete=complete))
     assert "max_chars" not in json.loads(complete.calls[0][1]["content"])
+
+
+def test_issued_draft_expires(monkeypatch):
+    from app import ai_variants
+
+    clear_cache()
+    clock = [1000.0]
+    monkeypatch.setattr(ai_variants.time, "monotonic", lambda: clock[0])
+    ai_variants.remember_issued("p9", [{"body": "Ran weekly reviews"}], "m:free", "j1")
+    assert issued_draft("p9", "Ran weekly reviews", "j1") == "m:free"
+    clock[0] += ai_variants._ISSUED_TTL + 1
+    assert issued_draft("p9", "Ran weekly reviews", "j1") is None
