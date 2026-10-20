@@ -1,13 +1,14 @@
 services:
   app:
     build: .
-    ports: ["8080:8080"]
+    # Loopback only: APP_ENV=local turns authentication off.
+    ports: ["127.0.0.1:8080:8080"]
     environment:
       APP_ENV: local
       DATABASE_URL: postgresql://resume_engine:resume_engine@db:5432/resume_engine
       GOTENBERG_URL: http://gotenberg:3000
       # Values below are read from the .env file next to this compose file.
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/free}
       # Studioshare AI Gateway, tried before OpenRouter. `launch env pull` writes
       # the URL and a 12-hour OIDC token into .env; leave them empty to skip.

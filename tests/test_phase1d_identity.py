@@ -129,3 +129,18 @@ def test_invalid_me_payload_fails_closed(monkeypatch):
         with pytest.raises(HTTPException) as caught:
             run(resolve_current_user(request("token"), None))
     assert caught.value.status_code == 502
+
+
+def test_local_identity_refused_for_remote_database(monkeypatch):
+    from app.identity import check_local_auth_safety
+
+    monkeypatch.setenv("APP_ENV", "local")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@prod-db.example.com:5432/app")
+    with pytest.raises(HTTPException) as caught:
+        run(resolve_current_user(request(), None))
+    assert caught.value.status_code == 503
+    with pytest.raises(RuntimeError):
+        check_local_auth_safety()
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db:5432/app")
+    check_local_auth_safety()
+    assert run(resolve_current_user(request(), None)).external_id == "local-user"
