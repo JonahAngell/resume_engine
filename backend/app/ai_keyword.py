@@ -15,6 +15,7 @@ from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job, scrub
 from .ai_variants import _fold, _keyword_allowed, drop_reason, job_tool_terms, remember_issued
 from .job_match import _placement_options
+from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
@@ -31,8 +32,7 @@ DETAILS = {
     "rate_limited": "The free model is rate limited. Your resume is unchanged.",
     "invalid": "The model response could not be validated. Your resume is unchanged.",
 }
-_CACHE: dict[str, dict] = {}
-_CACHE_MAX = 16
+_CACHE = BoundedCache(16)
 
 KEYWORD_SYSTEM = """You help a job seeker work one keyword from a job posting into their resume.
 Return one JSON object with keys revisions, new_bullets, and no_fit_reason.
@@ -304,9 +304,7 @@ async def assist_keyword(
         part["dropped"],
     )
     payload = _result("ok", revision, keyword, category, entries, served, part)
-    _CACHE[key] = payload
-    while len(_CACHE) > _CACHE_MAX:
-        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE.set(key, payload)
     _remember(payload, job_id)
     return json.loads(json.dumps(payload))
 

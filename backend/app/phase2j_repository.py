@@ -44,7 +44,7 @@ async def apply_placements(conn,user_id,cid,resume):
     grouped={}
     for rel in rels: grouped.setdefault((rel["destination_section"],str(rel["destination_parent_id"])),[]).append(rel)
     for section,pid in included:
-        key=section; rows=grouped.get((section,pid),[]); bodies=[x["wording_snapshot"] for x in rows]
+        rows=grouped.get((section,pid),[]); bodies=[x["wording_snapshot"] for x in rows]
         if section in {"projects","work_experience","leadership","education","tool_groups"}:
             for entry in resume.get(section,[]):
                 if str(entry.get("id"))==pid: entry["bullets"]=bodies

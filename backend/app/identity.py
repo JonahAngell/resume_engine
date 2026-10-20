@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import Header, HTTPException, Request, status
 
+from .database import configured_database_url
+
 
 @dataclass(frozen=True)
 class CurrentUser:
@@ -26,10 +28,7 @@ def local_auth_enabled() -> bool:
 
 
 def _database_host() -> str:
-    value = (
-        os.getenv("STUDIOSHARE_DB_URL", "").strip()
-        or os.getenv("DATABASE_URL", "").strip()
-    )
+    value = configured_database_url()
     return (urlparse(value).hostname or "").lower() if value else ""
 
 

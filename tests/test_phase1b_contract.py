@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.identity import resolve_current_user
+from api_source import api_source
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,7 +110,7 @@ def _render_measure_values(source: str) -> set[bool]:
 
 
 def test_render_contract_remains_canonical():
-    source = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    source = api_source()
 
     measure_values = _render_measure_values(source)
 

@@ -3,7 +3,6 @@
 
 
 import json
-from uuid import UUID
 
 from psycopg.rows import dict_row
 

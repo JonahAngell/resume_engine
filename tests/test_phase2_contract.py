@@ -1,4 +1,5 @@
 from pathlib import Path
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,7 +16,7 @@ def test_phase2_migration_is_additive_and_has_history():
 
 
 def test_phase2_routes_and_security_contracts():
-    s = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    s = api_source()
     assert (
         "/api/library/search" in s
         and "/revisions" in s

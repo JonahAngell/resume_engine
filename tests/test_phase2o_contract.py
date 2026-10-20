@@ -1,5 +1,6 @@
 
 from pathlib import Path
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,7 +33,7 @@ def test_standalone_library_route_and_workspace():
 
 
 def test_library_detail_is_owner_scoped():
-    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    main = api_source()
     repo = (ROOT / "backend/app/phase2k_repository.py").read_text(encoding="utf-8")
     assert (
         "/api/library-management/items/{bullet_id}" in main and "phase2k_detail" in main

@@ -14,6 +14,7 @@ from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job, scrub
 from .ai_variants import has_keyword
 from .job_match import extract_keywords
+from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
@@ -30,8 +31,7 @@ DETAILS = {
     "rate_limited": "The free model is rate limited. Showing a job keyword ranking instead.",
     "invalid": "The model response could not be validated. Showing a job keyword ranking instead.",
 }
-_CACHE: dict[str, dict] = {}
-_CACHE_MAX = 16
+_CACHE = BoundedCache(16)
 
 PICK_SYSTEM = """You choose resume wording for a specific job posting.
 You get slots. Each slot is one bullet position on the resume with a list of candidate wordings from the user's library.
@@ -290,9 +290,7 @@ async def pick_variants(
         dropped,
     )
     payload = _result("ok", "ai", rank(slots, "ai"), served, dropped, revision)
-    _CACHE[key] = payload
-    while len(_CACHE) > _CACHE_MAX:
-        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE.set(key, payload)
     return json.loads(json.dumps(payload))
 
 

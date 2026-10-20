@@ -20,6 +20,7 @@ from .ai_schemas import (
 from .job_match import analyze_requirements, match_qualifications
 from .job_schemas import JobMatch
 from .related_skills import DICTIONARY_PATH
+from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
@@ -47,8 +48,7 @@ MIN_FAMILY_CONFIDENCE = 0.4
 MIN_SEMANTIC_CONFIDENCE = 0.55
 MAX_BULLETS = 40
 MAX_SKILLS = 80
-_CACHE: dict[str, dict] = {}
-_CACHE_MAX = 32
+_CACHE = BoundedCache(32)
 
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
 _URL = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
@@ -591,9 +591,7 @@ def _cache_key(job_text: str, resume: dict, revision: int, review: dict, model: 
 
 
 def _remember(key: str, value: dict) -> None:
-    _CACHE[key] = value
-    while len(_CACHE) > _CACHE_MAX:
-        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE.set(key, value)
 
 
 def _pack(

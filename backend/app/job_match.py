@@ -4,7 +4,16 @@ import re
 from dataclasses import dataclass
 from datetime import date
 
-from .keywords import *
+from .keywords import (
+    ACRONYM_SKIP,
+    BARE_TOOLS,
+    DEGREE_LABELS,
+    GENERIC_LIST,
+    GENERIC_WORDS,
+    LIST_ONLY,
+    STOPWORDS,
+    UMBRELLAS,
+)
 
 from .related_skills import (
     category_for_term,

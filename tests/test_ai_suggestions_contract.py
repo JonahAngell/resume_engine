@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from app.render import render_resume
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 SEED = json.loads((ROOT / "seed/nia-calder-resume.json").read_text(encoding="utf-8"))
@@ -62,7 +63,7 @@ def test_keyword_assist_is_offered_only_for_keywords_outside_skills():
 
 def test_new_bullets_with_placeholders_cannot_be_saved():
     dialog = (ROOT / "frontend/src/KeywordAssistDialog.tsx").read_text(encoding="utf-8")
-    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    main = api_source()
     assert "!placeholder" in dialog
     assert "PLACEHOLDER.search(body)" in main
 
