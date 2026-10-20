@@ -40,7 +40,7 @@ async def exercise():
                 await conn.execute(migration.read_text(encoding="utf-8"))
             user = await ensure_user(conn, CurrentUser("skills", "skills", "Skills", None))
             uid = user["id"]
-            _, cid = await import_seed(conn, uid, ROOT / "seed/jonah-resume.json", "skills")
+            _, cid = await import_seed(conn, uid, ROOT / "seed/nia-calder-resume.json", "skills")
             other, error = await save_as_resume_variant(conn, uid, cid, "Other resume")
             assert error is None
             oid = other["id"]

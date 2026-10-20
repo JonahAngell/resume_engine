@@ -40,7 +40,7 @@ async def exercise():
                 await conn.execute(migration.read_text(encoding="utf-8"))
             user = await ensure_user(conn, CurrentUser("aiv", "aiv", "AI Variants", None))
             uid = user["id"]
-            _, cid = await import_seed(conn, uid, ROOT / "seed/jonah-resume.json", "aiv")
+            _, cid = await import_seed(conn, uid, ROOT / "seed/nia-calder-resume.json", "aiv")
             other, _ = await save_as_resume_variant(conn, uid, cid, "Other resume")
             job, _ = await create_job_description(
                 conn, uid, JobDescriptionWrite(company="Acme", role="Analyst", body="Financial forecasting experience.")

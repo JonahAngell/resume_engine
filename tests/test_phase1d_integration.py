@@ -30,12 +30,12 @@ async def exercise():
             b = await ensure_user(conn, CurrentUser("b", "b", "User B", None))
             assert a["id"] != b["id"]
             imported, cid = await import_seed(
-                conn, a["id"], ROOT / "seed/jonah-resume.json", "same-key"
+                conn, a["id"], ROOT / "seed/nia-calder-resume.json", "same-key"
             )
             assert imported
             assert (await fetch_library(conn, b["id"]))["compositions"] == []
             imported_b, cid_b = await import_seed(
-                conn, b["id"], ROOT / "seed/jonah-resume.json", "same-key"
+                conn, b["id"], ROOT / "seed/nia-calder-resume.json", "same-key"
             )
             assert imported_b and cid_b != cid
             assert await load_composition(conn, b["id"], cid) is None

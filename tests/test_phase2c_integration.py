@@ -38,7 +38,7 @@ async def exercise():
             a = await ensure_user(conn, CurrentUser("2c-a", "a", "A", None))
             b = await ensure_user(conn, CurrentUser("2c-b", "b", "B", None))
             _, cid = await import_seed(
-                conn, a["id"], ROOT / "seed/jonah-resume.json", "2c"
+                conn, a["id"], ROOT / "seed/nia-calder-resume.json", "2c"
             )
             parent = (
                 await (

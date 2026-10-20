@@ -558,26 +558,6 @@ async def save_as_resume_variant(conn, user_id, cid, name, replace_id=None):
         return row, None
 
 
-async def set_default_resume_variant(conn, user_id, cid):
-    async with conn.transaction():
-        row = await one(
-            conn,
-            "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s AND is_starter AND archived_at IS NULL",
-            (cid, user_id),
-        )
-        if not row:
-            return None
-        await conn.execute(
-            "UPDATE resume_compositions SET is_default_starter=false,updated_at=now() WHERE user_id=%s AND is_starter",
-            (user_id,),
-        )
-        return await one(
-            conn,
-            "UPDATE resume_compositions SET is_default_starter=true,updated_at=now() WHERE id=%s RETURNING *",
-            (cid,),
-        )
-
-
 async def rerender(conn, user_id, cid, source):
     row = await one(
         conn,
