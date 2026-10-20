@@ -7,11 +7,16 @@ MIGRATIONS = Path(__file__).resolve().parents[1] / "migrations"
 _pool: AsyncConnectionPool | None = None
 
 
-def database_url() -> str:
-    value = (
+def configured_database_url() -> str:
+    """The database URL from the environment, or "" when none is set."""
+    return (
         os.getenv("STUDIOSHARE_DB_URL", "").strip()
         or os.getenv("DATABASE_URL", "").strip()
     )
+
+
+def database_url() -> str:
+    value = configured_database_url()
 
     if not value:
         raise RuntimeError(

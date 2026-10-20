@@ -14,6 +14,7 @@ from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job, scrub
 from .ai_variants import drop_reason, job_tool_terms, remember_issued
 from .job_match import is_skill_keyword, match_qualifications
+from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
@@ -29,8 +30,7 @@ DETAILS = {
 }
 GROUP_ORDER = {"required": 0, "preferred": 1, "responsibilities": 2}
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
-_CACHE: dict[str, dict] = {}
-_CACHE_MAX = 16
+_CACHE = BoundedCache(16)
 
 COACH_SYSTEM = """You are a resume coach. Compare one resume with one job posting and suggest concrete edits.
 Return one JSON object with keys suggestions and equivalents.
@@ -275,9 +275,7 @@ async def coach_resume(
         part["dropped"],
     )
     payload = _result("ok", revision, served, part)
-    _CACHE[key] = payload
-    while len(_CACHE) > _CACHE_MAX:
-        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE.set(key, payload)
     _remember(payload, job_id)
     return json.loads(json.dumps(payload))
 

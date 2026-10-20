@@ -17,6 +17,7 @@ from .ai_review import redact_job, scrub
 from .ai_variants import drop_reason, job_tool_terms, remember_issued
 from .ai_variant_pick import keyword_hits
 from .job_match import extract_keywords
+from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
@@ -32,8 +33,7 @@ DETAILS = {
     "rate_limited": "The free model is rate limited. Showing bullets that wrap and the least relevant items instead.",
     "invalid": "The model response could not be validated. Showing bullets that wrap and the least relevant items instead.",
 }
-_CACHE: dict[str, dict] = {}
-_CACHE_MAX = 16
+_CACHE = BoundedCache(16)
 
 CONDENSE_SYSTEM = """You help fit a resume onto its target page count.
 You get the resume's bullets (with how many printed lines each takes), its entries (roles and projects), how many lines are over the target (lines_over), and roughly how many characters fit on one line (chars_per_line). A posting may be included.
@@ -340,9 +340,7 @@ async def condense_resume(
         if not isinstance(data, dict):
             return fallback("invalid")
         cached = {"data": data, "model": getattr(completion, "model", "") or model}
-        _CACHE[key] = cached
-        while len(_CACHE) > _CACHE_MAX:
-            _CACHE.pop(next(iter(_CACHE)))
+        _CACHE.set(key, cached)
     served = cached["model"]
     job_terms = job_tool_terms(job_text or "")
     condensed, removed, removed_entries, dropped = validate(cached["data"], rows, items, cpl, job_terms)

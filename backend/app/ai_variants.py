@@ -15,6 +15,7 @@ from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job, scrub
 from .job_match import extract_keywords
 from .related_skills import DICTIONARY, category_for_term
+from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
@@ -42,8 +43,7 @@ DETAILS = {
     "invalid": "The model response could not be validated. The bullet is unchanged.",
 }
 MAX_REASON = 240
-_CACHE: dict[str, dict] = {}
-_CACHE_MAX = 32
+_CACHE = BoundedCache(32)
 # placement id -> {folded body: (model, job id, issued at)} for drafts this process handed out.
 # Process memory only (single worker): a restart forgets provenance, so a draft accepted
 # afterwards is saved as user-written. Placement ids are per-user UUIDs.
@@ -393,9 +393,7 @@ async def suggest_variants(
         dropped,
     )
     payload = _result("ok", served, drafts, dropped, fits, reason)
-    _CACHE[key] = payload
-    while len(_CACHE) > _CACHE_MAX:
-        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE.set(key, payload)
     remember_issued(placement_id, drafts, served, job_id)
     return json.loads(json.dumps(payload))
 

@@ -226,3 +226,15 @@ def test_shared_client_is_reused_within_a_loop_and_replaced_across_loops():
     c, _ = asyncio.run(twice())
     assert c is not a
     asyncio.run(close_shared_client())
+
+
+def test_bounded_cache_drops_the_oldest_entry():
+    from app.cache import BoundedCache
+
+    cache = BoundedCache(2)
+    cache.set("a", 1)
+    cache.set("b", 2)
+    cache.set("c", 3)
+    assert (cache.get("a"), cache.get("b"), cache.get("c"), len(cache)) == (None, 2, 3, 2)
+    cache.clear()
+    assert len(cache) == 0

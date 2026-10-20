@@ -10,6 +10,7 @@ import logging
 
 from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job
+from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
@@ -20,8 +21,7 @@ DETAILS = {
     "rate_limited": "The free model is rate limited. Try again in a minute.",
     "invalid": "The model response could not be validated. Try again.",
 }
-_CACHE: dict[str, dict] = {}
-_CACHE_MAX = 64
+_CACHE = BoundedCache(64)
 
 DEFINE_SYSTEM = """You explain one term from a job posting to a job seeker who may not know it.
 Return one JSON object with keys definition and in_this_job.
@@ -89,9 +89,7 @@ async def define_keyword(description: str, keyword: str, requirement: str, compl
     served = getattr(completion, "model", "") or model
     payload = _result("ok", keyword, definition, _clip(data.get("in_this_job")), served)
     logger.info("keyword_define prompt=%s outcome=ok model=%s", DEFINE_PROMPT_VERSION, served)
-    _CACHE[key] = payload
-    while len(_CACHE) > _CACHE_MAX:
-        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE.set(key, payload)
     return dict(payload)
 
 

@@ -19,14 +19,14 @@ from .related_skills import (
     hints_for_term,
     related_mention,
 )
+from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
 SKILL_PROMPT_VERSION = "1"
 MAX_GROUP_NAME = 60
 MAX_TOOLS_SENT = 10
-_CACHE: dict[str, dict] = {}
-_CACHE_MAX = 64
+_CACHE = BoundedCache(64)
 
 SKILL_SYSTEM = """You file one skill into a resume's Skills section.
 You get the skill and the user's existing skill groups, each with an id, a name, and some tools already in it.
@@ -271,9 +271,7 @@ async def recommend_with_ai(keyword: str, groups: list[dict], tools: list[dict],
             bool(group_id),
             bool(name),
         )
-        _CACHE[key] = cached
-        while len(_CACHE) > _CACHE_MAX:
-            _CACHE.pop(next(iter(_CACHE)))
+        _CACHE.set(key, cached)
     group_id, name = cached["group_id"], cached["new_group_name"]
     if not group_id and not name:
         return {**local, "status": "ok", "model": cached["model"]}

@@ -39,7 +39,7 @@ Date format and section sort (automatic or manual) are applied on that same rend
 
 ## First-run seed
 
-When the signed-in user has no compositions, the app imports [`seed/nia-calder-resume.json`](seed/nia-calder-resume.json) under the seed key `nia-calder-resume-v1`. That file is a fictional sample resume. The same seed key and file contents import once. [`seed/jonah-resume.json`](seed/jonah-resume.json) is also in the repository; the product default is the Nia Calder file.
+When the signed-in user has no compositions, the app imports [`seed/nia-calder-resume.json`](seed/nia-calder-resume.json) under the seed key `nia-calder-resume-v1`. That file is a fictional sample resume. The same seed key and file contents import once.
 
 ## Run locally
 
@@ -53,13 +53,34 @@ Open [http://localhost:8080](http://localhost:8080). On startup the API applies 
 
 When `APP_ENV` is not `local`, the API resolves the user from a StudioShare session. Library and composition queries are scoped to that user on the server.
 
+`APP_ENV=local` turns authentication off, so the API refuses to start in that mode when the database host is not local. Compose publishes the app on `127.0.0.1` only.
+
+The API must run as a single worker (the Dockerfile passes `--workers 1`): the AI rate limits, the identity cache, and the AI caches live in process memory.
+
+## Configuration
+
+Copy [`.env.example`](.env.example) to `.env` for Compose. The API reads:
+
+| Variable | Purpose |
+| --- | --- |
+| `DATABASE_URL` / `STUDIOSHARE_DB_URL` | PostgreSQL connection. `STUDIOSHARE_DB_URL` wins when both are set. |
+| `APP_ENV` | `local` signs every request in as the development user. |
+| `DEV_USER_ID`, `DEV_USERNAME`, `DEV_DISPLAY_NAME`, `DEV_EMAIL` | The development user for `APP_ENV=local`. |
+| `STUDIOSHARE_API_URL` | StudioShare user service, used to resolve the `access_token` cookie. |
+| `ALLOW_BEARER_AUTH` | `true` also accepts `Authorization: Bearer` when there is no cookie. |
+| `GOTENBERG_URL` | PDF renderer. Defaults to `http://gotenberg:3000`. |
+| `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_APP_URL` | Free OpenRouter models for AI features. |
+| `STUDIOSHARE_AI_GATEWAY_URL`, `STUDIOSHARE_OIDC_TOKEN`, `STUDIOSHARE_OIDC_URL`, `STUDIOSHARE_AI_MODELS` | Studioshare AI Gateway, tried before OpenRouter. |
+| `AI_RATE_PER_MINUTE`, `AI_DAILY_LIMIT` | Per-user AI request limits (defaults 20 and 300; `0` disables one). |
+| `PORT` | Listen port in the image. Defaults to `8080`. |
+
 ## Repository layout
 
 | Path | What it is |
 | --- | --- |
 | `frontend/` | React UI. The Docker image builds it, and the API serves `frontend/dist`. |
 | `backend/app/main.py` | FastAPI app. The image runs `uvicorn app.main:app`. |
-| `backend/migrations/` | Ordered SQL migrations, applied at startup. |
+| `backend/migrations/` | Ordered SQL migrations, applied at startup in file-name order. Two files share the `020_` prefix; they were applied under those names, so they keep them. New files take the next unused number. |
 | `backend/app/templates/resume.html` | Preview and PDF template. |
 | `backend/app/related_skills.yaml` | Clusters, aliases, and phrases used by job match. See [`docs/related-skills.md`](docs/related-skills.md). |
 | `seed/` | Resume JSON used by import. |
