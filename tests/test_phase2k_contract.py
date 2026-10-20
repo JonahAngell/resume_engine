@@ -1,4 +1,5 @@
 from pathlib import Path
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,7 +17,7 @@ def test_migration_additive_and_normalized():
 
 
 def test_routes_and_stable_order():
-    m = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    m = api_source()
     x = (ROOT / "backend/app/phase2k_repository.py").read_text(encoding="utf-8")
     for value in [
         "/api/library-management/items",
@@ -38,7 +39,7 @@ def test_tags_not_added_to_render_schema():
     assert "library_tags" not in s and "tags:" not in s
 
 def test_parent_assignment_is_owner_scoped_and_compatible():
-    m = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    m = api_source()
     x = (ROOT / "backend/app/phase2k_repository.py").read_text(encoding="utf-8")
     schema = (ROOT / "backend/app/library_schemas.py").read_text(encoding="utf-8")
     assert "/api/library-management/items/{bullet_id}/parent" in m

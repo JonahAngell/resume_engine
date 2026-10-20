@@ -1,10 +1,11 @@
 from pathlib import Path
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_authoritative_render_and_export_contracts():
-    m = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    m = api_source()
     repo = (ROOT / "backend/app/phase2m_repository.py").read_text(encoding="utf-8")
     t = (ROOT / "backend/app/templates/resume.html").read_text(encoding="utf-8")
     assert (

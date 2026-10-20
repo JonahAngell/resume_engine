@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.phase2l import preprocess_resume
 from app.render import normalize_template_style, render_resume, skill_table
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,7 +100,7 @@ def test_each_style_sets_the_page_class_and_skips_coaching_copy():
 
 
 def test_preferences_and_editor_wire_style_and_coaching():
-    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    main = api_source()
     repo = (ROOT / "backend/app/phase2l_repository.py").read_text(encoding="utf-8")
     app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     coaching = (ROOT / "frontend/src/resumeCoaching.ts").read_text(encoding="utf-8")

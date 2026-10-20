@@ -10,6 +10,7 @@ from app.resume_import import (
     parse_text_resume,
     parse_upload,
 )
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -266,7 +267,7 @@ def test_profile_csv_alone_warns_that_jobs_are_missing():
 def test_import_ui_enables_home_button_and_explains_linkedin_downloads():
     app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     dialog = (ROOT / "frontend/src/ImportResumeDialog.tsx").read_text(encoding="utf-8")
-    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    main = api_source()
     assert "Import Existing Resume" in app
     assert "Import from an existing resume is coming soon." not in app
     assert 'setScreen("import")' in app

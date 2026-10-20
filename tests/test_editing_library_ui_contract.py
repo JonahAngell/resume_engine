@@ -1,4 +1,5 @@
 from pathlib import Path
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,7 +35,7 @@ def test_education_bullets_and_skill_visibility_contract():
     migration = (
         ROOT / "backend/migrations/019_composition_hidden_tools.sql"
     ).read_text(encoding="utf-8")
-    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    main = api_source()
     assert '"id": str(row["id"])' in library
     assert "composition_hidden_tools" in library
     assert "set_tool_visibility" in library
@@ -48,7 +49,7 @@ def test_education_bullets_and_skill_visibility_contract():
 def test_resume_bullet_reorder_contract():
     app = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     library = (ROOT / "backend/app/library_repository.py").read_text(encoding="utf-8")
-    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    main = api_source()
     migration = (
         ROOT / "backend/migrations/020_composition_tool_order.sql"
     ).read_text(encoding="utf-8")

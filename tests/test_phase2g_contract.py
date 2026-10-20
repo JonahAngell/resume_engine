@@ -1,4 +1,5 @@
 from pathlib import Path
+from api_source import api_source
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,7 +41,7 @@ def test_generated_default_names_adopt_display_title_within_limit():
 
 
 def test_phase2g_api_and_ui_contracts():
-    main = (ROOT / "backend/app/main.py").read_text(encoding="utf-8")
+    main = api_source()
     ui = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     assert "defaultSetId ? { default_set_id: defaultSetId } : { entire_library: true }" in ui
     assert 'prompt("Composition name")' not in ui
