@@ -37,7 +37,7 @@ async def exercise():
             u = await ensure_user(c, CurrentUser("2j-a", "a", "A", None))
             other = await ensure_user(c, CurrentUser("2j-b", "b", "B", None))
             _, cid = await import_seed(
-                c, u["id"], ROOT / "seed/jonah-resume.json", "2j"
+                c, u["id"], ROOT / "seed/nia-calder-resume.json", "2j"
             )
             comp = await load_composition(c, u["id"], cid)
             # Seed bullets are already placed; place a fresh bullet on a seeded project.

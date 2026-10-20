@@ -33,7 +33,7 @@ async def exercise():
             a = await ensure_user(conn, CurrentUser("p2b-a", "a", "A", None))
             b = await ensure_user(conn, CurrentUser("p2b-b", "b", "B", None))
             _, cid = await import_seed(
-                conn, a["id"], ROOT / "seed/jonah-resume.json", "phase2b-seed"
+                conn, a["id"], ROOT / "seed/nia-calder-resume.json", "phase2b-seed"
             )
             count = (
                 await (

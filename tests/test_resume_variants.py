@@ -35,7 +35,7 @@ async def exercise():
                 await conn.execute(migration.read_text(encoding="utf-8"))
             user = await ensure_user(conn, CurrentUser("variants", "variants", "Variants", None))
             _, composition_id = await import_seed(
-                conn, user["id"], ROOT / "seed/jonah-resume.json", "variants"
+                conn, user["id"], ROOT / "seed/nia-calder-resume.json", "variants"
             )
             starter, error = await save_as_resume_variant(
                 conn, user["id"], composition_id, "Site Reliability"
@@ -118,7 +118,7 @@ async def defaults_exercise():
             for migration in sorted((ROOT / "backend/migrations").glob("*.sql")):
                 await conn.execute(migration.read_text(encoding="utf-8"))
             user = await ensure_user(conn, CurrentUser("defaults", "defaults", "Defaults", None))
-            await import_seed(conn, user["id"], ROOT / "seed/jonah-resume.json", "defaults")
+            await import_seed(conn, user["id"], ROOT / "seed/nia-calder-resume.json", "defaults")
             created = await create_composition(
                 conn,
                 user["id"],

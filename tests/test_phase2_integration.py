@@ -89,7 +89,7 @@ async def exercise_phase2():
             user_b = await ensure_user(
                 conn, CurrentUser("phase2-b", "b", "User B", None)
             )
-            seed = json.loads((ROOT / "seed/jonah-resume.json").read_text(encoding="utf-8"))
+            seed = json.loads((ROOT / "seed/nia-calder-resume.json").read_text(encoding="utf-8"))
             composition_id = await seed_phase1d(conn, user_a["id"], seed)
 
             # Read only columns available in the Phase 1D schema. The Phase 2

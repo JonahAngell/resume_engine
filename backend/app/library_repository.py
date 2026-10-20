@@ -22,32 +22,6 @@ async def _many(conn, query, params=()):
         return await cursor.fetchall()
 
 
-def _display_date(row: dict) -> str:
-    if row.get("display_date"):
-        return row["display_date"]
-    year, month = row.get("graduation_year"), row.get("graduation_month")
-    if not year:
-        return row.get("graduation_date") or ""
-    if not month:
-        return str(year)
-    names = [
-        "",
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ]
-    return f"{names[month]} {year}"
-
-
 def _education_render(row: dict) -> dict:
     degree = row.get("degree_major") or row.get("degree") or ""
     if row.get("degree_type") and degree:

@@ -33,7 +33,7 @@ async def exercise():
             u = await ensure_user(c, CurrentUser("2e-a", "a", "A", None))
             other = await ensure_user(c, CurrentUser("2e-b", "b", "B", None))
             _, cid = await import_seed(
-                c, u["id"], ROOT / "seed/jonah-resume.json", "2e"
+                c, u["id"], ROOT / "seed/nia-calder-resume.json", "2e"
             )
             assert any(
                 x["type"] == "tool"
