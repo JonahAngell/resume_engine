@@ -36,7 +36,7 @@ async def exercise():
             u = await ensure_user(c, CurrentUser("2d-a", "a", "A", None))
             other = await ensure_user(c, CurrentUser("2d-b", "b", "B", None))
             _, cid = await import_seed(
-                c, u["id"], ROOT / "seed/jonah-resume.json", "2d"
+                c, u["id"], ROOT / "seed/nia-calder-resume.json", "2d"
             )
             section = await create_custom_section(
                 c, u["id"], CustomSectionWrite(title="Certifications", layout="dated")
@@ -62,7 +62,7 @@ async def exercise():
             _, other_cid = await import_seed(
                 c,
                 other["id"],
-                ROOT / "seed/jonah-resume.json",
+                ROOT / "seed/nia-calder-resume.json",
                 "2d-other",
             )
             with pytest.raises(psycopg.Error):

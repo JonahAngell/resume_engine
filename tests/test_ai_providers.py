@@ -210,3 +210,19 @@ def test_text_fallback_returns_prose_instead_of_failing(monkeypatch):
     result = run_async(run())
     assert result.data == {"_text": "Plain answer, no JSON."}
     assert result.model == "anthropic/claude-sonnet-4-6"
+
+
+def test_shared_client_is_reused_within_a_loop_and_replaced_across_loops():
+    import asyncio
+
+    from app.ai_client import close_shared_client, shared_client
+
+    async def twice():
+        first, second = shared_client(), shared_client()
+        return first, second
+
+    a, b = asyncio.run(twice())
+    assert a is b
+    c, _ = asyncio.run(twice())
+    assert c is not a
+    asyncio.run(close_shared_client())

@@ -290,3 +290,25 @@ def test_import_ui_enables_home_button_and_explains_linkedin_downloads():
     assert "<select" not in dialog
     assert "/api/library/import/preview" in main
     assert "/api/library/import/commit" in main
+
+
+def test_zip_bomb_is_rejected_before_decompression():
+    import pytest
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("Positions.csv", b"a," * (6 * 1024 * 1024))
+    assert len(buffer.getvalue()) < 100_000
+    with pytest.raises(ValueError, match="more data"):
+        parse_upload("export.zip", buffer.getvalue())
+
+
+def test_zip_with_too_many_entries_is_rejected():
+    import pytest
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for index in range(60):
+            archive.writestr(f"file{index}.txt", b"x")
+    with pytest.raises(ValueError, match="more data"):
+        parse_upload("export.zip", buffer.getvalue())

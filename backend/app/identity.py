@@ -1,5 +1,9 @@
+import hashlib
+import logging
 import os
+import time
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import Header, HTTPException, Request, status
@@ -13,9 +17,43 @@ class CurrentUser:
     email: str | None
 
 
+logger = logging.getLogger("resume_engine.identity")
+LOCAL_DB_HOSTS = {"localhost", "127.0.0.1", "::1", "db", "postgres"}
+
+
+def local_auth_enabled() -> bool:
+    return os.getenv("APP_ENV", "").strip().lower() == "local"
+
+
+def _database_host() -> str:
+    value = (
+        os.getenv("STUDIOSHARE_DB_URL", "").strip()
+        or os.getenv("DATABASE_URL", "").strip()
+    )
+    return (urlparse(value).hostname or "").lower() if value else ""
+
+
+def check_local_auth_safety() -> None:
+    """Refuse to run unauthenticated against a database that is not a local one."""
+    if not local_auth_enabled():
+        return
+    host = _database_host()
+    if host and host not in LOCAL_DB_HOSTS:
+        raise RuntimeError(
+            "APP_ENV=local disables authentication but the database host is not local. "
+            "Unset APP_ENV or point DATABASE_URL at a local database."
+        )
+    logger.warning("APP_ENV=local: authentication is disabled; every request is the development user.")
+
+
 def _local_user() -> CurrentUser | None:
-    if os.getenv("APP_ENV", "").strip().lower() != "local":
+    if not local_auth_enabled():
         return None
+    if _database_host() not in LOCAL_DB_HOSTS and _database_host():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Local development identity is not allowed with this database.",
+        )
     external_id = os.getenv("DEV_USER_ID", "local-user").strip()
     username = os.getenv("DEV_USERNAME", "local.user").strip()
     if not external_id or not username:
@@ -93,6 +131,30 @@ async def _studioshare_user(access_token: str) -> CurrentUser:
     return CurrentUser(external_id, username, display_name, email)
 
 
+IDENTITY_TTL = 60.0
+IDENTITY_CACHE_MAX = 512
+# sha256(token) -> (user, expires at). Single worker, so process memory is enough.
+_IDENTITY_CACHE: dict[str, tuple[CurrentUser, float]] = {}
+
+
+def clear_identity_cache() -> None:
+    _IDENTITY_CACHE.clear()
+
+
+async def _cached_studioshare_user(access_token: str) -> CurrentUser:
+    key = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+    now = time.monotonic()
+    hit = _IDENTITY_CACHE.get(key)
+    if hit and hit[1] > now:
+        return hit[0]
+    _IDENTITY_CACHE.pop(key, None)
+    user = await _studioshare_user(access_token)
+    _IDENTITY_CACHE[key] = (user, now + IDENTITY_TTL)
+    while len(_IDENTITY_CACHE) > IDENTITY_CACHE_MAX:
+        _IDENTITY_CACHE.pop(next(iter(_IDENTITY_CACHE)))
+    return user
+
+
 async def resolve_current_user(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -110,4 +172,4 @@ async def resolve_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authenticated StudioShare identity is required.",
         )
-    return await _studioshare_user(access_token)
+    return await _cached_studioshare_user(access_token)

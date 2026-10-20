@@ -1,8 +1,11 @@
 
 
 
-from typing import Literal
-from pydantic import BaseModel, ConfigDict
+from typing import Annotated, Literal
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+
+Text = Annotated[str, StringConstraints(max_length=5000)]
+Bullets = Annotated[list[Text], Field(max_length=200)]
 
 
 class Header(BaseModel):
@@ -19,14 +22,14 @@ class Education(BaseModel):
     location: str = ""
     degree: str = ""
     graduation_date: str = ""
-    bullets: list[str] = []
+    bullets: Bullets = []
 
 
 class ToolGroup(BaseModel):
     id: str | None = None
     name: str
-    items: list[str]
-    bullets: list[str] = []
+    items: Annotated[list[Text], Field(max_length=500)]
+    bullets: Bullets = []
 
 
 class Project(BaseModel):
@@ -34,7 +37,7 @@ class Project(BaseModel):
     name: str
     subtitle: str = ""
     date: str = ""
-    bullets: list[str]
+    bullets: Bullets
 
 
 class Experience(BaseModel):
@@ -43,7 +46,7 @@ class Experience(BaseModel):
     location: str = ""
     title: str
     date: str = ""
-    bullets: list[str]
+    bullets: Bullets
 
 
 class CustomEntry(BaseModel):
@@ -52,26 +55,26 @@ class CustomEntry(BaseModel):
     secondary_text: str | None = None
     location: str | None = None
     date: str | None = None
-    bullets: list[str] = []
+    bullets: Bullets = []
 
 
 class CustomSection(BaseModel):
     id: str | None = None
     title: str
     layout: Literal["list", "compact", "dated", "experience"] = "list"
-    entries: list[CustomEntry] = []
+    entries: Annotated[list[CustomEntry], Field(max_length=300)] = []
 
 
 class Resume(BaseModel):
     model_config = ConfigDict(extra="forbid")
     header: Header
-    summary: str = ""
-    education: list[Education] = []
-    tool_groups: list[ToolGroup] = []
-    projects: list[Project] = []
-    work_experience: list[Experience] = []
-    leadership: list[Experience] = []
-    personal_interests: list[str] = []
+    summary: Annotated[str, StringConstraints(max_length=20000)] = ""
+    education: Annotated[list[Education], Field(max_length=300)] = []
+    tool_groups: Annotated[list[ToolGroup], Field(max_length=300)] = []
+    projects: Annotated[list[Project], Field(max_length=300)] = []
+    work_experience: Annotated[list[Experience], Field(max_length=300)] = []
+    leadership: Annotated[list[Experience], Field(max_length=300)] = []
+    personal_interests: Annotated[list[Text], Field(max_length=200)] = []
     personal_interest_items: list[dict] = []
     interest_bullets: dict[str, list[str]] = {}
     section_order: list[str] = [
@@ -84,4 +87,4 @@ class Resume(BaseModel):
         "personal_interests",
     ]
     interest_layout: Literal["compact", "lines"] = "compact"
-    custom_sections: list[CustomSection] = []
+    custom_sections: Annotated[list[CustomSection], Field(max_length=300)] = []

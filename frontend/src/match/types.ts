@@ -207,11 +207,6 @@ export type AtsScore = {
   revision: number;
 };
 
-export function allRows(match: JobMatch | null): RequirementRow[] {
-  if (!match) return [];
-  return [...match.required, ...match.preferred, ...(match.responsibilities || [])];
-}
-
 export function groupLabel(group: string) {
   if (group === "required") return "Required";
   if (group === "preferred") return "Preferred";

@@ -3,13 +3,15 @@
 
 
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from urllib.parse import urlparse
 from fastapi.staticfiles import StaticFiles
 from .database import (
     close_database,
@@ -100,8 +102,8 @@ from .resume_variants import (
 )
 from . import default_sets
 from .ai_recommend import recommend_resume
-from .ai_client import providers as ai_providers
-from .identity import CurrentUser, resolve_current_user
+from .ai_client import close_shared_client, providers as ai_providers
+from .identity import CurrentUser, check_local_auth_safety, resolve_current_user
 from .library_repository import (
     add_skill_to_resume,
     load_skill_inputs,
@@ -227,6 +229,7 @@ from .phase2j_repository import (
 from .phase2k_repository import items as phase2k_items, counts as phase2k_counts, tags as phase2k_tags, create_item as phase2k_create_item, replace_tags as phase2k_replace_tags, bulk as phase2k_bulk, usages as phase2k_usages, detail as phase2k_detail, update_parent as phase2k_update_parent
 from .phase2l_repository import update_preferences
 from .phase2m_repository import materialize_composition, materialize_revision
+from .rate_limit import ai_rate_limit, limiter
 from .render import render_resume
 from .schemas import Resume
 
@@ -237,13 +240,39 @@ FRONTEND = ROOT / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(app):
+    check_local_auth_safety()
     await open_database()
     await migrate()
     yield
+    await close_shared_client()
     await close_database()
 
 
 app = FastAPI(title="Resume Engine Phase 2", version="0.5.0", lifespan=lifespan)
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+MAX_JSON_BYTES = 2 * 1024 * 1024
+UPLOAD_PATH = "/api/library/import/preview"
+
+
+@app.middleware("http")
+async def request_guard(request, call_next):
+    """Reject cross-site writes and oversized bodies before any handler runs."""
+    if request.method not in SAFE_METHODS:
+        site = request.headers.get("sec-fetch-site")
+        origin = request.headers.get("origin")
+        cross_site = False
+        if site is not None:
+            cross_site = site not in {"same-origin", "none"}
+        elif origin is not None:
+            cross_site = urlparse(origin).netloc != request.headers.get("host", "")
+        if cross_site:
+            return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+        limit = MAX_IMPORT_BYTES + 64 * 1024 if request.url.path == UPLOAD_PATH else MAX_JSON_BYTES
+        length = request.headers.get("content-length", "")
+        if length.isdigit() and int(length) > limit:
+            return JSONResponse({"detail": "Request body is too large."}, status_code=413)
+    return await call_next(request)
 
 
 async def owner(identity, conn):
@@ -320,7 +349,8 @@ async def preview_import(
     if len(data) > MAX_IMPORT_BYTES:
         raise HTTPException(413, "File is larger than 10 MB.")
     try:
-        draft = parse_upload(file.filename or "", data)
+        # pdfminer and python-docx are CPU-bound; keep them off the event loop.
+        draft = await asyncio.to_thread(parse_upload, file.filename or "", data)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     async with connection() as c:
@@ -685,6 +715,7 @@ async def recommend_skill_group(cid: UUID, req: SkillRecommendRequest, identity:
         raise HTTPException(404, "Composition not found")
     # Local data first; the model only runs on a second call when that found nothing.
     if req.allow_ai:
+        limiter.check(identity.external_id)
         return await recommend_with_ai(req.keyword, inputs["groups"], inputs["tools"])
     return recommend_group(req.keyword, inputs["groups"], inputs["tools"])
 
@@ -1158,7 +1189,7 @@ async def new_comp(
         return state(row)
 
 
-@app.post("/api/compositions/ai-recommend", response_model=ResumeRecommendResult, status_code=201)
+@app.post("/api/compositions/ai-recommend", response_model=ResumeRecommendResult, status_code=201, dependencies=[Depends(ai_rate_limit)])
 async def ai_recommend_resume(
     req: ResumeRecommendRequest, identity: CurrentUser = Depends(resolve_current_user)
 ):
@@ -1609,7 +1640,7 @@ async def refresh_bullet_usage(cid: UUID, placement_id: UUID, req: BulletUsageUp
         u=await owner(identity,c); row,error=await update_usage(c,u["id"],cid,placement_id,req.revision)
         return _placement_result(row,error)
 
-@app.post("/api/compositions/{cid}/bullet-placements/{placement_id}/ai-variants", response_model=VariantSuggestions)
+@app.post("/api/compositions/{cid}/bullet-placements/{placement_id}/ai-variants", response_model=VariantSuggestions, dependencies=[Depends(ai_rate_limit)])
 async def suggest_bullet_variants(cid: UUID, placement_id: UUID, req: AiVariantRequest, identity: CurrentUser = Depends(resolve_current_user)):
     async with connection() as c:
         u = await owner(identity, c)
@@ -1642,7 +1673,7 @@ def _keyword_category(keyword: str, category: str) -> str:
     return "tool" if is_skill_keyword(keyword, category) else (category or category_for_term(keyword) or "")
 
 
-@app.post("/api/compositions/{cid}/ai-variant-pick", response_model=VariantPick)
+@app.post("/api/compositions/{cid}/ai-variant-pick", response_model=VariantPick, dependencies=[Depends(ai_rate_limit)])
 async def pick_bullet_variants(cid: UUID, req: VariantPickRequest, identity: CurrentUser = Depends(resolve_current_user)):
     """Rank library wording for the listed placements, or every placed bullet, against one job."""
     async with connection() as c:
@@ -1664,7 +1695,7 @@ async def pick_bullet_variants(cid: UUID, req: VariantPickRequest, identity: Cur
     )
 
 
-@app.post("/api/compositions/{cid}/ai-keyword-assist", response_model=KeywordAssist)
+@app.post("/api/compositions/{cid}/ai-keyword-assist", response_model=KeywordAssist, dependencies=[Depends(ai_rate_limit)])
 async def keyword_assist(cid: UUID, req: KeywordAssistRequest, identity: CurrentUser = Depends(resolve_current_user)):
     inputs = await _review_inputs(req.job_id, cid, identity)
     return await assist_keyword(
@@ -1740,7 +1771,7 @@ async def accept_bullet_variant(cid: UUID, placement_id: UUID, req: AiVariantAcc
         return state(row)
 
 
-@app.post("/api/compositions/{cid}/ai-condense", response_model=CondenseResult)
+@app.post("/api/compositions/{cid}/ai-condense", response_model=CondenseResult, dependencies=[Depends(ai_rate_limit)])
 async def condense_composition(cid: UUID, req: CondenseRequest, identity: CurrentUser = Depends(resolve_current_user)):
     """Suggest bullets to condense and bullets or entries to remove so the resume fits its pages."""
     async with connection() as c:
@@ -1968,7 +1999,7 @@ async def match_job_description_post(
     return await _compare_job(job_id, req.composition_id, identity)
 
 
-@app.post("/api/job-descriptions/{job_id}/ai-review", response_model=AiReview)
+@app.post("/api/job-descriptions/{job_id}/ai-review", response_model=AiReview, dependencies=[Depends(ai_rate_limit)])
 async def ai_review_job(
     job_id: UUID,
     req: JobMatchRequest,
@@ -2006,7 +2037,7 @@ async def _review_inputs(job_id: UUID, composition_id: UUID, identity: CurrentUs
     return inputs
 
 
-@app.post("/api/job-descriptions/{job_id}/ai-coach", response_model=CoachResult)
+@app.post("/api/job-descriptions/{job_id}/ai-coach", response_model=CoachResult, dependencies=[Depends(ai_rate_limit)])
 async def ai_coach_job(job_id: UUID, req: JobMatchRequest, identity: CurrentUser = Depends(resolve_current_user)):
     inputs = await _review_inputs(job_id, req.composition_id, identity)
     return await coach_resume(
@@ -2019,7 +2050,7 @@ async def ai_coach_job(job_id: UUID, req: JobMatchRequest, identity: CurrentUser
     )
 
 
-@app.post("/api/compositions/{cid}/ai-chat", response_model=ChatTurn)
+@app.post("/api/compositions/{cid}/ai-chat", response_model=ChatTurn, dependencies=[Depends(ai_rate_limit)])
 async def ai_chat(cid: UUID, req: ChatRequest, identity: CurrentUser = Depends(resolve_current_user)):
     async with connection() as c:
         u = await owner(identity, c)
@@ -2040,7 +2071,7 @@ async def ai_chat(cid: UUID, req: ChatRequest, identity: CurrentUser = Depends(r
     )
 
 
-@app.post("/api/job-descriptions/{job_id}/define", response_model=KeywordDefinition)
+@app.post("/api/job-descriptions/{job_id}/define", response_model=KeywordDefinition, dependencies=[Depends(ai_rate_limit)])
 async def define_job_keyword(job_id: UUID, req: KeywordDefineRequest, identity: CurrentUser = Depends(resolve_current_user)):
     async with connection() as c:
         u = await owner(identity, c)

@@ -171,6 +171,7 @@ export default function ResumePreview({
       title="Live resume preview"
       className="preview"
       srcDoc={html}
+      sandbox="allow-scripts"
     />
   );
 }

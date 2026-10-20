@@ -140,6 +140,27 @@ async def gateway_token(client: httpx.AsyncClient) -> str:
     return token
 
 
+_SHARED: dict = {"client": None, "loop": None}
+
+
+def shared_client() -> httpx.AsyncClient:
+    """One pooled client per event loop, so AI calls reuse TLS connections to the provider."""
+    loop = asyncio.get_running_loop()
+    client = _SHARED["client"]
+    if client is None or client.is_closed or _SHARED["loop"] is not loop:
+        # Per-call deadlines come from asyncio.wait_for in _exchange_within.
+        client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0))
+        _SHARED.update(client=client, loop=loop)
+    return client
+
+
+async def close_shared_client() -> None:
+    client = _SHARED["client"]
+    _SHARED.update(client=None, loop=None)
+    if client is not None and not client.is_closed:
+        await client.aclose()
+
+
 def parse_json_content(content: str) -> dict:
     text = _FENCE.sub("", (content or "").strip())
     start = text.find("{")
@@ -398,34 +419,29 @@ async def complete_json(
         _log(openrouter_model(), "unavailable", started)
         raise AiCallError("unavailable")
 
-    owns_client = client is None
-    client = client or httpx.AsyncClient(timeout=timeout)
+    client = client or shared_client()
     status = "unavailable"
-    try:
-        for provider in chain:
-            headers = await _provider_headers(provider, client)
-            if headers is None:
-                _log(provider.models[0], "no_token", started, provider=provider.name)
+    for provider in chain:
+        headers = await _provider_headers(provider, client)
+        if headers is None:
+            _log(provider.models[0], "no_token", started, provider=provider.name)
+            status = _keep_status(status, "unavailable")
+            continue
+        for model in provider.models:
+            try:
+                return await _complete_with(
+                    client, provider.name, provider.url, headers, model, messages, schema, name, started,
+                    timeout, text_fallback,
+                )
+            except AiCallError as exc:
+                status = _keep_status(status, exc.status)
+            except _Unauthorized:
+                if provider.name == "studioshare":
+                    clear_gateway_token()
+                _log(model, "unauthorized", started, provider=provider.name)
                 status = _keep_status(status, "unavailable")
-                continue
-            for model in provider.models:
-                try:
-                    return await _complete_with(
-                        client, provider.name, provider.url, headers, model, messages, schema, name, started,
-                        timeout, text_fallback,
-                    )
-                except AiCallError as exc:
-                    status = _keep_status(status, exc.status)
-                except _Unauthorized:
-                    if provider.name == "studioshare":
-                        clear_gateway_token()
-                    _log(model, "unauthorized", started, provider=provider.name)
-                    status = _keep_status(status, "unavailable")
-                    break
-                except httpx.HTTPError:
-                    _log(model, "unavailable", started, provider=provider.name)
-                    status = _keep_status(status, "unavailable")
-        raise AiCallError(status)
-    finally:
-        if owns_client:
-            await client.aclose()
+                break
+            except httpx.HTTPError:
+                _log(model, "unavailable", started, provider=provider.name)
+                status = _keep_status(status, "unavailable")
+    raise AiCallError(status)

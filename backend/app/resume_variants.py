@@ -7,7 +7,7 @@ from .library_repository import (
     _custom_render,
     _education_render,
     _profile_header,
-    _tool_group_render,
+    _tool_groups_render,
 )
 from .phase2j_repository import _commit, _lock_composition, apply_placements
 
@@ -317,10 +317,9 @@ async def apply_library_selection(
                WHERE composition_id=%s AND section='tool_groups' ORDER BY sort_order,id""",
             (composition_id,),
         )
-        resume["tool_groups"] = [
-            await _tool_group_render(conn, user_id, item["item_id"], composition_id)
-            for item in groups
-        ]
+        resume["tool_groups"] = await _tool_groups_render(
+            conn, user_id, [item["item_id"] for item in groups], composition_id
+        )
         interests = await many(
             conn,
             """SELECT x.body FROM composition_items i
@@ -557,26 +556,6 @@ async def save_as_resume_variant(conn, user_id, cid, name, replace_id=None):
         )
         await _copy_rows(conn, cid, row["id"])
         return row, None
-
-
-async def set_default_resume_variant(conn, user_id, cid):
-    async with conn.transaction():
-        row = await one(
-            conn,
-            "SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s AND is_starter AND archived_at IS NULL",
-            (cid, user_id),
-        )
-        if not row:
-            return None
-        await conn.execute(
-            "UPDATE resume_compositions SET is_default_starter=false,updated_at=now() WHERE user_id=%s AND is_starter",
-            (user_id,),
-        )
-        return await one(
-            conn,
-            "UPDATE resume_compositions SET is_default_starter=true,updated_at=now() WHERE id=%s RETURNING *",
-            (cid,),
-        )
 
 
 async def rerender(conn, user_id, cid, source):

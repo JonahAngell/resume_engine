@@ -102,15 +102,6 @@ class CompositionInterestSelection(BaseModel):
     included: bool
 
 
-class SearchResult(BaseModel):
-    id: UUID
-    type: str
-    label: str
-    context: str | None = None
-    archived: bool = False
-    tags: list[str] = []
-
-
 class CompositionSummary(BaseModel):
     id: UUID
     name: str
@@ -219,11 +210,3 @@ class LibraryParentWrite(BaseModel):
     model_config = ConfigDict(extra="forbid")
     parent_id: UUID | None = None
     parent_type: str | None = Field(default=None, pattern="^(content_item|education_item|tool_group|interest|custom_entry)$")
-
-
-class LibraryParentAssignment(BaseModel):
-    bullet_id: UUID
-    parent_type: str
-    parent_id: UUID
-class LibraryParentsWrite(BaseModel):
-    items: list[LibraryParentAssignment]
