@@ -973,6 +973,7 @@
             }
           });
           addEventListener("message", (event) => {
+            if (event.source !== parent) return;
             if (event.data?.type === "resume-show-page") showPage(event.data.pageIndex);
             if (event.data?.type === "resume-highlight") {
               highlightLines(event.data.marks);

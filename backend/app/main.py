@@ -9,7 +9,8 @@ from pathlib import Path
 from uuid import UUID
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from urllib.parse import urlparse
 from fastapi.staticfiles import StaticFiles
 from .database import (
     close_database,
@@ -101,7 +102,7 @@ from .resume_variants import (
 from . import default_sets
 from .ai_recommend import recommend_resume
 from .ai_client import providers as ai_providers
-from .identity import CurrentUser, resolve_current_user
+from .identity import CurrentUser, check_local_auth_safety, resolve_current_user
 from .library_repository import (
     add_skill_to_resume,
     load_skill_inputs,
@@ -237,6 +238,7 @@ FRONTEND = ROOT / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(app):
+    check_local_auth_safety()
     await open_database()
     await migrate()
     yield
@@ -244,6 +246,30 @@ async def lifespan(app):
 
 
 app = FastAPI(title="Resume Engine Phase 2", version="0.5.0", lifespan=lifespan)
+
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+MAX_JSON_BYTES = 2 * 1024 * 1024
+UPLOAD_PATH = "/api/library/import/preview"
+
+
+@app.middleware("http")
+async def request_guard(request, call_next):
+    """Reject cross-site writes and oversized bodies before any handler runs."""
+    if request.method not in SAFE_METHODS:
+        site = request.headers.get("sec-fetch-site")
+        origin = request.headers.get("origin")
+        cross_site = False
+        if site is not None:
+            cross_site = site not in {"same-origin", "none"}
+        elif origin is not None:
+            cross_site = urlparse(origin).netloc != request.headers.get("host", "")
+        if cross_site:
+            return JSONResponse({"detail": "Cross-site request blocked."}, status_code=403)
+        limit = MAX_IMPORT_BYTES + 64 * 1024 if request.url.path == UPLOAD_PATH else MAX_JSON_BYTES
+        length = request.headers.get("content-length", "")
+        if length.isdigit() and int(length) > limit:
+            return JSONResponse({"detail": "Request body is too large."}, status_code=413)
+    return await call_next(request)
 
 
 async def owner(identity, conn):

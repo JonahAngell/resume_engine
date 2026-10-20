@@ -133,7 +133,7 @@ class ImportProfile(BaseModel):
 class ImportSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = "Imported summary"
-    body: str = ""
+    body: str = Field(default="", max_length=20_000)
     included: bool = True
     low_confidence: list[str] = Field(default_factory=list)
 
@@ -143,7 +143,7 @@ class ImportEntry(BaseModel):
     id: str
     section: str = "employment"
     included: bool = True
-    source_text: str = ""
+    source_text: str = Field(default="", max_length=20_000)
     low_confidence: list[str] = Field(default_factory=list)
     organization: str = ""
     title: str = ""
@@ -156,7 +156,7 @@ class ImportEntry(BaseModel):
     end_year: int | None = None
     end_month: int | None = None
     is_current: bool = False
-    bullets: list[str] = Field(default_factory=list)
+    bullets: list[str] = Field(default_factory=list, max_length=200)
     institution: str = ""
     college_school: str = ""
     degree_type: str = ""
@@ -164,17 +164,17 @@ class ImportEntry(BaseModel):
     graduation_year: int | None = None
     graduation_month: int | None = None
     display_date: str = ""
-    tools: list[str] = Field(default_factory=list)
-    body: str = ""
+    tools: list[str] = Field(default_factory=list, max_length=500)
+    body: str = Field(default="", max_length=20_000)
 
 
 class ImportDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     profile: ImportProfile = Field(default_factory=ImportProfile)
     summary: ImportSummary = Field(default_factory=ImportSummary)
-    entries: list[ImportEntry] = Field(default_factory=list)
-    leftover: str = ""
-    notices: list[str] = Field(default_factory=list)
+    entries: list[ImportEntry] = Field(default_factory=list, max_length=1000)
+    leftover: str = Field(default="", max_length=200_000)
+    notices: list[str] = Field(default_factory=list, max_length=100)
 
 
 @dataclass
@@ -194,6 +194,34 @@ class _Date:
     end_month: int | None = None
     is_current: bool = False
     found: bool = False
+
+
+MAX_ARCHIVE_ENTRIES = 50
+MAX_ARCHIVE_MEMBER_BYTES = 5 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 20 * 1024 * 1024
+MAX_CSV_ROWS = 5000
+TOO_LARGE = "This file expands to more data than the importer allows."
+
+
+def _check_archive(archive: zipfile.ZipFile) -> None:
+    """Reject zip bombs by trusting the declared sizes before anything is decompressed."""
+    infos = archive.infolist()
+    if len(infos) > MAX_ARCHIVE_ENTRIES:
+        raise ValueError(TOO_LARGE)
+    total = 0
+    for info in infos:
+        total += info.file_size
+        if info.file_size > MAX_ARCHIVE_MEMBER_BYTES or total > MAX_ARCHIVE_TOTAL_BYTES:
+            raise ValueError(TOO_LARGE)
+
+
+def _read_member(archive: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
+    """Read one member, stopping at the cap even if the header understates its size."""
+    with archive.open(info) as handle:
+        data = handle.read(MAX_ARCHIVE_MEMBER_BYTES + 1)
+    if len(data) > MAX_ARCHIVE_MEMBER_BYTES:
+        raise ValueError(TOO_LARGE)
+    return data
 
 
 def parse_upload(filename: str, data: bytes) -> ImportDraft:
@@ -286,6 +314,11 @@ def extract_docx(data: bytes) -> list[TextLine]:
     except ImportError as exc:  # pragma: no cover
         raise ValueError(UNREADABLE_DOC) from exc
     try:
+        with zipfile.ZipFile(io.BytesIO(data)) as package:
+            _check_archive(package)
+    except zipfile.BadZipFile as exc:
+        raise ValueError(UNREADABLE_DOC) from exc
+    try:
         document = Document(io.BytesIO(data))
     except Exception as exc:
         raise ValueError(UNREADABLE_DOC) from exc
@@ -317,13 +350,14 @@ def parse_linkedin_zip(data: bytes) -> ImportDraft:
         archive = zipfile.ZipFile(io.BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise ValueError(BAD_ZIP) from exc
+    _check_archive(archive)
     files: dict[str, bytes] = {}
     for info in archive.infolist():
         if info.is_dir():
             continue
         name = Path(info.filename).name.lower()
         if name in LINKEDIN_FILES and name not in files:
-            files[name] = archive.read(info)
+            files[name] = _read_member(archive, info)
     if not files:
         raise ValueError(BAD_ZIP)
     return _linkedin_draft(files)
@@ -474,6 +508,8 @@ def _csv_rows(data: bytes) -> tuple[list[dict[str, str]], list[str]]:
     headers = [header or "" for header in (reader.fieldnames or [])]
     rows = []
     for row in reader:
+        if len(rows) >= MAX_CSV_ROWS:
+            raise ValueError(TOO_LARGE)
         rows.append({(key or "").strip(): (value or "").strip() for key, value in row.items()})
     return rows, headers
 
