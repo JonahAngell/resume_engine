@@ -96,11 +96,32 @@ async def _save_library_refresh(conn, user_id, composition_id, payload, source):
 
 
 async def ensure_user(conn, user):
+    # Read first so an unchanged user costs no write; this runs on every request.
+    row = await _one(
+        conn,
+        "SELECT id,external_id,username,display_name,email FROM app_users WHERE external_id=%s",
+        (user.external_id,),
+    )
+    if row and (row["username"], row["display_name"], row["email"]) == (
+        user.username,
+        user.display_name,
+        user.email,
+    ):
+        return row
     return await _one(
         conn,
         "INSERT INTO app_users(external_id,username,display_name,email) VALUES(%s,%s,%s,%s) ON CONFLICT(external_id) DO UPDATE SET username=excluded.username,display_name=excluded.display_name,email=excluded.email,updated_at=now() RETURNING id,external_id,username,display_name,email",
         (user.external_id, user.username, user.display_name, user.email),
     )
+
+
+def _group_by(rows, key, keep_key=False):
+    """Split rows (already ordered) into lists keyed by `key`, keeping their order."""
+    grouped: dict = {}
+    for row in rows:
+        parent = row[key] if keep_key else row.pop(key)
+        grouped.setdefault(parent, []).append(row)
+    return grouped
 
 
 async def fetch_library(conn, user_id):
@@ -115,12 +136,11 @@ async def fetch_library(conn, user_id):
            FROM profile_field_variants WHERE user_id=%s ORDER BY sort_order,id""",
         (user_id,),
     )
+    variants_by_profile: dict = {}
+    for variant in profile_variants:
+        variants_by_profile.setdefault(variant["profile_id"], []).append(variant)
     for profile in profiles:
-        profile["field_variants"] = [
-            variant
-            for variant in profile_variants
-            if variant["profile_id"] == profile["id"]
-        ]
+        profile["field_variants"] = variants_by_profile.get(profile["id"], [])
     summaries = await _many(
         conn,
         "SELECT id,name,body,tags,sort_order,archived_at,created_at,updated_at FROM summary_variants WHERE user_id=%s ORDER BY sort_order,id",
@@ -138,28 +158,33 @@ async def fetch_library(conn, user_id):
            FROM education_item_variants WHERE user_id=%s ORDER BY sort_order,id""",
         (user_id,),
     )
-    for item in education:
-        item["field_variants"] = [
-            variant
-            for variant in education_variants
-            if variant["education_item_id"] == item["id"]
-        ]
-        item["bullets"] = await _many(
+    education_variants_by_item = _group_by(education_variants, "education_item_id", keep_key=True)
+    education_bullets = _group_by(
+        await _many(
             conn,
-            "SELECT b.id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.education_item_id=%s ORDER BY b.sort_order,v.sort_order,v.id",
-            (user_id, item["id"]),
-        )
+            "SELECT b.education_item_id,b.id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.education_item_id=ANY(%s) ORDER BY b.sort_order,v.sort_order,v.id",
+            (user_id, [item["id"] for item in education]),
+        ),
+        "education_item_id",
+    )
+    for item in education:
+        item["field_variants"] = education_variants_by_item.get(item["id"], [])
+        item["bullets"] = education_bullets.get(item["id"], [])
     groups = await _many(
         conn,
         "SELECT id,name,sort_order,archived_at,created_at,updated_at FROM tool_groups WHERE user_id=%s ORDER BY sort_order,id",
         (user_id,),
     )
-    for group in groups:
-        group["items"] = await _many(
+    tools_by_group = _group_by(
+        await _many(
             conn,
-            "SELECT id,name,sort_order,archived_at,created_at,updated_at FROM tools WHERE user_id=%s AND group_id=%s ORDER BY sort_order,id",
-            (user_id, group["id"]),
-        )
+            "SELECT group_id,id,name,sort_order,archived_at,created_at,updated_at FROM tools WHERE user_id=%s AND group_id=ANY(%s) ORDER BY sort_order,id",
+            (user_id, [group["id"] for group in groups]),
+        ),
+        "group_id",
+    )
+    for group in groups:
+        group["items"] = tools_by_group.get(group["id"], [])
 
     content_variants = await _many(
         conn,
@@ -169,23 +194,26 @@ async def fetch_library(conn, user_id):
         (user_id,),
     )
 
+    content_variants_by_item = _group_by(content_variants, "content_item_id", keep_key=True)
+
     async def content(kind):
         rows = await _many(
             conn,
             "SELECT id,name,subtitle,organization,location,title,date_label,start_year,start_month,end_year,end_month,is_current,tags,sort_order,archived_at,created_at,updated_at FROM content_items WHERE user_id=%s AND kind=%s ORDER BY sort_order,id",
             (user_id, kind),
         )
-        for row in rows:
-            row["field_variants"] = [
-                variant
-                for variant in content_variants
-                if variant["content_item_id"] == row["id"]
-            ]
-            row["bullets"] = await _many(
+        bullets = _group_by(
+            await _many(
                 conn,
-                "SELECT b.id,b.parent_id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at,v.updated_at variant_updated_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.parent_id=%s ORDER BY b.sort_order,v.sort_order,v.id",
-                (user_id, row["id"]),
-            )
+                "SELECT b.id,b.parent_id,b.sort_order,b.archived_at,v.id variant_id,v.name variant_name,v.body,v.is_default,v.sort_order variant_sort_order,v.archived_at variant_archived_at,v.updated_at variant_updated_at FROM bullets b LEFT JOIN bullet_variants v ON v.bullet_id=b.id WHERE b.user_id=%s AND b.parent_id=ANY(%s) ORDER BY b.sort_order,v.sort_order,v.id",
+                (user_id, [row["id"] for row in rows]),
+            ),
+            "parent_id",
+            keep_key=True,
+        )
+        for row in rows:
+            row["field_variants"] = content_variants_by_item.get(row["id"], [])
+            row["bullets"] = bullets.get(row["id"], [])
         return rows
 
     custom = await _many(
@@ -193,12 +221,16 @@ async def fetch_library(conn, user_id):
         "SELECT id,title,layout,sort_order,archived_at,created_at,updated_at FROM custom_sections WHERE user_id=%s ORDER BY sort_order,id",
         (user_id,),
     )
-    for section in custom:
-        section["entries"] = await _many(
+    entries_by_section = _group_by(
+        await _many(
             conn,
-            "SELECT id,primary_text,secondary_text,location,date_label,start_year,start_month,end_year,end_month,is_current,sort_order,archived_at FROM custom_section_entries WHERE user_id=%s AND section_id=%s ORDER BY sort_order,id",
-            (user_id, section["id"]),
-        )
+            "SELECT section_id,id,primary_text,secondary_text,location,date_label,start_year,start_month,end_year,end_month,is_current,sort_order,archived_at FROM custom_section_entries WHERE user_id=%s AND section_id=ANY(%s) ORDER BY sort_order,id",
+            (user_id, [section["id"] for section in custom]),
+        ),
+        "section_id",
+    )
+    for section in custom:
+        section["entries"] = entries_by_section.get(section["id"], [])
     interests = await _many(
         conn,
         "SELECT id,body,sort_order,archived_at,created_at,updated_at FROM interests WHERE user_id=%s ORDER BY sort_order,id",
@@ -965,38 +997,33 @@ async def restore_tool(conn, user_id, rid, outcome, group_id=None):
         return {"id": rid}, None
 
 
-async def _tool_group_render(conn, user_id, group_id, composition_id=None):
-    group = await _one(
+async def _tool_groups_render(conn, user_id, group_ids, composition_id):
+    """Render a composition's tool groups, in the given order, with two queries."""
+    group_ids = list(group_ids)
+    if not group_ids:
+        return []
+    groups = await _many(
         conn,
-        "SELECT name FROM tool_groups WHERE id=%s AND user_id=%s",
-        (group_id, user_id),
+        "SELECT id,name FROM tool_groups WHERE user_id=%s AND id=ANY(%s)",
+        (user_id, group_ids),
     )
-    if composition_id:
-        items = await _many(
-            conn,
-            """SELECT t.id,t.name FROM tools t
-               LEFT JOIN composition_tool_order o ON o.tool_id=t.id AND o.composition_id=%s
-               WHERE t.user_id=%s AND t.group_id=%s AND t.archived_at IS NULL
-               ORDER BY o.sort_order NULLS LAST, t.sort_order, t.id""",
-            (composition_id, user_id, group_id),
-        )
-    else:
-        items = await _many(
-            conn,
-            "SELECT id,name FROM tools WHERE user_id=%s AND group_id=%s AND archived_at IS NULL ORDER BY sort_order,id",
-            (user_id, group_id),
-        )
-    if composition_id and items:
-        hidden = await _many(
-            conn,
-            "SELECT tool_id FROM composition_hidden_tools WHERE composition_id=%s",
-            (composition_id,),
-        )
-        hidden_ids = {str(x["tool_id"]) for x in hidden}
-        items = [x for x in items if str(x["id"]) not in hidden_ids]
-    return (
-        {"name": group["name"], "items": [x["name"] for x in items]} if group else None
+    names = {str(x["id"]): x["name"] for x in groups}
+    tools = await _many(
+        conn,
+        """SELECT t.id,t.name,t.group_id FROM tools t
+           LEFT JOIN composition_tool_order o ON o.tool_id=t.id AND o.composition_id=%s
+           WHERE t.user_id=%s AND t.group_id=ANY(%s) AND t.archived_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM composition_hidden_tools h WHERE h.composition_id=%s AND h.tool_id=t.id)
+           ORDER BY o.sort_order NULLS LAST, t.sort_order, t.id""",
+        (composition_id, user_id, group_ids, composition_id),
     )
+    items: dict[str, list[str]] = {}
+    for tool in tools:
+        items.setdefault(str(tool["group_id"]), []).append(tool["name"])
+    return [
+        {"name": names[str(gid)], "items": items.get(str(gid), [])} if str(gid) in names else None
+        for gid in group_ids
+    ]
 
 
 async def _refresh_tool_compositions(conn, user_id, group_id, source):
@@ -1012,10 +1039,9 @@ async def _refresh_tool_compositions(conn, user_id, group_id, source):
             (comp["id"],),
         )
         resume = comp["render_payload"]
-        resume["tool_groups"] = [
-            await _tool_group_render(conn, user_id, x["item_id"], comp["id"])
-            for x in selected
-        ]
+        resume["tool_groups"] = await _tool_groups_render(
+            conn, user_id, [x["item_id"] for x in selected], comp["id"]
+        )
         await _save_library_refresh(conn, user_id, comp["id"], resume, source)
 
 
@@ -1059,9 +1085,9 @@ async def select_tool_group(conn, user_id, cid, expected, group_id, included):
             (cid,),
         )
         resume = locked["render_payload"]
-        resume["tool_groups"] = [
-            await _tool_group_render(conn, user_id, x["item_id"], cid) for x in selected
-        ]
+        resume["tool_groups"] = await _tool_groups_render(
+            conn, user_id, [x["item_id"] for x in selected], cid
+        )
         row = await _one(
             conn,
             "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",
@@ -1141,9 +1167,9 @@ async def set_tool_order(conn, user_id, cid, expected, group_id, ids):
             (cid,),
         )
         resume = locked["render_payload"]
-        resume["tool_groups"] = [
-            await _tool_group_render(conn, user_id, x["item_id"], cid) for x in selected
-        ]
+        resume["tool_groups"] = await _tool_groups_render(
+            conn, user_id, [x["item_id"] for x in selected], cid
+        )
         row = await _one(
             conn,
             "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",
@@ -1218,9 +1244,9 @@ async def set_tool_visibility(conn, user_id, cid, expected, tool_id, included):
             (cid,),
         )
         resume = locked["render_payload"]
-        resume["tool_groups"] = [
-            await _tool_group_render(conn, user_id, x["item_id"], cid) for x in selected
-        ]
+        resume["tool_groups"] = await _tool_groups_render(
+            conn, user_id, [x["item_id"] for x in selected], cid
+        )
         row = await _one(
             conn,
             "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",
@@ -1534,7 +1560,7 @@ async def reorder_composition_items(conn, user_id, cid, payload):
             resume["education"] = [_education_render(x) for x in ordered]
             resume = await _apply_resume_placements(conn, user_id, cid, resume)
         elif payload.section == "tool_groups":
-            resume["tool_groups"] = [await _tool_group_render(conn, user_id, rid, cid) for rid in payload.ids]
+            resume["tool_groups"] = await _tool_groups_render(conn, user_id, payload.ids, cid)
         elif payload.section == "personal_interests":
             ordered = await _many(conn, "SELECT x.body FROM composition_items i JOIN interests x ON x.id=i.item_id WHERE i.composition_id=%s AND i.section='personal_interests' ORDER BY i.sort_order,i.id", (cid,))
             resume["personal_interests"] = [x["body"] for x in ordered]
@@ -1751,9 +1777,9 @@ async def add_skill_to_resume(conn, user_id, cid, expected, name, group_id=None,
             (cid,),
         )
         resume = locked["render_payload"]
-        resume["tool_groups"] = [
-            await _tool_group_render(conn, user_id, x["item_id"], cid) for x in selected
-        ]
+        resume["tool_groups"] = await _tool_groups_render(
+            conn, user_id, [x["item_id"] for x in selected], cid
+        )
         row = await _one(
             conn,
             "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",

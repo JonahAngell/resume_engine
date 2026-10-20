@@ -187,11 +187,7 @@ async def compare_job_description(conn, user_id, job_id, composition_id: UUID):
         review = json.loads(review)
     bullets = await _placed_bullets(conn, user_id, composition_id)
     result = match_qualifications(job["body"], payload, bullets, review)
-    await _one(
-        conn,
-        "UPDATE job_descriptions SET composition_id=%s WHERE id=%s AND user_id=%s RETURNING id",
-        (composition_id, job_id, user_id),
-    )
+    await link_job_composition(conn, user_id, job_id, composition_id)
     result["composition_id"] = composition_id
     return result, None
 

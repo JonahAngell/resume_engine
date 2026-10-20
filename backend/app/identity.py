@@ -1,5 +1,7 @@
+import hashlib
 import logging
 import os
+import time
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -129,6 +131,30 @@ async def _studioshare_user(access_token: str) -> CurrentUser:
     return CurrentUser(external_id, username, display_name, email)
 
 
+IDENTITY_TTL = 60.0
+IDENTITY_CACHE_MAX = 512
+# sha256(token) -> (user, expires at). Single worker, so process memory is enough.
+_IDENTITY_CACHE: dict[str, tuple[CurrentUser, float]] = {}
+
+
+def clear_identity_cache() -> None:
+    _IDENTITY_CACHE.clear()
+
+
+async def _cached_studioshare_user(access_token: str) -> CurrentUser:
+    key = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+    now = time.monotonic()
+    hit = _IDENTITY_CACHE.get(key)
+    if hit and hit[1] > now:
+        return hit[0]
+    _IDENTITY_CACHE.pop(key, None)
+    user = await _studioshare_user(access_token)
+    _IDENTITY_CACHE[key] = (user, now + IDENTITY_TTL)
+    while len(_IDENTITY_CACHE) > IDENTITY_CACHE_MAX:
+        _IDENTITY_CACHE.pop(next(iter(_IDENTITY_CACHE)))
+    return user
+
+
 async def resolve_current_user(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -146,4 +172,4 @@ async def resolve_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authenticated StudioShare identity is required.",
         )
-    return await _studioshare_user(access_token)
+    return await _cached_studioshare_user(access_token)

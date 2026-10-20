@@ -171,3 +171,18 @@ def test_adjacent_company_name_is_shown_once():
     assert "Intern" in second and "2024" in second
     assert "Disney" not in second and "Orlando" not in second
     assert html.count("Disney") == 2
+
+
+def test_each_template_embeds_only_the_font_family_its_css_uses():
+    import re
+
+    from app.render import STYLE_FONTS, TEMPLATE_STYLES, font_css_for
+
+    template = (ROOT / "backend/app/templates/resume.html").read_text(encoding="utf-8")
+    assert set(STYLE_FONTS) == TEMPLATE_STYLES
+    for style in TEMPLATE_STYLES - {"classic"}:
+        block = re.search(r"body\.template-%s \{(.*?)\}" % style, template, re.S).group(1)
+        first = re.search(r"font-family:\s*\"?([^\",;]+)", block).group(1)
+        assert first == STYLE_FONTS[style]
+        assert f"font-family:'{first}'" in font_css_for(style)
+    assert font_css_for("classic") == ""

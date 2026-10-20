@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 
 from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job, scrub
@@ -43,9 +44,12 @@ DETAILS = {
 MAX_REASON = 240
 _CACHE: dict[str, dict] = {}
 _CACHE_MAX = 32
-# placement id -> {folded body: (model, job id)} for drafts this process handed out.
-_ISSUED: dict[str, dict[str, tuple[str, str]]] = {}
-_ISSUED_MAX = 64
+# placement id -> {folded body: (model, job id, issued at)} for drafts this process handed out.
+# Process memory only (single worker): a restart forgets provenance, so a draft accepted
+# afterwards is saved as user-written. Placement ids are per-user UUIDs.
+_ISSUED: dict[str, dict[str, tuple[str, str, float]]] = {}
+_ISSUED_MAX = 1024
+_ISSUED_TTL = 3600.0
 
 VARIANT_SYSTEM = """You rewrite one resume bullet for a specific job posting.
 Return one JSON object with keys drafts, fits, and reason.
@@ -279,9 +283,12 @@ def job_tool_terms(description: str) -> list[str]:
 def remember_issued(placement_id: str, drafts: list[dict], model: str, job_id: str) -> None:
     if not placement_id:
         return
-    issued = _ISSUED.pop(placement_id, {})
+    now = time.monotonic()
+    issued = {
+        body: entry for body, entry in _ISSUED.pop(placement_id, {}).items() if now - entry[2] < _ISSUED_TTL
+    }
     for draft in drafts:
-        issued[_fold(draft["body"])] = (model, job_id)
+        issued[_fold(draft["body"])] = (model, job_id, now)
     _ISSUED[placement_id] = issued
     while len(_ISSUED) > _ISSUED_MAX:
         _ISSUED.pop(next(iter(_ISSUED)))
@@ -290,7 +297,7 @@ def remember_issued(placement_id: str, drafts: list[dict], model: str, job_id: s
 def issued_draft(placement_id: str, body: str, job_id: str) -> str | None:
     """The model that wrote this exact draft for this placement and job, if this process issued it."""
     entry = (_ISSUED.get(str(placement_id)) or {}).get(_fold(body))
-    if entry and entry[1] == str(job_id):
+    if entry and entry[1] == str(job_id) and time.monotonic() - entry[2] < _ISSUED_TTL:
         return entry[0]
     return None
 

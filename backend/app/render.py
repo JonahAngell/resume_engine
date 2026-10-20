@@ -61,9 +61,15 @@ def skill_table(groups, row_max: int) -> dict:
     return {"blocks": blocks, "rows": height}
 
 
-def _font_css() -> str:
+# The only embedded family each template's CSS asks for; "classic" uses system Arial.
+STYLE_FONTS = {"classic": None, "sheets": "EB Garamond", "harvard": "Carlito", "sre": "Carlito", "dais": "Tinos"}
+
+
+def _font_css(only_family: str) -> str:
     rules = []
     for family, weight, style, filename in _FONT_FACES:
+        if family != only_family:
+            continue
         path = FONT_DIR / filename
         if not path.exists():
             continue
@@ -80,7 +86,13 @@ def _font_css() -> str:
     return "\n".join(rules)
 
 
-FONT_CSS = _font_css()
+# Built once at import; each response embeds only its template's family (about 100 KB, or none).
+FONT_CSS_BY_FAMILY = {family: _font_css(family) for family in {f for f, *_ in _FONT_FACES}}
+
+
+def font_css_for(style: str) -> str:
+    family = STYLE_FONTS.get(style)
+    return FONT_CSS_BY_FAMILY.get(family, "") if family else ""
 
 
 def render_resume(resume: Resume | dict, measure: bool = True, renderer_contract_version: str = "legacy", sort_modes: dict | None = None, date_format: str = "long", template_style: str = "classic", skill_row_max: int = 4) -> str:
@@ -91,6 +103,6 @@ def render_resume(resume: Resume | dict, measure: bool = True, renderer_contract
         resume=prepared, measure=measure,
         renderer_contract_version=renderer_contract_version,
         template_style=style,
-        font_css=FONT_CSS,
+        font_css=font_css_for(style),
         skill_table=skill_table(prepared.get("tool_groups"), skill_row_max),
     )

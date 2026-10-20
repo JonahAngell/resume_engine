@@ -1,6 +1,8 @@
 import pytest
 
 from app.ai_client import clear_gateway_token
+from app.identity import clear_identity_cache
+from app.rate_limit import limiter
 
 GATEWAY_ENV = (
     "STUDIOSHARE_AI_GATEWAY_URL",
@@ -16,5 +18,9 @@ def _no_gateway_from_shell(monkeypatch):
     for name in GATEWAY_ENV:
         monkeypatch.delenv(name, raising=False)
     clear_gateway_token()
+    limiter.reset()
+    clear_identity_cache()
     yield
     clear_gateway_token()
+    limiter.reset()
+    clear_identity_cache()
