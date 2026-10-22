@@ -106,7 +106,8 @@ def test_maps_model_keys_to_library_records():
     assert result["dropped"] == 2
     selection = result["selection"]
     parkline = lib["employment"][0]
-    assert list(selection.items["content_item"]) == [UUID(parkline["id"])]
+    # The project the model skipped is added after its pick.
+    assert list(selection.items["content_item"]) == [UUID(parkline["id"]), UUID(lib["projects"][0]["id"])]
     chosen = _variant_ids(parkline)[str(next(iter(selection.bullets.values())))]
     assert chosen["body"] == "Built SQL dashboards for financial forecasting"
     assert selection.summary_id == UUID(lib["summary_variants"][1]["id"])
@@ -164,3 +165,48 @@ def test_invalid_response_falls_back():
     result = run(library(), model({"entries": [{"key": "nope", "bullets": []}]}))
     assert result["status"] == "invalid" and result["method"] == "keywords"
     assert result["selection"].items["content_item"]
+
+
+def _project_ids(lib, selection):
+    return [UUID(p["id"]) for p in lib["projects"] if UUID(p["id"]) in selection.items["content_item"]]
+
+
+def _project_bullets(lib, selection):
+    ids = {row["variant_id"] for p in lib["projects"] for row in p["bullets"]}
+    return [v for v in selection.bullets.values() if str(v) in ids]
+
+
+def test_projects_are_offered_with_bullets_even_after_a_long_job_history():
+    lib = library()
+    lib["employment"] += [
+        _entry(f"Extra {n}", f"Firm {n}", [[f"Task {n}.{i}.{v}" for v in range(3)] for i in range(5)])
+        for n in range(30)
+    ]
+    probe = model({"entries": []})
+    run(lib, probe)
+    request = json.loads(probe.calls[0][1]["content"])
+    projects = [e for e in request["entries"] if e["type"] == "project"]
+    assert projects and projects[0]["bullets"]
+
+
+def test_adds_a_project_when_the_model_skips_projects():
+    lib = library()
+    probe = model({"entries": []})
+    run(lib, probe)
+    request = json.loads(probe.calls[0][1]["content"])
+    job = next(e for e in request["entries"] if e["type"] == "job")
+    result = run(lib, model({"entries": [{"key": job["key"], "bullets": []}]}))
+    assert result["method"] == "ai"
+    assert _project_ids(lib, result["selection"]) and _project_bullets(lib, result["selection"])
+    assert "projects" in [e["section"] for e in result["entries"]]
+
+
+def test_keyword_fallback_keeps_a_project_without_keyword_matches():
+    async def failing(messages, schema, name):
+        raise AiCallError("unavailable")
+
+    lib = library()
+    lib["projects"] = [_entry("Garden app", "Side project", [["Planted tomatoes"]])]
+    result = run(lib, failing)
+    assert result["method"] == "keywords"
+    assert _project_ids(lib, result["selection"]) and _project_bullets(lib, result["selection"])

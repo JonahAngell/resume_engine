@@ -19,8 +19,10 @@ from .resume_variants import Selection
 
 logger = logging.getLogger("resume_engine.ai")
 
-RECOMMEND_PROMPT_VERSION = "1"
+RECOMMEND_PROMPT_VERSION = "2"
 SECTIONS = {"employment": "work_experience", "project": "projects", "leadership": "leadership"}
+# Where fetch_library keeps each kind.
+LIBRARY_KEYS = {"employment": "employment", "project": "projects", "leadership": "leadership"}
 # One-page budget.
 MAX_ENTRIES = {"employment": 4, "project": 3, "leadership": 2}
 MIN_BULLETS = 2
@@ -50,6 +52,7 @@ Rules:
 - Fit one page: at most {MAX_ENTRIES['employment']} jobs, {MAX_ENTRIES['project']} projects, {MAX_ENTRIES['leadership']} leadership roles, {MIN_BULLETS} to {MAX_BULLETS_PER_ENTRY} bullets per entry, {MAX_BULLETS} bullets in total.
 - Prefer wording that shows the posting's requirements, concrete outcomes, and its keywords.
 - Keep the most recent job unless it is clearly irrelevant.
+- Include at least one project, with at least one bullet, whenever the library has a project with bullets.
 - Use only keys you were given. Do not write new wording."""
 
 RECOMMEND_SCHEMA = {
@@ -111,8 +114,8 @@ def _secrets(library: dict) -> list[str]:
 def build_catalog(library: dict, keywords: list[str]) -> dict:
     """Active library records with short keys and keyword scores."""
     entries, variant_count = [], 0
-    for kind in ("employment", "project", "leadership"):
-        for order, row in enumerate(item for item in library.get(kind) or [] if _active(item)):
+    for kind, library_key in LIBRARY_KEYS.items():
+        for order, row in enumerate(item for item in library.get(library_key) or [] if _active(item)):
             bullets: dict[str, dict] = {}
             for line in row.get("bullets") or []:
                 if line.get("archived_at") or line.get("variant_archived_at") or not line.get("variant_id"):
@@ -213,15 +216,30 @@ def build_catalog(library: dict, keywords: list[str]) -> dict:
     }
 
 
+def _best_project(catalog: dict, skip=()) -> dict | None:
+    """The highest-scoring project that has a bullet to show."""
+    return next(
+        (e for e in catalog["entries"] if e["kind"] == "project" and e["bullets"] and e["key"] not in skip),
+        None,
+    )
+
+
 def _prompt(catalog: dict, job: str, secrets: list[str]) -> dict:
-    sent, budget = [], MAX_VARIANTS_SENT
-    for entry in catalog["entries"][:MAX_ENTRIES_SENT]:
+    offered = catalog["entries"][:MAX_ENTRIES_SENT]
+    project = _best_project(catalog)
+    if project and project not in offered:
+        offered = [*offered[: MAX_ENTRIES_SENT - 1], project]
+    # Every entry keeps its best wording, so a long job history cannot leave a project bare.
+    sent, budget = [], MAX_VARIANTS_SENT - sum(1 for entry in offered if entry["bullets"])
+    for entry in offered:
         bullets = []
-        for bullet in entry["bullets"]:
-            variants = bullet["variants"][:MAX_VARIANTS_PER_BULLET][: max(budget, 0)]
+        for index, bullet in enumerate(entry["bullets"]):
+            first = bullet["variants"][:1] if index == 0 else []
+            extra = bullet["variants"][len(first) : MAX_VARIANTS_PER_BULLET][: max(budget, 0)]
+            variants = first + extra
             if not variants:
                 break
-            budget -= len(variants)
+            budget -= len(extra)
             bullets.append(
                 {
                     "key": bullet["key"],
@@ -266,8 +284,10 @@ def _keyword_choice(catalog: dict) -> dict:
             rows = rows[:limit]
         else:
             rows = [entry for entry in rows if entry["score"] > 0][:limit]
-            if not rows and kind == "project" and not any(e["kind"] == "employment" for e in catalog["entries"]):
-                rows = [entry for entry in catalog["entries"] if entry["kind"] == kind][:2]
+            if kind == "project" and not any(entry["bullets"] for entry in rows):
+                with_bullets = [entry for entry in catalog["entries"] if entry["kind"] == kind and entry["bullets"]]
+                has_jobs = any(e["kind"] == "employment" for e in catalog["entries"])
+                rows = (rows + with_bullets[: 1 if has_jobs else 2])[:limit] if with_bullets else rows
         for entry in rows:
             entries.append(
                 {
@@ -319,6 +339,7 @@ def _model_choice(catalog: dict, data: dict) -> tuple[dict | None, int]:
         )
     if not entries:
         return None, dropped
+    _ensure_project(catalog, entries, counts)
     summaries = {s["key"]: s for s in catalog["summaries"]}
     summary = summaries.get(str(data.get("summary") or ""))
     groups_by_key = {g["key"]: g for g in catalog["groups"]}
@@ -332,6 +353,27 @@ def _model_choice(catalog: dict, data: dict) -> tuple[dict | None, int]:
         "custom": custom,
         "interests": data.get("interests") is True,
     }, dropped
+
+
+def _ensure_project(catalog: dict, entries: list, counts: dict) -> None:
+    """Add the best project with its top bullets when the model left out every project with bullets."""
+    if any(item["entry"]["kind"] == "project" and item["variants"] for item in entries):
+        return
+    project = _best_project(catalog, {item["entry"]["key"] for item in entries})
+    if not project:
+        return
+    if counts["project"] >= MAX_ENTRIES["project"]:
+        # Only bulletless projects were picked; swap the last one out.
+        entries.remove(next(item for item in reversed(entries) if item["entry"]["kind"] == "project"))
+        counts["project"] -= 1
+    counts["project"] += 1
+    entries.append(
+        {
+            "entry": project,
+            "variants": [bullet["variants"][0] for bullet in project["bullets"][:MIN_BULLETS]],
+            "reason": "Added so the resume keeps a project.",
+        }
+    )
 
 
 def _fit_page(choice: dict) -> dict:
