@@ -3,6 +3,10 @@
 The model may reshape wording toward the job, but a draft that adds a number, tool, proper
 noun, or guarded keyword the original bullet does not show is dropped. In keyword mode every
 draft must also use the job keyword, and the model may say the keyword does not fit.
+
+The STAR goal restructures the bullet as Situation, Task, Action, Result. Facts the bullet
+does not state (the context, the scale, the measured result) come back as `[placeholders]`,
+each with a question, so the user supplies them. The guard runs with the placeholders removed.
 """
 
 import hashlib
@@ -19,7 +23,7 @@ from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
-VARIANT_PROMPT_VERSION = "3"
+VARIANT_PROMPT_VERSION = "4"
 GOALS = {
     "concise": "Make it shorter and tighter.",
     "impact": "Lead with the outcome the bullet already states.",
@@ -28,7 +32,27 @@ GOALS = {
         "Fit on one resume line: at most max_chars characters. Cut filler words and soft phrasing; "
         "keep the action, the outcome, and every number that matters."
     ),
+    "star": (
+        "Restructure the bullet with the STAR method: the situation or problem, the task or goal, "
+        "the action taken, and the result. Follow star_rule."
+    ),
 }
+STAR_PARTS = ("situation", "task", "action", "result")
+STAR_RULE = (
+    "Return each draft's star parts and gaps. star maps situation, task, action and result to the "
+    "exact words of body that carry that part, or \"\" when body has none. Where a part needs a fact "
+    "the original bullet does not state (the context, the scale, a measured result), do not invent it: "
+    "write a short placeholder in square brackets, such as [X%], [N customers] or [problem you solved], "
+    "and add a gap for it. gaps: a list of {placeholder, part, question}; placeholder is the bracketed "
+    "text exactly as it appears in body, part is one of situation, task, action, result, and question "
+    "asks the user for that fact in plain words. Use at most 3 placeholders per draft. Also return "
+    "missing: the STAR parts the original bullet does not show."
+)
+STAR_LENGTH_RATIO = 2.5
+STAR_LENGTH_SLACK = 120
+MAX_GAPS = 3
+MAX_QUESTION = 160
+PLACEHOLDER = re.compile(r"\[[^\[\]\n]{1,30}\]")
 ONE_LINE_CHARS = 95
 GUARDED_CATEGORIES = {"tool", "credential", "degree", "experience_duration"}
 MAX_DRAFTS = 5
@@ -53,14 +77,15 @@ _ISSUED_TTL = 3600.0
 
 VARIANT_SYSTEM = """You rewrite one resume bullet for a specific job posting.
 Return one JSON object with keys drafts, fits, and reason.
-drafts: a list of 3 to 5 items, each with name, body, and rationale.
+drafts: a list of 3 to 5 items, each with name, body, and rationale (plus star and gaps when star_rule is given).
 name: 2 to 4 words describing the angle, for example "Outcome first".
 body: the rewritten bullet, one sentence, no leading bullet character.
 rationale: one short sentence on why this wording suits the requirement.
 fits: false only when keyword_rule asks for the keyword and it cannot honestly describe this bullet's work; then drafts is empty.
 reason: when fits is false, one short sentence why; else "".
+missing: only when star_rule is given, see star_rule.
 Rules:
-- Every fact must come from the original bullet. Do not add numbers, tools, products, employers, people, places, or certifications it does not state.
+- Every fact must come from the original bullet. Do not add numbers, tools, products, employers, people, places, or certifications it does not state. Only star_rule allows [placeholders] for missing facts.
 - The posting may guide emphasis and word choice only.
 - Each draft must take a different angle.
 - Follow keyword_rule.
@@ -77,12 +102,29 @@ VARIANT_SCHEMA = {
                     "name": {"type": "string"},
                     "body": {"type": "string"},
                     "rationale": {"type": "string"},
+                    "star": {
+                        "type": "object",
+                        "properties": {part: {"type": "string"} for part in STAR_PARTS},
+                    },
+                    "gaps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "placeholder": {"type": "string"},
+                                "part": {"type": "string", "enum": list(STAR_PARTS)},
+                                "question": {"type": "string"},
+                            },
+                            "required": ["placeholder", "part", "question"],
+                        },
+                    },
                 },
                 "required": ["name", "body", "rationale"],
             },
         },
         "fits": {"type": "boolean"},
         "reason": {"type": "string"},
+        "missing": {"type": "array", "items": {"type": "string", "enum": list(STAR_PARTS)}},
     },
     "required": ["drafts"],
 }
@@ -237,6 +279,7 @@ def filter_drafts(
     job_terms: list[str],
     require_keyword: bool = False,
     max_chars: int | None = None,
+    star: bool = False,
 ) -> tuple[list[dict], int]:
     drafts = data.get("drafts") if isinstance(data, dict) else None
     if not isinstance(drafts, list):
@@ -250,16 +293,86 @@ def filter_drafts(
             continue
         body = " ".join(str(item.get("body") or "").split()).lstrip("•-* ").strip()
         too_long = max_chars is not None and len(body) > max_chars
-        if too_long or _fold(body) in seen or drop_reason(body, original, keyword, category, job_terms, require_keyword=require_keyword):
+        if star:
+            unsafe = _fold(body) in seen or star_drop_reason(body, original, keyword, category, job_terms, require_keyword)
+        else:
+            unsafe = _fold(body) in seen or drop_reason(body, original, keyword, category, job_terms, require_keyword=require_keyword)
+        if too_long or unsafe:
             dropped += 1
             continue
         seen.add(_fold(body))
         name = " ".join(str(item.get("name") or "").split())[:MAX_NAME] or f"AI draft {index + 1}"
         rationale = " ".join(str(item.get("rationale") or "").split())[:MAX_RATIONALE]
-        kept.append({"name": name, "body": body, "rationale": rationale})
+        draft = {"name": name, "body": body, "rationale": rationale}
+        if star:
+            draft["star"] = _star_parts(item.get("star"), body)
+            draft["gaps"] = _star_gaps(item.get("gaps"), body)
+        kept.append(draft)
         if len(kept) >= MAX_DRAFTS:
             break
     return kept, dropped
+
+
+def without_placeholders(text: str) -> str:
+    return " ".join(PLACEHOLDER.sub(" ", text or "").split())
+
+
+def star_drop_reason(
+    body: str, original: str, keyword: str, category: str, job_terms: list[str], require_keyword: bool = False
+) -> str:
+    """`drop_reason` for a STAR draft: [placeholders] are the user's to fill, so they are removed
+    before the fact guard. STAR adds context, so the length budget is wider than for other goals."""
+    text = " ".join((body or "").split())
+    if len(PLACEHOLDER.findall(text)) > MAX_GAPS:
+        return "placeholders"
+    if "[" in PLACEHOLDER.sub("", text) or "]" in PLACEHOLDER.sub("", text):
+        return "placeholders"
+    if len(text) > max(len(original) * STAR_LENGTH_RATIO, len(original) + STAR_LENGTH_SLACK):
+        return "length"
+    if _fold(text) == _fold(original):
+        return "unchanged"
+    return drop_reason(
+        without_placeholders(text), original, keyword, category, job_terms, require_keyword=require_keyword, fresh=True
+    )
+
+
+def _star_parts(raw, body: str) -> dict:
+    """Keep a STAR part only when it is words of the draft itself."""
+    parts = raw if isinstance(raw, dict) else {}
+    folded = _fold(body)
+    out = {}
+    for part in STAR_PARTS:
+        value = " ".join(str(parts.get(part) or "").split()).strip(" ,;.")
+        out[part] = value if value and _fold(value) in folded else ""
+    return out
+
+
+def _star_gaps(raw, body: str) -> list[dict]:
+    """One gap per [placeholder] in body, in reading order. A placeholder the model did not
+    explain still gets a plain question so the user can always fill it in."""
+    given = {}
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        placeholder = " ".join(str(item.get("placeholder") or "").split())
+        if placeholder and not placeholder.startswith("["):
+            placeholder = f"[{placeholder}]"
+        part = str(item.get("part") or "").strip().casefold()
+        question = " ".join(str(item.get("question") or "").split())[:MAX_QUESTION]
+        if placeholder and placeholder not in given:
+            given[placeholder] = {"part": part if part in STAR_PARTS else "result", "question": question}
+    gaps = []
+    for placeholder in dict.fromkeys(match.group(0) for match in PLACEHOLDER.finditer(body)):
+        info = given.get(placeholder) or {"part": "result", "question": ""}
+        question = info["question"] or f"What should replace {placeholder}?"
+        gaps.append({"placeholder": placeholder, "part": info["part"], "question": question})
+    return gaps
+
+
+def _star_missing(raw) -> list[str]:
+    items = raw if isinstance(raw, list) else []
+    wanted = {str(item).strip().casefold() for item in items}
+    return [part for part in STAR_PARTS if part in wanted]
 
 
 def _cache_key(original, job, requirement, keyword, category, goal, model, incorporate=False, max_chars=None) -> str:
@@ -302,7 +415,9 @@ def issued_draft(placement_id: str, body: str, job_id: str) -> str | None:
     return None
 
 
-def _result(status: str, model: str = "", drafts=None, dropped: int = 0, fits: bool = True, reason: str = "") -> dict:
+def _result(
+    status: str, model: str = "", drafts=None, dropped: int = 0, fits: bool = True, reason: str = "", missing=None
+) -> dict:
     return {
         "status": status,
         "detail": DETAILS.get(status, ""),
@@ -311,6 +426,7 @@ def _result(status: str, model: str = "", drafts=None, dropped: int = 0, fits: b
         "dropped": dropped,
         "fits": fits,
         "reason": reason,
+        "missing": missing or [],
     }
 
 
@@ -369,6 +485,9 @@ async def suggest_variants(
     }
     if max_chars:
         request["max_chars"] = max_chars
+    star = goal == "star"
+    if star:
+        request["star_rule"] = STAR_RULE
     messages = [
         {"role": "system", "content": VARIANT_SYSTEM},
         {"role": "user", "content": json.dumps(request, ensure_ascii=False)},
@@ -382,7 +501,7 @@ async def suggest_variants(
     if not isinstance(data, dict):
         return _result("invalid")
     served = getattr(completion, "model", "") or model
-    drafts, dropped = filter_drafts(data, bullet, keyword, category, terms, require, max_chars)
+    drafts, dropped = filter_drafts(data, bullet, keyword, category, terms, require, max_chars, star=star)
     fits = data.get("fits") is not False or bool(drafts)
     reason = "" if fits else " ".join(str(data.get("reason") or "").split())[:MAX_REASON]
     logger.info(
@@ -392,7 +511,8 @@ async def suggest_variants(
         len(drafts),
         dropped,
     )
-    payload = _result("ok", served, drafts, dropped, fits, reason)
+    missing = _star_missing(data.get("missing")) if star else []
+    payload = _result("ok", served, drafts, dropped, fits, reason, missing)
     _CACHE.set(key, payload)
     remember_issued(placement_id, drafts, served, job_id)
     return json.loads(json.dumps(payload))

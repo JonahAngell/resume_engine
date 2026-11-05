@@ -1,11 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { api, ApiError } from "./api";
-import KeywordText from "./KeywordText";
+import KeywordText, { hasPlaceholder } from "./KeywordText";
+import {
+  StarBreakdown,
+  StarGapFields,
+  StarMissingNote,
+  fillPlaceholders,
+  type StarGap,
+  type StarPart,
+  type StarParts,
+} from "./StarFillIn";
 import ModalShell from "./ModalShell";
 import type { CompareJob } from "./matchMarks";
 import type { VariantTarget } from "./match/types";
 
-type Draft = { name: string; body: string; rationale: string };
+type Draft = { name: string; body: string; rationale: string; star?: StarParts | null; gaps?: StarGap[] };
 type Suggestions = {
   status: "ok" | "unavailable" | "rate_limited" | "invalid";
   detail: string;
@@ -16,14 +25,16 @@ type Suggestions = {
   dropped: number;
   fits?: boolean;
   reason?: string;
+  missing?: StarPart[];
 };
-type Goal = "" | "concise" | "impact" | "align";
+type Goal = "" | "concise" | "impact" | "align" | "star";
 
 const GOALS: [Goal, string][] = [
   ["", "Mixed"],
   ["concise", "Concise"],
   ["impact", "Impact"],
   ["align", "Match the requirement"],
+  ["star", "STAR"],
 ];
 // The model may not add these terms; drafts only sharpen wording.
 const GUARDED = new Set(["tool", "credential", "degree", "experience_duration"]);
@@ -52,6 +63,8 @@ export default function SuggestVariantDialog({
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<number | null>(null);
   const [edits, setEdits] = useState<Record<number, string>>({});
+  // Answers to a STAR draft's [placeholders], per draft.
+  const [fills, setFills] = useState<Record<number, Record<string, string>>>({});
   const [editing, setEditing] = useState<number | null>(null);
   const [own, setOwn] = useState(target.excerpt);
   const [busy, setBusy] = useState(false);
@@ -62,6 +75,7 @@ export default function SuggestVariantDialog({
     setLoading(true);
     setSelected(null);
     setEdits({});
+    setFills({});
     setEditing(null);
     api<Suggestions>(
       `/api/compositions/${compositionId}/bullet-placements/${target.placementId}/ai-variants`,
@@ -93,10 +107,15 @@ export default function SuggestVariantDialog({
   const drafts = result?.drafts || [];
   const category = result?.category || target.category;
   const workIn = !!target.incorporate && !!target.keyword && !GUARDED.has(category);
-  const textOf = (index: number) => (index === OWN ? own : edits[index] ?? drafts[index]?.body ?? "");
+  const filled = (index: number) => {
+    const draft = drafts[index];
+    return draft ? fillPlaceholders(draft.body, draft.gaps || [], fills[index] || {}) : "";
+  };
+  const textOf = (index: number) => (index === OWN ? own : edits[index] ?? filled(index));
   const chosenText = selected === null ? "" : textOf(selected).trim();
+  const unfilled = selected !== null && selected !== OWN && hasPlaceholder(chosenText);
   const canApply =
-    !busy && selected !== null && !!chosenText && chosenText !== original.trim();
+    !busy && selected !== null && !!chosenText && chosenText !== original.trim() && !unfilled;
 
   const apply = async () => {
     if (!canApply || selected === null) return;
@@ -172,6 +191,7 @@ export default function SuggestVariantDialog({
             Each option uses {target.keyword}. Only pick one if it describes work you actually did.
           </p>
         )}
+        {goal === "star" && !loading && result?.status === "ok" && <StarMissingNote missing={result.missing} />}
         {loading && <p className="ai-meta">Reviewing…</p>}
         {!loading && result && result.status !== "ok" && <p className="ai-meta">{result.detail}</p>}
         {!loading && result?.status === "ok" && drafts.length === 0 && result.fits === false && (
@@ -208,8 +228,19 @@ export default function SuggestVariantDialog({
                       </span>
                     )}
                     {draft.rationale && <small>{draft.rationale}</small>}
+                    <StarBreakdown star={draft.star} gaps={draft.gaps} values={fills[index]} />
                   </span>
                 </label>
+                {selected === index && editing !== index && edits[index] === undefined && !!draft.gaps?.length && (
+                  <StarGapFields
+                    gaps={draft.gaps}
+                    values={fills[index] || {}}
+                    idPrefix={`variant-${index}`}
+                    onChange={(placeholder, value) =>
+                      setFills((current) => ({ ...current, [index]: { ...current[index], [placeholder]: value } }))
+                    }
+                  />
+                )}
                 {editing === index ? (
                   <textarea
                     aria-label={`Edit ${draft.name}`}
@@ -224,6 +255,10 @@ export default function SuggestVariantDialog({
                   className="link-button"
                   onClick={() => {
                     setSelected(index);
+                    // Editing starts from the draft with any details filled in so far.
+                    if (editing !== index && edits[index] === undefined) {
+                      setEdits((current) => ({ ...current, [index]: filled(index) }));
+                    }
                     setEditing(editing === index ? null : index);
                   }}
                 >
@@ -254,6 +289,9 @@ export default function SuggestVariantDialog({
             )}
           </div>
         </div>
+        {unfilled && (
+          <p className="assist-placeholder-note">Replace the [placeholders] with your own details before saving.</p>
+        )}
         <p className="ai-meta">Saved as a new variant for this resume. Other resumes aren't changed.</p>
         {error && (
           <p role="alert" className="error">

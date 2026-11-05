@@ -86,10 +86,26 @@ class AiReview(BaseModel):
     suggestions: list[AiSuggestion] = []
 
 
+class StarParts(BaseModel):
+    situation: str = ""
+    task: str = ""
+    action: str = ""
+    result: str = ""
+
+
+class StarGap(BaseModel):
+    placeholder: str
+    part: Literal["situation", "task", "action", "result"]
+    question: str
+
+
 class VariantDraft(BaseModel):
     name: str
     body: str
     rationale: str = ""
+    # Only for the STAR goal: which words carry each part, and the [placeholders] to fill in.
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
 
 
 class VariantSuggestions(BaseModel):
@@ -102,6 +118,7 @@ class VariantSuggestions(BaseModel):
     dropped: int = 0
     fits: bool = True
     reason: str = ""
+    missing: list[Literal["situation", "task", "action", "result"]] = []
 
 
 class KeywordRevision(BaseModel):
