@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { api, ApiError } from "./api";
 import KeywordText, { hasPlaceholder } from "./KeywordText";
 import ModalShell from "./ModalShell";
+import { StarBreakdown, StarGapFields, fillPlaceholders, type StarGap, type StarParts } from "./StarFillIn";
 import type { CompareJob } from "./matchMarks";
 import type { KeywordAssistResult, KeywordEntry, VariantTarget } from "./match/types";
 
@@ -70,6 +71,8 @@ export default function KeywordAssistDialog({
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, string>>({});
+  // Answers to a STAR draft's [placeholders], per card.
+  const [fills, setFills] = useState<Record<string, Record<string, string>>>({});
   const [parents, setParents] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
   const [own, setOwn] = useState("");
@@ -101,14 +104,14 @@ export default function KeywordAssistDialog({
   const textOf = (id: string) => {
     if (id === OWN) return own;
     const card = revisions.find((item) => item.id === id) || fresh.find((item) => item.id === id);
-    return edits[id] ?? card?.body ?? "";
+    return edits[id] ?? (card ? fillPlaceholders(card.body, card.gaps || [], fills[id] || {}) : "");
   };
   const parentOf = (id: string) => parents[id] ?? fresh.find((item) => item.id === id)?.parent_id ?? "";
   const chosenText = selected ? textOf(selected).trim() : "";
   const revisionCard = revisions.find((item) => item.id === selected);
   const newCard = fresh.find((item) => item.id === selected);
   const needsParent = selected === OWN || !!newCard;
-  const placeholder = needsParent && hasPlaceholder(chosenText);
+  const placeholder = (needsParent || !!revisionCard) && hasPlaceholder(chosenText);
   const canApply =
     !busy &&
     !!selected &&
@@ -177,6 +180,8 @@ export default function KeywordAssistDialog({
       className="link-button"
       onClick={() => {
         setSelected(id);
+        // Editing starts from the draft with any details filled in so far.
+        if (editing !== id && edits[id] === undefined) setEdits((current) => ({ ...current, [id]: textOf(id) }));
         setEditing(editing === id ? null : id);
       }}
     >
@@ -193,6 +198,22 @@ export default function KeywordAssistDialog({
         onChange={(e) => setEdits((current) => ({ ...current, [id]: e.target.value }))}
       />
     ) : null;
+  /** S/T/A/R breakdown, and fields for the [placeholders] while the card is picked and not hand-edited. */
+  const star = (card: { id: string; star?: StarParts | null; gaps?: StarGap[] }) => (
+    <>
+      <StarBreakdown star={card.star} gaps={card.gaps} values={fills[card.id]} />
+      {selected === card.id && editing !== card.id && edits[card.id] === undefined && !!card.gaps?.length && (
+        <StarGapFields
+          gaps={card.gaps}
+          values={fills[card.id] || {}}
+          idPrefix={`keyword-${card.id}`}
+          onChange={(placeholder, value) =>
+            setFills((current) => ({ ...current, [card.id]: { ...current[card.id], [placeholder]: value } }))
+          }
+        />
+      )}
+    </>
+  );
   const nothing = !loading && result?.status === "ok" && !revisions.length && !fresh.length;
 
   return (
@@ -248,6 +269,7 @@ export default function KeywordAssistDialog({
                       {card.rationale && <small>{card.rationale}</small>}
                     </span>
                   </label>
+                  <div className="assist-star">{star(card)}</div>
                   {editor(card.id, label)}
                   <div className="assist-option-links">
                     {editToggle(card.id, label)}
@@ -296,6 +318,7 @@ export default function KeywordAssistDialog({
                       {card.rationale && <small>{card.rationale}</small>}
                     </span>
                   </label>
+                  <div className="assist-star">{star(card)}</div>
                   {editor(card.id, label)}
                   {selected === card.id && (
                     <EntryPicker
@@ -304,9 +327,6 @@ export default function KeywordAssistDialog({
                       label={`Entry for ${label}`}
                       onChange={(value) => setParents((current) => ({ ...current, [card.id]: value }))}
                     />
-                  )}
-                  {selected === card.id && hasPlaceholder(textOf(card.id)) && (
-                    <p className="assist-placeholder-note">Replace each [placeholder] with your real detail before saving.</p>
                   )}
                   <div className="assist-option-links">{editToggle(card.id, label)}</div>
                 </div>
@@ -343,6 +363,9 @@ export default function KeywordAssistDialog({
             </div>
           )}
         </div>
+        {placeholder && (
+          <p className="assist-placeholder-note">Replace each [placeholder] with your real detail before saving.</p>
+        )}
         <p className="ai-meta">
           {revisionCard
             ? "Saved as a new variant for this resume. Other resumes aren't changed."

@@ -50,6 +50,16 @@ STAR_RULE = (
 )
 STAR_LENGTH_RATIO = 2.5
 STAR_LENGTH_SLACK = 120
+# The same guidance for the coach, chat and Work into resume, which name their own fields.
+STAR_GUIDE = (
+    "Shape accomplishment bullets with the STAR method: the situation or problem, the task or goal, the "
+    "action taken, and the result. Where a part needs a fact the source text does not state (the context, "
+    "the scale, a measured result), write a short placeholder in square brackets such as [X%], "
+    "[N customers] or [problem you solved] instead of inventing it; at most 3 per bullet. With that wording "
+    "also return star (situation, task, action and result, each the exact words that carry that part, or "
+    "\"\") and gaps (a list of {placeholder, part, question} for every placeholder; question asks the user "
+    "for that fact in plain words)."
+)
 MAX_GAPS = 3
 MAX_QUESTION = 160
 PLACEHOLDER = re.compile(r"\[[^\[\]\n]{1,30}\]")
@@ -305,8 +315,7 @@ def filter_drafts(
         rationale = " ".join(str(item.get("rationale") or "").split())[:MAX_RATIONALE]
         draft = {"name": name, "body": body, "rationale": rationale}
         if star:
-            draft["star"] = _star_parts(item.get("star"), body)
-            draft["gaps"] = _star_gaps(item.get("gaps"), body)
+            draft.update(star_fields(item, body))
         kept.append(draft)
         if len(kept) >= MAX_DRAFTS:
             break
@@ -317,23 +326,47 @@ def without_placeholders(text: str) -> str:
     return " ".join(PLACEHOLDER.sub(" ", text or "").split())
 
 
+def star_unsafe_detail(
+    body: str,
+    original: str,
+    keyword: str,
+    category: str,
+    job_terms: list[str],
+    *,
+    require_keyword: bool = False,
+    fresh: bool = False,
+    open_terms: bool = False,
+) -> tuple[str, str]:
+    """`unsafe_detail` for STAR wording: [placeholders] are the user's to fill, so they are removed
+    before the fact guard. STAR adds context, so the length budget is wider than for other wording.
+    `fresh` (a new bullet, `original` is its entry's text) skips the length and unchanged checks."""
+    text = " ".join((body or "").split())
+    rest = PLACEHOLDER.sub("", text)
+    if len(PLACEHOLDER.findall(text)) > MAX_GAPS or "[" in rest or "]" in rest:
+        return "placeholders", ""
+    if not fresh:
+        if len(text) > max(len(original) * STAR_LENGTH_RATIO, len(original) + STAR_LENGTH_SLACK):
+            return "length", ""
+        if _fold(text) == _fold(original):
+            return "unchanged", ""
+    checked = without_placeholders(text)
+    if not checked:
+        return "empty", ""
+    return unsafe_detail(
+        checked, original, keyword, category, job_terms, require_keyword=require_keyword, fresh=True, open_terms=open_terms
+    )
+
+
 def star_drop_reason(
     body: str, original: str, keyword: str, category: str, job_terms: list[str], require_keyword: bool = False
 ) -> str:
-    """`drop_reason` for a STAR draft: [placeholders] are the user's to fill, so they are removed
-    before the fact guard. STAR adds context, so the length budget is wider than for other goals."""
-    text = " ".join((body or "").split())
-    if len(PLACEHOLDER.findall(text)) > MAX_GAPS:
-        return "placeholders"
-    if "[" in PLACEHOLDER.sub("", text) or "]" in PLACEHOLDER.sub("", text):
-        return "placeholders"
-    if len(text) > max(len(original) * STAR_LENGTH_RATIO, len(original) + STAR_LENGTH_SLACK):
-        return "length"
-    if _fold(text) == _fold(original):
-        return "unchanged"
-    return drop_reason(
-        without_placeholders(text), original, keyword, category, job_terms, require_keyword=require_keyword, fresh=True
-    )
+    return star_unsafe_detail(body, original, keyword, category, job_terms, require_keyword=require_keyword)[0]
+
+
+def star_fields(item, body: str) -> dict:
+    """The checked `star` breakdown and `gaps` for one piece of model wording."""
+    item = item if isinstance(item, dict) else {}
+    return {"star": _star_parts(item.get("star"), body), "gaps": _star_gaps(item.get("gaps"), body)}
 
 
 def _star_parts(raw, body: str) -> dict:

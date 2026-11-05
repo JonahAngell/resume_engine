@@ -129,6 +129,9 @@ class KeywordRevision(BaseModel):
     original: str
     body: str
     rationale: str = ""
+    placeholders: bool = False
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
 
 
 class KeywordNewBullet(BaseModel):
@@ -139,6 +142,8 @@ class KeywordNewBullet(BaseModel):
     body: str
     rationale: str = ""
     placeholders: bool = False
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
 
 
 class KeywordEntry(BaseModel):
@@ -174,6 +179,8 @@ class CoachSuggestion(BaseModel):
     proposed: str = ""
     rationale: str = ""
     priority: Literal["high", "medium", "low"] = "medium"
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
 
 
 class CoachEquivalent(BaseModel):
@@ -347,6 +354,8 @@ class ChatProposal(BaseModel):
     original: str = ""
     proposed: str = ""
     placeholders: bool = False
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
     order: list[str] = []
     before: list[str] = []
     after: list[str] = []

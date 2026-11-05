@@ -125,3 +125,37 @@ def test_failure_statuses(status):
 def test_missing_key_is_unavailable(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     assert asyncio.run(coach_resume(DESCRIPTION, RESUME, PLACED, {}, 1))["status"] == "unavailable"
+
+
+def test_star_rewrite_keeps_placeholders_and_gaps():
+    body = "Facing [budget pressure], owned budgeting reviews and financial forecasting for regional teams, cutting variance by [X%]"
+    complete = model(
+        {
+            "suggestions": [
+                {"kind": "rewrite", "bullet": 1, "requirement": FORECAST, "keyword": "Financial Forecasting", "proposed": body,
+                 "priority": "high", "star": {"situation": "Facing [budget pressure]", "result": "cutting variance by [X%]"},
+                 "gaps": [{"placeholder": "[X%]", "part": "result", "question": "How much did variance drop?"}]},
+                {"kind": "rewrite", "bullet": 1, "requirement": FORECAST, "proposed": "Owned budgeting reviews for regional teams, cutting variance 20%"},
+                {"kind": "summary", "requirement": FORECAST, "proposed": "Analyst who turns crew schedules into decisions for [N] teams."},
+            ],
+            "equivalents": [],
+        }
+    )
+    result = run(complete)
+    assert "STAR" in complete.calls[0][0]["content"]
+    [card] = result["suggestions"]
+    assert card["proposed"] == body
+    assert result["dropped"] == 2  # invented number; placeholder in a summary
+    assert card["star"]["situation"] == "Facing [budget pressure]" and card["star"]["task"] == ""
+    assert [gap["placeholder"] for gap in card["gaps"]] == ["[budget pressure]", "[X%]"]
+    assert card["gaps"][1]["question"] == "How much did variance drop?"
+
+
+def test_summary_cards_have_no_star_fields():
+    complete = model(
+        {"suggestions": [{"kind": "summary", "requirement": FORECAST,
+                          "proposed": "Analyst who turns crew schedules into forecasting decisions operations teams can use."}],
+         "equivalents": []}
+    )
+    [card] = run(complete)["suggestions"]
+    assert card["star"] is None and card["gaps"] == []

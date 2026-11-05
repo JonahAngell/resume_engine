@@ -3,30 +3,40 @@
 The model may reword placed bullets so they use the keyword, and draft new bullets for a role or
 project. Revisions pass the single-bullet guard against their own bullet. A new bullet has no
 original, so its fact source is its entry: the title, organization, and that entry's bullets.
-Missing numbers become [placeholders] the user must fill in before saving.
+Both follow the STAR method; facts the source does not state become [placeholders], each with a
+question, that the user must fill in before saving.
 """
 
 import hashlib
 import json
 import logging
-import re
 
 from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job, scrub
-from .ai_variants import _fold, _keyword_allowed, drop_reason, job_tool_terms, remember_issued
+from .ai_variants import (
+    PLACEHOLDER,
+    STAR_GUIDE,
+    _fold,
+    _keyword_allowed,
+    job_tool_terms,
+    remember_issued,
+    star_drop_reason,
+    star_fields,
+    star_unsafe_detail,
+    without_placeholders,
+)
 from .job_match import _placement_options
 from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
-KEYWORD_PROMPT_VERSION = "1"
+KEYWORD_PROMPT_VERSION = "2"
 MAX_REVISIONS = 3
 MAX_NEW = 2
 MAX_BULLETS = 40
 MAX_RATIONALE = 240
 MAX_REASON = 240
 ENTRY_SECTIONS = {"work_experience": "Work Experience", "projects": "Projects", "leadership": "Leadership"}
-PLACEHOLDER = re.compile(r"\[[^\[\]\n]{1,30}\]")
 DETAILS = {
     "unavailable": "AI suggestions are unavailable. Your resume is unchanged.",
     "rate_limited": "The free model is rate limited. Your resume is unchanged.",
@@ -34,15 +44,16 @@ DETAILS = {
 }
 _CACHE = BoundedCache(16)
 
-KEYWORD_SYSTEM = """You help a job seeker work one keyword from a job posting into their resume.
+KEYWORD_SYSTEM = f"""You help a job seeker work one keyword from a job posting into their resume.
 Return one JSON object with keys revisions, new_bullets, and no_fit_reason.
-revisions: up to 3 items, each with bullet (a bullet number), body, and rationale. Rewrite that bullet so it uses the keyword. Only pick bullets whose work the keyword honestly describes. Bullets marked likely_fit are good candidates, but you may pick any.
-new_bullets: up to 2 items, each with entry (an entry number), body, and rationale. A new bullet for that role or project, about work it plausibly involved, using the keyword.
+revisions: up to 3 items, each with bullet (a bullet number), body, rationale, star, and gaps. Rewrite that bullet so it uses the keyword. Only pick bullets whose work the keyword honestly describes. Bullets marked likely_fit are good candidates, but you may pick any.
+new_bullets: up to 2 items, each with entry (an entry number), body, rationale, star, and gaps. A new bullet for that role or project, about work it plausibly involved, using the keyword.
 no_fit_reason: when nothing fits, one short sentence why; else "".
 Rules:
 - Every body must contain the keyword phrase.
 - A revision keeps the facts of its bullet and adds none: no new numbers, tools, products, employers, people, places, or certifications.
-- A new bullet may only use facts from its entry: the title, organization, and its bullets. Where a number would help but the entry states none, write a placeholder in square brackets such as [X%] or [N teams].
+- A new bullet may only use facts from its entry: the title, organization, and its bullets.
+- {STAR_GUIDE}
 - One sentence each, no leading bullet character.
 - The posting may guide emphasis and word choice only.
 - rationale: one short sentence."""
@@ -128,10 +139,6 @@ def entry_facts(entry: dict) -> str:
     return " ".join([entry["facts"], *entry["bullets"]]).strip()
 
 
-def without_placeholders(text: str) -> str:
-    return " ".join(PLACEHOLDER.sub(" ", text or "").split())
-
-
 def filter_keyword(
     data: dict, entries: list[dict], bullets: list[dict], keyword: str, category: str, job_terms: list[str]
 ) -> dict:
@@ -147,10 +154,8 @@ def filter_keyword(
             continue
         bullet = bullets[index - 1]
         body = _body(item.get("body"))
-        if (
-            bullet["placement_id"] in used
-            or PLACEHOLDER.search(body)
-            or drop_reason(body, bullet["text"], keyword, category, job_terms, require_keyword=True)
+        if bullet["placement_id"] in used or star_drop_reason(
+            body, bullet["text"], keyword, category, job_terms, require_keyword=True
         ):
             dropped += 1
             continue
@@ -164,6 +169,8 @@ def filter_keyword(
                 "original": bullet["text"],
                 "body": body,
                 "rationale": _clip(item.get("rationale"), MAX_RATIONALE),
+                "placeholders": bool(PLACEHOLDER.search(body)),
+                **star_fields(item, body),
             }
         )
     seen = {_fold(bullet["text"]) for bullet in bullets}
@@ -174,11 +181,9 @@ def filter_keyword(
             continue
         entry = entries[index - 1]
         body = _body(item.get("body"))
-        checked = without_placeholders(body)
         if (
-            not checked
-            or _fold(body) in seen
-            or drop_reason(checked, entry_facts(entry), keyword, category, job_terms, require_keyword=True, fresh=True)
+            _fold(body) in seen
+            or star_unsafe_detail(body, entry_facts(entry), keyword, category, job_terms, require_keyword=True, fresh=True)[0]
         ):
             dropped += 1
             continue
@@ -192,6 +197,7 @@ def filter_keyword(
                 "body": body,
                 "rationale": _clip(item.get("rationale"), MAX_RATIONALE),
                 "placeholders": bool(PLACEHOLDER.search(body)),
+                **star_fields(item, body),
             }
         )
     return {"revisions": revisions, "new_bullets": new_bullets, "dropped": dropped}

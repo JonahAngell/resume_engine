@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { diffWords } from "../match/diffWords";
+import KeywordText from "../KeywordText";
+import { StarBreakdown, StarGapFields, fillPlaceholders, type StarGap, type StarParts } from "../StarFillIn";
 
 export type ChatProposal = {
   id: string;
@@ -16,6 +18,9 @@ export type ChatProposal = {
   original: string;
   proposed: string;
   placeholders: boolean;
+  /** STAR breakdown and the [placeholders] to fill in, on rewrites and new bullets. */
+  star?: StarParts | null;
+  gaps?: StarGap[];
   order: string[];
   before: string[];
   after: string[];
@@ -68,9 +73,15 @@ export default function ProposalCard({
   onDismiss: () => void;
 }) {
   const editable = card.kind === "rewrite" || card.kind === "summary" || card.kind === "new_bullet";
-  // Wording with [placeholders] or held back by the guard opens in edit mode: the user supplies the details.
-  const [text, setText] = useState<string | undefined>(card.placeholders || held ? card.proposed : undefined);
-  const value = text ?? card.proposed;
+  const gaps = held ? [] : card.gaps || [];
+  const [fills, setFills] = useState<Record<string, string>>({});
+  // Held-back wording, or [placeholders] without STAR questions, open in edit mode: the user
+  // supplies the details. STAR placeholders get one field each instead.
+  const [text, setText] = useState<string | undefined>(
+    held || (card.placeholders && !gaps.length) ? card.proposed : undefined,
+  );
+  const filled = fillPlaceholders(card.proposed, gaps, fills);
+  const value = text ?? filled;
   const placeholders = editable && PLACEHOLDER.test(value);
   const untouched = held && value.trim() === card.proposed.trim();
   const blocked = placeholders || untouched;
@@ -102,7 +113,7 @@ export default function ProposalCard({
           {text === undefined ? (
             <p className="coach-after">
               <span className="coach-label">{card.kind === "use_library" ? "From your library" : "Suggested"}</span>
-              {card.kind === "use_library" ? card.proposed : diffWords(card.original, card.proposed)}
+              {card.kind === "use_library" ? card.proposed : diffWords(card.original, value)}
             </p>
           ) : null}
         </div>
@@ -110,8 +121,17 @@ export default function ProposalCard({
       {(card.kind === "new_bullet" || (card.kind === "use_library" && !card.placement_id)) && text === undefined && (
         <p className="coach-after">
           <span className="coach-label">{card.kind === "use_library" ? "From your library" : "New bullet"}</span>
-          {card.proposed}
+          {card.kind === "use_library" ? card.proposed : <KeywordText text={value} keyword="" />}
         </p>
+      )}
+      {editable && <StarBreakdown star={card.star} gaps={gaps} values={fills} />}
+      {editable && text === undefined && gaps.length > 0 && (
+        <StarGapFields
+          gaps={gaps}
+          values={fills}
+          idPrefix={`chat-${card.id}`}
+          onChange={(placeholder, next) => setFills((current) => ({ ...current, [placeholder]: next }))}
+        />
       )}
       {editable && text !== undefined && (
         <label className="coach-after">
@@ -119,7 +139,9 @@ export default function ProposalCard({
           <textarea rows={3} value={text} onChange={(event) => setText(event.target.value)} />
         </label>
       )}
-      {placeholders && <p className="chat-note">Replace the [placeholders] with your own details before saving.</p>}
+      {placeholders && text !== undefined && (
+        <p className="chat-note">Replace the [placeholders] with your own details before saving.</p>
+      )}
       {card.kind === "remove" && (
         <p className="coach-before chat-removed">
           <span className="coach-label">Remove</span>
@@ -153,7 +175,7 @@ export default function ProposalCard({
           {saving ? "Saving…" : card.kind === "add_skill" ? "Choose a group…" : held ? "Save my edit" : text === undefined ? "Accept" : "Save edit"}
         </button>
         {editable && !held && (
-          <button type="button" disabled={disabled} onClick={() => setText(text === undefined ? card.proposed : undefined)}>
+          <button type="button" disabled={disabled} onClick={() => setText(text === undefined ? filled : undefined)}>
             {text === undefined ? "Edit" : "Cancel edit"}
           </button>
         )}

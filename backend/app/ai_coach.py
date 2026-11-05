@@ -12,13 +12,13 @@ import re
 
 from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_review import redact_job, scrub
-from .ai_variants import drop_reason, job_tool_terms, remember_issued
+from .ai_variants import PLACEHOLDER, STAR_GUIDE, drop_reason, job_tool_terms, remember_issued, star_drop_reason, star_fields
 from .job_match import is_skill_keyword, match_qualifications
 from .cache import BoundedCache
 
 logger = logging.getLogger("resume_engine.ai")
 
-COACH_PROMPT_VERSION = "1"
+COACH_PROMPT_VERSION = "2"
 MAX_SUGGESTIONS = 12
 MAX_EQUIVALENTS = 8
 MAX_BULLETS = 40
@@ -32,7 +32,7 @@ GROUP_ORDER = {"required": 0, "preferred": 1, "responsibilities": 2}
 PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 _CACHE = BoundedCache(16)
 
-COACH_SYSTEM = """You are a resume coach. Compare one resume with one job posting and suggest concrete edits.
+COACH_SYSTEM = f"""You are a resume coach. Compare one resume with one job posting and suggest concrete edits.
 Return one JSON object with keys suggestions and equivalents.
 suggestions: up to 12 items, most important first. Each item has:
   kind: "rewrite" (reword one numbered bullet), "summary" (reword the summary), or "add_skill" (a tool or skill the job wants that belongs in the Skills section);
@@ -41,10 +41,12 @@ suggestions: up to 12 items, most important first. Each item has:
   keyword: the requirement keyword it targets, or "";
   proposed: the full new wording for "rewrite" and "summary", else "";
   rationale: one short sentence;
-  priority: "high", "medium" or "low".
+  priority: "high", "medium" or "low";
+  star and gaps: for "rewrite" only, see the STAR rule.
 equivalents: requirements the resume already meets in other words. Each item has requirement (copied exactly), bullet (number), and rationale.
 Rules:
 - Every fact in proposed wording must already be in the bullet or summary you rewrite. Never add numbers, tools, products, employers, people, places or certifications.
+- STAR rule, for "rewrite" only: {STAR_GUIDE} A summary takes no placeholders.
 - The posting may guide emphasis and word choice only.
 - Prefer required requirements over preferred ones.
 - Do not suggest a rewrite that only changes punctuation."""
@@ -136,6 +138,8 @@ def filter_coach(data: dict, bullets: list[dict], summary: str, rows: list[dict]
             "proposed": "",
             "rationale": _clip(item.get("rationale"), MAX_RATIONALE),
             "priority": priority,
+            "star": None,
+            "gaps": [],
         }
         if kind == "add_skill":
             if row.get("matched") or not keyword or _keyword_found(row, keyword) or not is_skill_keyword(keyword, category):
@@ -157,10 +161,16 @@ def filter_coach(data: dict, bullets: list[dict], summary: str, rows: list[dict]
                 if not original.strip():
                     dropped += 1
                     continue
-            if drop_reason(proposed, original, keyword, category, job_terms):
+            if kind == "rewrite":
+                unsafe = star_drop_reason(proposed, original, keyword, category, job_terms)
+            else:
+                unsafe = PLACEHOLDER.search(proposed) or drop_reason(proposed, original, keyword, category, job_terms)
+            if unsafe:
                 dropped += 1
                 continue
             card["original"], card["proposed"] = original, proposed
+            if kind == "rewrite":
+                card.update(star_fields(item, proposed))
             key = (kind, card["placement_id"], _fold(proposed))
         if key in seen:
             dropped += 1

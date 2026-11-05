@@ -5361,8 +5361,17 @@ mark.doc-hit:focus-visible {
 .ai-draft-option > button {
   align-self: center;
 }
-.assist-option > .star-gaps {
+.assist-option > .star-gaps,
+.assist-option > .assist-star {
   grid-column: 2;
+}
+.assist-star {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.assist-star:empty {
+  display: none;
 }
 .ai-draft-option > .star-gaps {
   grid-column: 1 / -1;

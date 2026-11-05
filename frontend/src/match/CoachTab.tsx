@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
 import { diffWords } from "./diffWords";
 import { activeIdsForTerms } from "../matchMarks";
+import { hasPlaceholder } from "../KeywordText";
+import { StarBreakdown, StarGapFields, fillPlaceholders } from "../StarFillIn";
 import type { JobMatchState } from "./useJobMatch";
 import { groupLabel, type AssistRequest, type CoachSuggestion, type CoachResult } from "./types";
 
@@ -53,12 +55,16 @@ export default function CoachTab({
   const [applied, setApplied] = useState<string[]>([]);
   const [dismissed, setDismissed] = useState<string[]>(() => readDismissed(storageKey));
   const [editing, setEditing] = useState<Record<string, string>>({});
+  // Answers to a STAR rewrite's [placeholders], per card.
+  const [fills, setFills] = useState<Record<string, Record<string, string>>>({});
   const [saving, setSaving] = useState("");
+  const filled = (card: CoachSuggestion) => fillPlaceholders(card.proposed, card.gaps || [], fills[card.id] || {});
 
   useEffect(() => {
     setResult(null);
     setApplied([]);
     setEditing({});
+    setFills({});
     setError("");
     setDismissed(readDismissed(storageKey));
   }, [storageKey]);
@@ -75,6 +81,7 @@ export default function CoachTab({
       setResult(next);
       setApplied([]);
       setEditing({});
+      setFills({});
     } catch (reason: any) {
       setError(reason.message);
     } finally {
@@ -98,8 +105,8 @@ export default function CoachTab({
 
   const accept = async (card: CoachSuggestion) => {
     if (!job) return;
-    const text = (editing[card.id] ?? card.proposed).trim();
-    if (!text) return;
+    const text = (editing[card.id] ?? filled(card)).trim();
+    if (!text || hasPlaceholder(text)) return;
     setSaving(card.id);
     setError("");
     try {
@@ -201,6 +208,9 @@ export default function CoachTab({
           <ul className="coach-list">
             {open.map((card) => {
               const text = editing[card.id];
+              const current = text ?? filled(card);
+              const gaps = card.gaps || [];
+              const unfilled = card.kind !== "add_skill" && hasPlaceholder(current);
               return (
                 <li key={card.id} className={`coach-card kind-${card.kind}`}>
                   <div className="coach-card-head">
@@ -220,7 +230,7 @@ export default function CoachTab({
                       {text === undefined ? (
                         <p className="coach-after">
                           <span className="coach-label">Suggested</span>
-                          {diffWords(card.original, card.proposed)}
+                          {diffWords(card.original, current)}
                         </p>
                       ) : (
                         <label className="coach-after">
@@ -234,6 +244,20 @@ export default function CoachTab({
                       )}
                     </div>
                   )}
+                  {card.kind === "rewrite" && <StarBreakdown star={card.star} gaps={gaps} values={fills[card.id]} />}
+                  {text === undefined && gaps.length > 0 && (
+                    <StarGapFields
+                      gaps={gaps}
+                      values={fills[card.id] || {}}
+                      idPrefix={`coach-${card.id}`}
+                      onChange={(placeholder, value) =>
+                        setFills((all) => ({ ...all, [card.id]: { ...all[card.id], [placeholder]: value } }))
+                      }
+                    />
+                  )}
+                  {text !== undefined && unfilled && (
+                    <p className="assist-placeholder-note">Replace the [placeholders] with your own details before saving.</p>
+                  )}
                   {card.rationale && <p className="coach-why">{card.rationale}</p>}
                   <div className="row-actions">
                     {card.kind === "add_skill" ? (
@@ -245,7 +269,7 @@ export default function CoachTab({
                         <button
                           type="button"
                           className="primary"
-                          disabled={!!saving || (card.kind === "summary" && !summaryVariantId)}
+                          disabled={!!saving || unfilled || (card.kind === "summary" && !summaryVariantId)}
                           onClick={() => accept(card)}
                         >
                           {saving === card.id ? "Saving…" : text === undefined ? "Accept" : "Save edit"}
@@ -255,7 +279,7 @@ export default function CoachTab({
                           onClick={() =>
                             setEditing((current) => {
                               const next = { ...current };
-                              if (text === undefined) next[card.id] = card.proposed;
+                              if (text === undefined) next[card.id] = filled(card);
                               else delete next[card.id];
                               return next;
                             })

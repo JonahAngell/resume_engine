@@ -265,3 +265,29 @@ def test_prose_fallback_becomes_the_reply():
 def test_a_rewrite_that_only_adds_a_placeholder_is_kept():
     result = run(model({"reply": "Add the team count.", "proposals": [{"kind": "rewrite", "bullet": 1, "proposed": "Owned budgeting reviews for [N] regional teams"}]}))
     assert result["proposals"][0]["placeholders"] is True
+
+
+def test_star_rewrite_and_new_bullet_carry_gaps():
+    rewrite = "Facing [budget pressure], owned budgeting reviews for regional teams, cutting variance by [X%]"
+    fresh = "As operations analyst, rebuilt [report name] for regional teams, saving [X hours] a week"
+    complete = model(
+        {
+            "reply": "Two STAR edits below.",
+            "proposals": [
+                {"kind": "rewrite", "bullet": 1, "proposed": rewrite, "rationale": "STAR.",
+                 "star": {"situation": "Facing [budget pressure]", "action": "owned budgeting reviews for regional teams"},
+                 "gaps": [{"placeholder": "[budget pressure]", "part": "situation", "question": "What pressure prompted the reviews?"}]},
+                {"kind": "new_bullet", "entry": 1, "proposed": fresh, "rationale": "Adds a result."},
+                {"kind": "rewrite", "bullet": 3, "proposed": "Planned [a] [b] [c] [d] weekly crew schedules for 3 venues"},
+            ],
+        }
+    )
+    result = run(complete)
+    assert "STAR" in complete.calls[0][0]["content"]
+    kinds = [card["kind"] for card in result["proposals"]]
+    assert kinds == ["rewrite", "new_bullet"]
+    first, second = result["proposals"]
+    assert first["placeholders"] and first["star"]["action"] == "owned budgeting reviews for regional teams"
+    assert first["gaps"][0] == {"placeholder": "[budget pressure]", "part": "situation", "question": "What pressure prompted the reviews?"}
+    assert [gap["placeholder"] for gap in second["gaps"]] == ["[report name]", "[X hours]"]
+    assert result["dropped"] == 1
