@@ -167,13 +167,19 @@ Design notes and the review behind these features are in `docs/ai_suggestions_bl
 
 | Route | Saves | Notes |
 |---|---|---|
-| `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`, `goal` (`concise`/`impact`/`align`), `incorporate_keyword`. Bullet text is read from the placement. In keyword mode every draft must contain the keyword (or a dictionary form of it), and the reply carries `fits`/`reason` when the model says it doesn't fit. |
+| `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`, `goal` (`concise`/`impact`/`align`/`one_line`/`star`), `incorporate_keyword`. `one_line` and `star` work without a job. Bullet text is read from the placement. In keyword mode every draft must contain the keyword (or a dictionary form of it), and the reply carries `fits`/`reason` when the model says it doesn't fit. |
 | `POST /api/compositions/{cid}/ai-keyword-assist` | nothing | Body: `job_id`, `keyword`, `requirement`, `category`. Returns up to 3 `revisions` (one per placed bullet), up to 2 `new_bullets` (each tied to a role or project), the `entries` a new bullet can go under, `allowed`, `no_fit_reason`. Guarded keywords return `allowed: false` without calling the model. |
 | `POST /api/compositions/{cid}/ai-keyword-assist/accept-new` | bullet + variant + placement | Body: `revision`, `parent_id` (a role or project on this resume), `body`, `source`, `job_id`, `model`. 422 while the body still has a `[placeholder]`; 404 for an entry not on this resume; 409 on a stale revision. Revisions are accepted through `.../ai-variants/accept`. |
 | `POST /api/job-descriptions/{job_id}/define` | nothing | Body: `keyword`, `requirement`. Returns `status`, `detail`, `definition`, `in_this_job`, `model`. 404 for a job the user doesn't own. |
 | `POST /api/compositions/{cid}/bullet-placements/{pid}/ai-variants/accept` | variant + placement | Body: `revision`, `name`, `body`, `source` (`draft`/`edited`/`own`), `job_id`, `model`. 409 on a stale revision, with no variant written. |
 | `POST /api/compositions/{cid}/skills/recommend` | nothing | Body: `keyword`, `allow_ai`. The UI calls with `allow_ai=false` first and again with `true` only when `source == "none"`. |
 | `POST /api/compositions/{cid}/skills` | tool, group, this resume | Body: `revision`, `name`, and `group_id` or `new_group_name`. |
+
+## STAR rewrites
+
+The `star` goal asks the model to restructure the bullet as Situation, Task, Action, Result. Each draft also returns `star` (the words of the draft that carry each part; a part that is not a substring of the draft is blanked) and `gaps` (one `{placeholder, part, question}` per `[placeholder]` in the draft, in reading order; a placeholder the model didn't explain gets a default question). The reply carries `missing`, the parts the original bullet lacks. Facts the bullet doesn't state, such as the context or a measured result, must be `[placeholders]`, never invented: `star_drop_reason` removes placeholders and then runs `drop_reason`, so an added number, tool or proper noun outside brackets is still dropped. At most 3 placeholders; the length budget is 2.5× the original plus 120 characters (still capped at 500). In the UI (`StarFillIn.tsx`, used by `SuggestVariantDialog` and the editor's `AiDraftPanel`) each placeholder becomes a field labelled with its question and STAR part; the draft and the S/T/A/R breakdown update as the user types, and saving stays disabled until every placeholder is filled. `.../ai-variants/accept` returns 422 for a `draft`/`edited` body that still has a placeholder. A filled-in draft is saved as `edited`, so `ai_generated` stays false.
+
+The coach, the chat assistant and Work into resume use the same approach for bullets. Their prompts include `STAR_GUIDE`; bullet wording is checked with `star_unsafe_detail` (`fresh=True` for new bullets, where the entry's text is the only fact source and the length budget is skipped) and carries `star` and `gaps` from `star_fields`. Coach rewrites, chat rewrites and new bullets, and Work into resume revisions and new bullets may now hold up to 3 placeholders; summaries never take STAR fields, and a coach summary with a placeholder is dropped. The coach card (`CoachTab`), the Work into resume card (`KeywordAssistDialog`) and the chat card (`ProposalCard`) show the breakdown and one field per placeholder, and saving stays disabled until each is filled. Chat wording with placeholders but no `gaps` (a summary) still opens in edit mode. Prompt versions: coach `2`, keyword `2`, chat `3`.
 
 ## Match data
 
@@ -185,7 +191,7 @@ Each `RequirementKeyword` carries `skill` (`is_skill_keyword`): skill keywords g
 
 ## Guardrails
 
-A draft is dropped when it adds a number (digits or spelled), a dictionary term or capitalised job keyword that the original does not show, a mid-sentence capitalised word or acronym not in the original, or, for `tool`/`credential`/`degree`/`experience_duration`, the keyword itself. Domain, methodology, responsibility and soft-skill keywords may appear. In keyword mode a draft without the keyword is dropped (`missing_keyword`). A new bullet is checked the same way with its entry (title, organization, location and that entry's bullets) as the original, without the length-ratio and unchanged checks, after `[placeholders]` are removed; placeholders are not allowed in revisions. Drafts over 500 characters or 1.6× the original (plus 60), equal to the original, or equal to an earlier draft are dropped. Only counts are logged.
+A draft is dropped when it adds a number (digits or spelled), a dictionary term or capitalised job keyword that the original does not show, a mid-sentence capitalised word or acronym not in the original, or, for `tool`/`credential`/`degree`/`experience_duration`, the keyword itself. Domain, methodology, responsibility and soft-skill keywords may appear. In keyword mode a draft without the keyword is dropped (`missing_keyword`). A new bullet is checked the same way with its entry (title, organization, location and that entry's bullets) as the original, without the length-ratio and unchanged checks, after `[placeholders]` are removed. Revisions from Work into resume, the coach and the chat follow the STAR rules (up to 3 placeholders, wider length budget; see STAR rewrites). Drafts over 500 characters or 1.6× the original (plus 60), equal to the original, or equal to an earlier draft are dropped. Only counts are logged.
 
 ## Caches
 
@@ -196,7 +202,7 @@ A draft is dropped when it adds a number (digits or spelled), a dictionary term 
 - Suggestions never change the match score; the next deterministic match decides.
 - No draft is saved without an explicit Accept, and the server reads the bullet from the placement.
 - Missing tools are offered as Add to Skills, never as an AI rewrite.
-- A new AI bullet uses only facts from its entry. Missing numbers are `[placeholders]` the user must replace before the server will save it.
+- A new or revised AI bullet uses only facts from its source. Missing facts are `[placeholders]` the user must replace before the server will save it.
 - Skill group choice uses library, related-skills and hint data first. The model sees only group and tool names and can only pick a listed group or propose a new name.
 - Skill group names are never hardcoded.
 - Adding a skill writes to the library and the current resume only. Other resumes that include the group get a `composition_hidden_tools` row for a new or restored tool, so their payload, revision and history are untouched. A group newly added to the current resume shows only the added skill.

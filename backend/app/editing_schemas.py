@@ -336,7 +336,7 @@ class SkillAddWrite(BaseModel):
         return self
 
 
-AiGoal = Literal["concise", "impact", "align", "one_line"]
+AiGoal = Literal["concise", "impact", "align", "one_line", "star"]
 AiKeywordCategory = Literal[
     "tool", "domain", "responsibility", "methodology", "credential", "degree", "experience_duration", "soft_skill", ""
 ]
@@ -344,7 +344,7 @@ AiKeywordCategory = Literal[
 
 class AiVariantRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    # Only the one-line goal works without a job.
+    # Only the one-line and STAR goals work without a job.
     job_id: UUID | None = None
     keyword: str = Field(default="", max_length=200)
     requirement: str = Field(default="", max_length=2000)
@@ -355,7 +355,7 @@ class AiVariantRequest(BaseModel):
 
     @model_validator(mode="after")
     def job_unless_one_line(self):
-        if self.job_id is None and self.goal != "one_line":
+        if self.job_id is None and self.goal not in ("one_line", "star"):
             raise ValueError("Choose a job for this suggestion")
         return self
 

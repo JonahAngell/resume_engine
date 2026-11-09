@@ -2,6 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api";
 import ModalShell from "../ModalShell";
 import { linesOver, type Fit } from "../FitIndicator";
+import KeywordText, { hasPlaceholder } from "../KeywordText";
+import {
+  StarBreakdown,
+  StarGapFields,
+  StarMissingNote,
+  fillPlaceholders,
+  type StarGap,
+  type StarPart,
+  type StarParts,
+} from "../StarFillIn";
 
 /** What the editor's bullet dialogs need to call AI for the selected job. */
 export type AiJobContext = {
@@ -37,21 +47,24 @@ export function placementLineId(placements: any[], placement: any) {
   return index < 0 ? "" : `${parent}-bullet-${index}`;
 }
 
-export type AiDraft = { name: string; body: string; rationale: string };
+export type AiDraft = { name: string; body: string; rationale: string; star?: StarParts | null; gaps?: StarGap[] };
 type Drafts = {
   status: "ok" | "unavailable" | "rate_limited" | "invalid";
   detail: string;
   model: string;
   drafts: AiDraft[];
+  missing?: StarPart[];
 };
-type Goal = "" | "concise" | "impact" | "align" | "one_line";
+type Goal = "" | "concise" | "impact" | "align" | "one_line" | "star";
 const GOALS: [Goal, string][] = [
   ["", "Mixed"],
   ["concise", "Concise"],
   ["impact", "Impact"],
   ["align", "Match the job"],
   ["one_line", "One line"],
+  ["star", "STAR"],
 ];
+const JOBLESS = new Set<Goal>(["one_line", "star"]);
 
 export type PickCandidate = {
   key: string;
@@ -199,7 +212,8 @@ export function PickBadges({ option, method, best }: { option: PickCandidate; me
   );
 }
 
-/** Ask the model for new wording of one placed bullet. Picking a draft hands it back. */
+/** Ask the model for new wording of one placed bullet. Picking a draft hands it back, with any
+ * STAR [placeholders] already replaced by the user's answers. */
 export function AiDraftPanel({
   ai,
   placementId,
@@ -209,19 +223,25 @@ export function AiDraftPanel({
   ai: AiJobContext;
   placementId: string;
   selected?: string;
-  onPick: (draft: AiDraft, model: string) => void;
+  onPick: (draft: AiDraft, model: string, body: string) => void;
 }) {
   const [goal, setGoal] = useState<Goal>("");
   const [result, setResult] = useState<Drafts | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [filling, setFilling] = useState<number | null>(null);
+  const [fills, setFills] = useState<Record<number, Record<string, string>>>({});
   useEffect(() => {
     setResult(null);
     setError("");
   }, [ai.jobId, placementId]);
+  useEffect(() => {
+    setFilling(null);
+    setFills({});
+  }, [result]);
   const run = async (nextGoal: Goal = goal) => {
-    // Only the one-line rewrite works without a job.
-    if (!ai.jobId && nextGoal !== "one_line") return;
+    // Only the one-line and STAR rewrites work without a job.
+    if (!ai.jobId && !JOBLESS.has(nextGoal)) return;
     setGoal(nextGoal);
     setLoading(true);
     setError("");
@@ -255,6 +275,9 @@ export function AiDraftPanel({
           <button type="button" className="ai-action" onClick={() => run("one_line")}>
             <span aria-hidden="true">✦</span> Make it one line
           </button>
+          <button type="button" className="ai-action" onClick={() => run("star")}>
+            <span aria-hidden="true">✦</span> Rewrite with STAR
+          </button>
         </div>
       )}
       {(result || loading) && (
@@ -265,7 +288,7 @@ export function AiDraftPanel({
               type="button"
               className={goal === value ? "active" : ""}
               aria-pressed={goal === value}
-              disabled={loading || (!ai.jobId && value !== "one_line")}
+              disabled={loading || (!ai.jobId && !JOBLESS.has(value))}
               onClick={() => run(value)}
             >
               {label}
@@ -274,8 +297,9 @@ export function AiDraftPanel({
         </div>
       )}
       {!ai.jobId && (
-        <p className="ai-meta">Choose a job to get wording aimed at it. One line works without a job.</p>
+        <p className="ai-meta">Choose a job to get wording aimed at it. One line and STAR work without a job.</p>
       )}
+      {goal === "star" && !loading && result?.status === "ok" && <StarMissingNote missing={result.missing} />}
       {loading && <p className="ai-meta">{goal === "one_line" ? "Writing one-line versions…" : "Writing options…"}</p>}
       {!loading && result && result.status !== "ok" && <p className="ai-meta">{result.detail}</p>}
       {!loading && result?.status === "ok" && !result.drafts.length && (
@@ -287,27 +311,52 @@ export function AiDraftPanel({
       )}
       {!loading && !!result?.drafts.length && (
         <div className="assist-options" role="list" aria-label="AI wording">
-          {result.drafts.map((draft, index) => (
-            <div
-              key={`${draft.name}-${index}`}
-              role="listitem"
-              className={`assist-option ai-draft-option ${selected === draft.body ? "selected" : ""}`}
-            >
-              <span className="assist-option-text">
-                <strong>{draft.name}</strong>
-                <span>{draft.body}</span>
-                {goal === "one_line" && (
-                  <small>
-                    {draft.body.length} of ~{charsPerLine(ai)} characters
-                  </small>
+          {result.drafts.map((draft, index) => {
+            const gaps = draft.gaps || [];
+            const text = fillPlaceholders(draft.body, gaps, fills[index] || {});
+            const open = filling === index;
+            const ready = !hasPlaceholder(text);
+            return (
+              <div
+                key={`${draft.name}-${index}`}
+                role="listitem"
+                className={`assist-option ai-draft-option ${selected === draft.body ? "selected" : ""}`}
+              >
+                <span className="assist-option-text">
+                  <strong>{draft.name}</strong>
+                  <span>
+                    <KeywordText text={text} keyword="" />
+                  </span>
+                  {goal === "one_line" && (
+                    <small>
+                      {draft.body.length} of ~{charsPerLine(ai)} characters
+                    </small>
+                  )}
+                  {draft.rationale && <small>{draft.rationale}</small>}
+                  <StarBreakdown star={draft.star} gaps={gaps} values={fills[index]} />
+                </span>
+                {gaps.length && !open ? (
+                  <button type="button" onClick={() => setFilling(index)}>
+                    {selected === draft.body ? "Selected" : "Fill in details"}
+                  </button>
+                ) : (
+                  <button type="button" disabled={!ready} onClick={() => onPick(draft, result.model, text)}>
+                    {selected === draft.body ? "Selected" : "Use"}
+                  </button>
                 )}
-                {draft.rationale && <small>{draft.rationale}</small>}
-              </span>
-              <button type="button" onClick={() => onPick(draft, result.model)}>
-                {selected === draft.body ? "Selected" : "Use"}
-              </button>
-            </div>
-          ))}
+                {open && (
+                  <StarGapFields
+                    gaps={gaps}
+                    values={fills[index] || {}}
+                    idPrefix={`ai-draft-${placementId}-${index}`}
+                    onChange={(placeholder, value) =>
+                      setFills((current) => ({ ...current, [index]: { ...current[index], [placeholder]: value } }))
+                    }
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       {error && (

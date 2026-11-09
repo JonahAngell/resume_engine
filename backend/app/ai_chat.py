@@ -16,12 +16,12 @@ from collections import Counter
 from .ai_client import AiCallError, ai_available, complete_json, model_name
 from .ai_keyword import PLACEHOLDER, entry_facts, new_bullet_key, resume_entries, without_placeholders
 from .ai_review import redact_job, scrub
-from .ai_variants import has_keyword, job_tool_terms, remember_issued, unsafe_detail
+from .ai_variants import STAR_GUIDE, has_keyword, job_tool_terms, remember_issued, star_fields, star_unsafe_detail, unsafe_detail
 from .job_match import match_qualifications
 
 logger = logging.getLogger("resume_engine.ai")
 
-CHAT_PROMPT_VERSION = "2"
+CHAT_PROMPT_VERSION = "3"
 CHAT_TIMEOUT = 60.0
 MAX_HISTORY = 12
 MAX_MESSAGE = 2000
@@ -61,14 +61,14 @@ def _feedback(code: str, term: str) -> str:
     return f"names {term}, which the resume does not show; leave it out of the wording (offer add_skill if it is a missing tool from the posting)"
 
 
-CHAT_SYSTEM = """You are a resume assistant inside a resume editor. You talk with the job seeker about their resume, how it matches the selected job posting, and the posting itself.
+CHAT_SYSTEM = f"""You are a resume assistant inside a resume editor. You talk with the job seeker about their resume, how it matches the selected job posting, and the posting itself.
 The CONTEXT block below holds the only facts you may use: the selected job posting (or none), its requirements with match state, the resume (summary, skills, numbered entries and bullets), and the user's library of other bullets they have written.
 Return one JSON object with keys reply and proposals.
 reply: your answer in plain text (short paragraphs or "- " lists, no markdown headings). Refer to bullets by their wording, not their number.
 proposals: edits the user can accept with one click, only when they asked for changes or a change clearly helps; else []. At most 6. Each item has kind, rationale (one short sentence) and:
-  "rewrite": bullet (number), proposed (full new wording), keyword (a requirement keyword it works in, or "");
+  "rewrite": bullet (number), proposed (full new wording), keyword (a requirement keyword it works in, or ""), star, gaps;
   "summary": proposed (full new summary);
-  "new_bullet": entry (number), proposed (one sentence);
+  "new_bullet": entry (number), proposed (one sentence), star, gaps;
   "remove": bullet (number);
   "reorder": entry (number), order (every bullet number of that entry, in the new order);
   "add_skill": keyword (a missing requirement keyword that is a tool or skill);
@@ -76,6 +76,7 @@ proposals: edits the user can accept with one click, only when they asked for ch
 Rules:
 - Only discuss requirements that appear in the selected posting. Never invent requirements, employers, or job details. With no posting selected, say so when asked about fit, and do not guess what a job wants.
 - Every fact in proposed wording must already be in the bullet, summary or entry it changes. Never add numbers, tools, products, employers, people, places or certifications. Where a number would help but none is given, write a placeholder in square brackets such as [X%] or [N teams]; the user fills it in.
+- For "rewrite" and "new_bullet": {STAR_GUIDE}
 - Tools and software the resume doesn't show belong in add_skill proposals, never in bullet wording.
 - Write team and function names in lowercase ("the support team"), unless the source text capitalises them.
 - Only say you suggested an edit when it is in proposals.
@@ -260,10 +261,17 @@ def filter_proposals(data: dict, context: dict) -> tuple[list[dict], list[dict],
     touched: set[str] = set()
     dropped = 0
 
-    def check(card: dict, number: int, proposed: str, original: str, keyword: str = "", category: str = "", fresh: bool = False) -> bool:
-        """True when the wording is safe. Unsafe wording is held back with its reason, or dropped."""
+    def check(
+        card: dict, number: int, proposed: str, original: str, keyword: str = "", category: str = "",
+        fresh: bool = False, star: bool = False,
+    ) -> bool:
+        """True when the wording is safe. Unsafe wording is held back with its reason, or dropped.
+        `star` (bullets) uses the STAR guard: wider length budget, at most 3 placeholders."""
         checked = without_placeholders(proposed)
-        code, term = unsafe_detail(checked, original, keyword, category, job_terms, fresh=fresh, open_terms=True)
+        if star:
+            code, term = star_unsafe_detail(proposed, original, keyword, category, job_terms, fresh=fresh, open_terms=True)
+        else:
+            code, term = unsafe_detail(checked, original, keyword, category, job_terms, fresh=fresh, open_terms=True)
         # Adding only a [placeholder] ("for [N] teams") asks the user for a number: a real edit.
         if not code or (code == "unchanged" and PLACEHOLDER.search(proposed)):
             return True
@@ -298,11 +306,13 @@ def filter_proposals(data: dict, context: dict) -> tuple[list[dict], list[dict],
                 proposed = _body(item.get("proposed"))
                 found = _keyword(keywords, item.get("keyword"))
                 keyword = found["keyword"] if found else ""
-                card.update(proposed=proposed, keyword=keyword, placeholders=bool(PLACEHOLDER.search(proposed)))
+                card.update(
+                    proposed=proposed, keyword=keyword, placeholders=bool(PLACEHOLDER.search(proposed)), **star_fields(item, proposed)
+                )
                 if bullet["placement_id"] in touched:
                     dropped += 1
                     continue
-                if not check(card, number, proposed, bullet["text"], keyword, found["category"] if found else ""):
+                if not check(card, number, proposed, bullet["text"], keyword, found["category"] if found else "", star=True):
                     continue
                 key = (kind, bullet["placement_id"], _fold(proposed))
             else:
@@ -338,8 +348,9 @@ def filter_proposals(data: dict, context: dict) -> tuple[list[dict], list[dict],
                 entry=entry["entry"],
                 proposed=proposed,
                 placeholders=bool(PLACEHOLDER.search(proposed)),
+                **star_fields(item, proposed),
             )
-            if not check(card, number, proposed, entry_facts(entry), fresh=True):
+            if not check(card, number, proposed, entry_facts(entry), fresh=True, star=True):
                 continue
             key = (kind, entry["parent_id"], _fold(proposed))
         elif kind == "reorder":

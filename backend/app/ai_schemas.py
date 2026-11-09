@@ -86,10 +86,26 @@ class AiReview(BaseModel):
     suggestions: list[AiSuggestion] = []
 
 
+class StarParts(BaseModel):
+    situation: str = ""
+    task: str = ""
+    action: str = ""
+    result: str = ""
+
+
+class StarGap(BaseModel):
+    placeholder: str
+    part: Literal["situation", "task", "action", "result"]
+    question: str
+
+
 class VariantDraft(BaseModel):
     name: str
     body: str
     rationale: str = ""
+    # Only for the STAR goal: which words carry each part, and the [placeholders] to fill in.
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
 
 
 class VariantSuggestions(BaseModel):
@@ -102,6 +118,7 @@ class VariantSuggestions(BaseModel):
     dropped: int = 0
     fits: bool = True
     reason: str = ""
+    missing: list[Literal["situation", "task", "action", "result"]] = []
 
 
 class KeywordRevision(BaseModel):
@@ -112,6 +129,9 @@ class KeywordRevision(BaseModel):
     original: str
     body: str
     rationale: str = ""
+    placeholders: bool = False
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
 
 
 class KeywordNewBullet(BaseModel):
@@ -122,6 +142,8 @@ class KeywordNewBullet(BaseModel):
     body: str
     rationale: str = ""
     placeholders: bool = False
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
 
 
 class KeywordEntry(BaseModel):
@@ -157,6 +179,8 @@ class CoachSuggestion(BaseModel):
     proposed: str = ""
     rationale: str = ""
     priority: Literal["high", "medium", "low"] = "medium"
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
 
 
 class CoachEquivalent(BaseModel):
@@ -330,6 +354,8 @@ class ChatProposal(BaseModel):
     original: str = ""
     proposed: str = ""
     placeholders: bool = False
+    star: StarParts | None = None
+    gaps: list[StarGap] = []
     order: list[str] = []
     before: list[str] = []
     after: list[str] = []

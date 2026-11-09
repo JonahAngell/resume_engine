@@ -665,6 +665,9 @@ async def accept_keyword_bullet(cid: UUID, req: KeywordBulletAccept, identity: C
 
 @router.post("/api/compositions/{cid}/bullet-placements/{placement_id}/ai-variants/accept", response_model=CompositionState)
 async def accept_bullet_variant(cid: UUID, placement_id: UUID, req: AiVariantAccept, identity: CurrentUser = Depends(resolve_current_user)):
+    # STAR drafts carry [placeholders] for facts only the user knows; they must be filled first.
+    if req.source != "own" and PLACEHOLDER.search(req.body):
+        raise HTTPException(422, "Replace the [placeholders] with your own details before saving.")
     async with connection() as c:
         u = await owner(identity, c)
         ai = None

@@ -114,6 +114,8 @@ export type AssistRequest =
   | { kind: "rewrite"; target: VariantTarget }
   | { kind: "keyword"; keyword: string; requirement: string; category: string };
 
+import type { StarGap, StarParts } from "../StarFillIn";
+
 export type KeywordRevision = {
   id: string;
   placement_id: string;
@@ -122,6 +124,9 @@ export type KeywordRevision = {
   original: string;
   body: string;
   rationale: string;
+  placeholders?: boolean;
+  star?: StarParts | null;
+  gaps?: StarGap[];
 };
 
 export type KeywordNewBullet = {
@@ -132,6 +137,8 @@ export type KeywordNewBullet = {
   body: string;
   rationale: string;
   placeholders: boolean;
+  star?: StarParts | null;
+  gaps?: StarGap[];
 };
 
 export type KeywordEntry = { parent_id: string; section: string; entry: string };
@@ -167,6 +174,8 @@ export type CoachSuggestion = {
   proposed: string;
   rationale: string;
   priority: "high" | "medium" | "low";
+  star?: StarParts | null;
+  gaps?: StarGap[];
 };
 
 export type CoachEquivalent = {

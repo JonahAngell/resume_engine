@@ -104,7 +104,8 @@ def test_safe_revisions_and_new_bullets_are_kept_and_remembered():
         {"bullet": 2, "body": "Used A/B testing to model attendance and staffing for 20 venues"},  # new number
         {"bullet": 2, "body": "Used A/B testing in Optimizely to model attendance for 14 venues"},  # job tool
         {"bullet": 2, "body": "Used A/B testing at Contoso to model attendance for 14 venues"},  # proper noun
-        {"bullet": 2, "body": "Used A/B testing to model attendance for [N] venues"},  # placeholder in a revision
+        {"bullet": 2, "body": "Used A/B testing [a] [b] [c] [d] to model attendance for 14 venues"},  # too many placeholders
+        {"bullet": 2, "body": "Used A/B testing to model attendance for 14 venues [unclosed"},  # broken placeholder
         {"bullet": 9, "body": "Used A/B testing to model attendance for 14 venues"},  # unknown bullet
         {"bullet": "2", "body": "Used A/B testing to model attendance for 14 venues"},  # not a number
     ],
@@ -195,3 +196,35 @@ def test_missing_key_is_unavailable(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
     result = asyncio.run(assist_keyword(JOB, RESUME, PLACED, "A/B Testing", "", "methodology", 1))
     assert result["status"] == "unavailable"
+
+
+def test_star_revision_may_ask_for_missing_details():
+    entries, bullets = resume_entries(RESUME, PLACED)
+    body = "Facing [staffing problem], used A/B testing to model attendance and staffing for 14 venues, cutting overtime by [X%]"
+    item = {
+        "bullet": 2,
+        "body": body,
+        "star": {"situation": "Facing [staffing problem]", "action": "used A/B testing to model attendance and staffing for 14 venues", "result": "cutting overtime by [X%]"},
+        "gaps": [{"placeholder": "[X%]", "part": "result", "question": "How much did overtime drop?"}],
+    }
+    part = filter_keyword({"revisions": [item], "new_bullets": []}, entries, bullets, "A/B Testing", "methodology", [])
+    [card] = part["revisions"]
+    assert card["placeholders"] is True
+    assert card["star"]["result"] == "cutting overtime by [X%]" and card["star"]["task"] == ""
+    assert [(gap["placeholder"], gap["part"]) for gap in card["gaps"]] == [("[staffing problem]", "result"), ("[X%]", "result")]
+    assert card["gaps"][1]["question"] == "How much did overtime drop?"
+
+
+def test_star_new_bullet_carries_gaps():
+    entries, bullets = resume_entries(RESUME, PLACED)
+    body = "Used A/B testing to compare [N] staffing schedules, saving [X hours]"
+    part = filter_keyword({"revisions": [], "new_bullets": [{"entry": 2, "body": body}]}, entries, bullets, "A/B Testing", "methodology", [])
+    [card] = part["new_bullets"]
+    assert [gap["placeholder"] for gap in card["gaps"]] == ["[N]", "[X hours]"]
+    assert set(card["star"]) == {"situation", "task", "action", "result"}
+
+
+def test_prompt_asks_for_star():
+    from app.ai_keyword import KEYWORD_SYSTEM
+
+    assert "STAR" in KEYWORD_SYSTEM and "gaps" in KEYWORD_SYSTEM

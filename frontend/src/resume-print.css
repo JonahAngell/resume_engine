@@ -5361,6 +5361,103 @@ mark.doc-hit:focus-visible {
 .ai-draft-option > button {
   align-self: center;
 }
+.assist-option > .star-gaps,
+.assist-option > .assist-star {
+  grid-column: 2;
+}
+.assist-star {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.assist-star:empty {
+  display: none;
+}
+.ai-draft-option > .star-gaps {
+  grid-column: 1 / -1;
+}
+/* STAR method: breakdown chips on a draft and fill-in fields for its [placeholders]. */
+.star-breakdown {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+}
+.star-part {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  color: #3b4a66;
+}
+.star-letter {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--ok-bg, #e3f4ea);
+  color: var(--ok, #157347);
+  font-weight: 700;
+  font-size: 11px;
+}
+.star-needs .star-letter {
+  background: #fde2e1;
+  color: #8a1f1a;
+}
+.star-absent .star-letter {
+  background: #eef1f6;
+  color: #7a879c;
+}
+.star-label {
+  font-weight: 600;
+}
+.star-muted {
+  color: #7a879c;
+  font-style: italic;
+}
+.star-gaps {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border: 1px dashed #e8b4b0;
+  border-radius: 8px;
+  background: #fffafa;
+  cursor: default;
+}
+.star-gaps legend {
+  padding: 0 4px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.star-gap {
+  display: grid;
+  gap: 4px;
+}
+.star-gap label {
+  font-size: 13px;
+}
+.star-gap input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+}
+.star-chip {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #eef3fc;
+  color: #1f2a44;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
 .switch-rank-bar {
   display: flex;
   flex-wrap: wrap;

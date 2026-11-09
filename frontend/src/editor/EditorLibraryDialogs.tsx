@@ -181,9 +181,9 @@ function BulletEditDialog({
             ai={ai}
             placementId={placementId}
             selected={aiDraft?.draft.body}
-            onPick={(draft, model) => {
+            onPick={(draft, model, text) => {
               setAiDraft({ draft, model });
-              setBody(draft.body);
+              setBody(text);
             }}
           />
         </section>
@@ -353,9 +353,9 @@ function BulletSwitchDialog({
             ai={ai}
             placementId={String(placement.id)}
             selected={aiDraft?.draft.body}
-            onPick={(next, model) => {
+            onPick={(next, model, text) => {
               setAiDraft({ draft: next, model });
-              setDraft(next.body);
+              setDraft(text);
             }}
           />
           {aiDraft && (

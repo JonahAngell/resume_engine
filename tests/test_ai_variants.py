@@ -220,3 +220,83 @@ def test_issued_draft_expires(monkeypatch):
     assert issued_draft("p9", "Ran weekly reviews", "j1") == "m:free"
     clock[0] += ai_variants._ISSUED_TTL + 1
     assert issued_draft("p9", "Ran weekly reviews", "j1") is None
+
+
+STAR_BODY = "Facing [problem you solved], owned budgeting reviews for regional teams, cutting variance by [X%]"
+
+
+def star_reply(items, missing=("situation", "result"), model="m:free"):
+    async def complete(messages, schema, name):
+        complete.calls.append(messages)
+        return AiCompletion({"drafts": items, "missing": list(missing)}, model)
+
+    complete.calls = []
+    return complete
+
+
+def test_star_goal_keeps_placeholders_breakdown_and_questions():
+    item = {
+        **draft(STAR_BODY, name="STAR"),
+        "star": {
+            "situation": "Facing [problem you solved]",
+            "task": "",
+            "action": "owned budgeting reviews for regional teams",
+            "result": "an invented result not in the body",
+        },
+        "gaps": [
+            {"placeholder": "[X%]", "part": "result", "question": "By how much did variance drop?"},
+            {"placeholder": "[not in body]", "part": "task", "question": "Ignored"},
+        ],
+    }
+    complete = star_reply([item], missing=("situation", "result", "bogus"))
+    result = asyncio.run(
+        suggest_variants(ORIGINAL, JOB, "req", "", goal="star", placement_id="p1", job_id="j1", complete=complete)
+    )
+    sent = json.loads(complete.calls[0][1]["content"])
+    assert "STAR" in sent["goal"] and "placeholder" in sent["star_rule"]
+    assert result["missing"] == ["situation", "result"]
+    [kept] = result["drafts"]
+    assert kept["body"] == STAR_BODY
+    assert kept["star"] == {
+        "situation": "Facing [problem you solved]",
+        "task": "",
+        "action": "owned budgeting reviews for regional teams",
+        "result": "",
+    }
+    # Every placeholder in the body gets a question, in reading order; unknown ones get a default.
+    assert kept["gaps"] == [
+        {"placeholder": "[problem you solved]", "part": "result", "question": "What should replace [problem you solved]?"},
+        {"placeholder": "[X%]", "part": "result", "question": "By how much did variance drop?"},
+    ]
+    assert issued_draft("p1", STAR_BODY, "j1") == "m:free"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Owned budgeting reviews for regional teams, cutting variance by 30%",  # invented number
+        "Owned budgeting reviews in Excel for regional teams, saving [X hours]",  # invented tool
+        "Owned [a] [b] [c] [d] budgeting reviews for regional teams",  # too many placeholders
+        "Owned budgeting reviews for regional teams [unclosed",
+    ],
+)
+def test_star_goal_still_drops_invented_facts(body):
+    complete = star_reply([draft(body)])
+    result = asyncio.run(suggest_variants(ORIGINAL, JOB, "req", "", goal="star", job_terms=["Excel"], complete=complete))
+    assert result["drafts"] == [] and result["dropped"] == 1
+
+
+def test_star_goal_allows_longer_drafts_than_other_goals():
+    body = "When regional spend drifted from plan, owned budgeting reviews for regional teams to keep spending on track, reducing variance by [X%]"
+    for goal, kept in (("star", 1), ("impact", 0)):
+        clear_cache()
+        result = asyncio.run(suggest_variants(ORIGINAL, JOB, "req", "", goal=goal, complete=star_reply([draft(body)])))
+        assert len(result["drafts"]) == kept, goal
+
+
+def test_other_goals_have_no_star_fields():
+    complete = reply("Led budgeting reviews for regional teams")
+    result = asyncio.run(suggest_variants(ORIGINAL, JOB, "req", "", goal="impact", complete=complete))
+    assert "star_rule" not in json.loads(complete.calls[0][1]["content"])
+    assert result["missing"] == []
+    assert set(result["drafts"][0]) == {"name", "body", "rationale"}
