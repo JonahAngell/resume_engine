@@ -11,6 +11,8 @@ from ..editing_schemas import (
 from ..identity import CurrentUser, resolve_current_user
 from ..ai_schemas import AtsScore
 from ..ats_score import score_resume
+from ..render import tools_layout_for
+from ..templates_repository import appearance_for
 from ..job_match import match_qualifications
 from ..job_repository import (
     analyze_job_description,
@@ -112,5 +114,10 @@ async def match_job_description_post(
 async def ats_score_job(job_id: UUID, req: AtsScoreRequest, identity: CurrentUser = Depends(resolve_current_user)):
     inputs = await _review_inputs(job_id, req.composition_id, identity)
     match = match_qualifications(inputs["description"], inputs["resume"], inputs["bullets"], inputs["review"])
-    result = score_resume(match, inputs["resume"], inputs["job"], inputs["composition"], req.page_count)
+    composition = dict(inputs["composition"])
+    async with connection() as c:
+        u = await owner(identity, c)
+        look = await appearance_for(c, u["id"], composition.get("template_id"), composition.get("tools_layout"))
+    composition["tools_layout_effective"] = tools_layout_for(composition.get("template_style") or "classic", look["settings"], look["tools_layout"])
+    result = score_resume(match, inputs["resume"], inputs["job"], composition, req.page_count)
     return {**result, "revision": inputs["revision"]}

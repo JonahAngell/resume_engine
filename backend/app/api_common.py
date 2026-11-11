@@ -50,6 +50,8 @@ def state(row):
         "date_format": row.get("date_format", "long"),
         "template_style": row.get("template_style", "classic"),
         "skill_row_max": row.get("skill_row_max", 4),
+        "template_id": row.get("template_id"),
+        "tools_layout": row.get("tools_layout"),
         "section_sort_modes": row.get("section_sort_modes", {}),
         "summary_variant_id": row.get("summary_variant_id"),
         "profile_id": row.get("profile_id"),

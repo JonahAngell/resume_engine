@@ -445,11 +445,11 @@ async def copy_resume_variant(conn, user_id, starter_id, name, description, disp
                  user_id,name,description,display_title,target_company,target_role,
                  summary_variant_id,profile_id,profile_variant_id,render_payload,
                  interest_layout,section_order,preferred_page_length,date_format,
-                 template_style,skill_row_max,section_sort_modes,is_starter,is_default_starter
+                 template_style,skill_row_max,template_id,tools_layout,section_sort_modes,is_starter,is_default_starter
                )
                SELECT user_id,%s,%s,%s,%s,%s,summary_variant_id,profile_id,profile_variant_id,
                       render_payload,interest_layout,section_order,preferred_page_length,date_format,
-                      template_style,skill_row_max,section_sort_modes,false,false
+                      template_style,skill_row_max,template_id,tools_layout,section_sort_modes,false,false
                FROM resume_compositions WHERE id=%s
                RETURNING *""",
             (
@@ -500,7 +500,7 @@ async def save_as_resume_variant(conn, user_id, cid, name, replace_id=None):
                      target_company=%s,target_role=%s,
                      summary_variant_id=%s,profile_id=%s,profile_variant_id=%s,render_payload=%s::jsonb,
                      interest_layout=%s,section_order=%s,preferred_page_length=%s,date_format=%s,
-                     template_style=%s,skill_row_max=%s,section_sort_modes=%s,revision=revision+1,updated_at=now()
+                     template_style=%s,skill_row_max=%s,template_id=%s,tools_layout=%s,section_sort_modes=%s,revision=revision+1,updated_at=now()
                    WHERE id=%s RETURNING *""",
                 (
                     name.strip(),
@@ -518,6 +518,8 @@ async def save_as_resume_variant(conn, user_id, cid, name, replace_id=None):
                     source.get("date_format") or "long",
                     source.get("template_style") or "classic",
                     source.get("skill_row_max") or 4,
+                    source.get("template_id"),
+                    source.get("tools_layout"),
                     json.dumps(source.get("section_sort_modes") or {}),
                     replace_id,
                 ),
@@ -530,8 +532,8 @@ async def save_as_resume_variant(conn, user_id, cid, name, replace_id=None):
             """INSERT INTO resume_compositions(
                  user_id,name,description,display_title,target_company,target_role,summary_variant_id,profile_id,profile_variant_id,
                  render_payload,interest_layout,section_order,preferred_page_length,date_format,
-                 template_style,skill_row_max,section_sort_modes,is_starter,is_default_starter
-               ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s::jsonb,%s,%s,%s,%s,%s::jsonb,true,%s)
+                 template_style,skill_row_max,template_id,tools_layout,section_sort_modes,is_starter,is_default_starter
+               ) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s::jsonb,%s,%s,%s,%s,%s,%s,%s::jsonb,true,%s)
                RETURNING *""",
             (
                 user_id,
@@ -550,6 +552,8 @@ async def save_as_resume_variant(conn, user_id, cid, name, replace_id=None):
                 source.get("date_format") or "long",
                 source.get("template_style") or "classic",
                 source.get("skill_row_max") or 4,
+                source.get("template_id"),
+                source.get("tools_layout"),
                 json.dumps(source.get("section_sort_modes") or {}),
                 not bool(has_default),
             ),

@@ -1,1 +1,6 @@
-EB Garamond, Carlito, and Tinos are licensed under the SIL Open Font License 1.1. See OFL.txt.
+EB Garamond, Carlito, Tinos, Lato, Inter, and Source Serif 4 are licensed under the SIL Open Font License 1.1. See OFL.txt.
+
+Lato: Copyright (c) 2010-2011 by tyPoland Lukasz Dziedzic, with Reserved Font Name "Lato".
+Inter: Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter).
+Source Serif 4: Copyright Adobe (https://github.com/adobe-fonts/source-serif).
+Lato, Inter, and Source Serif 4 are the Latin subsets from the @fontsource npm packages (v5.3).

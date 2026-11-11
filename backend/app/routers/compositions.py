@@ -447,6 +447,7 @@ async def composition_preferences(cid: UUID, req: CompositionPreferencesWrite, i
         u=await owner(identity,c); row,error=await update_preferences(c,u["id"],cid,req)
         if error=="missing": raise HTTPException(404,"Composition not found")
         if error=="stale": raise HTTPException(409,"Composition changed; reload before saving")
+        if error=="template": raise HTTPException(404,"Template not found")
         return state(row)
 
 
@@ -571,7 +572,7 @@ async def render_revision(cid:UUID,rid:UUID,identity:CurrentUser=Depends(resolve
     async with connection() as c:
         u=await owner(identity,c);materialized,error=await materialize_revision(c,u["id"],cid,rid)
         if error:raise HTTPException(404,"Revision not found")
-        return HTMLResponse(render_resume(materialized["resume"],True,materialized["renderer_contract_version"],materialized["section_sort_modes"],materialized["date_format"],materialized.get("template_style","classic"),materialized.get("skill_row_max",4)))
+        return HTMLResponse(render_resume(materialized["resume"],True,materialized["renderer_contract_version"],materialized["section_sort_modes"],materialized["date_format"],materialized.get("template_style","classic"),materialized.get("skill_row_max",4),appearance=materialized.get("appearance")))
 
 
 @router.get("/api/compositions/{cid}/bullet-placements")
@@ -723,7 +724,7 @@ async def render_composition(cid: UUID, revision: int | None = None, identity: C
         materialized,error=await materialize_composition(c,u["id"],cid,revision)
         if error=="stale": raise HTTPException(409,"Composition changed; reload before rendering")
         if error: raise HTTPException(404,"Composition not found")
-        return HTMLResponse(render_resume(materialized["resume"],True,materialized["renderer_contract_version"],materialized.get("section_sort_modes",{}),materialized.get("date_format","long"),materialized.get("template_style","classic"),materialized.get("skill_row_max",4)))
+        return HTMLResponse(render_resume(materialized["resume"],True,materialized["renderer_contract_version"],materialized.get("section_sort_modes",{}),materialized.get("date_format","long"),materialized.get("template_style","classic"),materialized.get("skill_row_max",4),appearance=materialized.get("appearance")))
 
 
 @router.post("/api/compositions/{cid}/export/pdf")
@@ -733,7 +734,7 @@ async def export_composition_pdf(cid: UUID, revision: int | None = Query(default
         materialized,error=await materialize_composition(c,u["id"],cid,revision)
     if error=="stale": raise HTTPException(409,"Composition changed; save or reload before exporting")
     if error: raise HTTPException(404,"Composition not found")
-    html=render_resume(materialized["resume"],False,materialized["renderer_contract_version"],materialized.get("section_sort_modes",{}),materialized.get("date_format","long"),materialized.get("template_style","classic"),materialized.get("skill_row_max",4))
+    html=render_resume(materialized["resume"],False,materialized["renderer_contract_version"],materialized.get("section_sort_modes",{}),materialized.get("date_format","long"),materialized.get("template_style","classic"),materialized.get("skill_row_max",4),appearance=materialized.get("appearance"))
     url=os.getenv("GOTENBERG_URL","http://gotenberg:3000").rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=45) as client:

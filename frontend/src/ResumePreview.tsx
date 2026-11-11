@@ -18,6 +18,7 @@ export default function ResumePreview({
   onHighlightPage,
   onHighlightHover,
   onMarkClick,
+  draft,
 }: {
   compositionId: string;
   revision: number;
@@ -29,6 +30,8 @@ export default function ResumePreview({
   onHighlightPage?: (page: number) => void;
   onHighlightHover?: (ids: string[]) => void;
   onMarkClick?: (click: PreviewMarkClick) => void;
+  /** Unsaved template settings: the resume is rendered with them instead of its own look. */
+  draft?: { baseStyle: string; settings: unknown } | null;
 }) {
   const [html, setHtml] = useState(""),
     seq = useRef(0),
@@ -49,12 +52,22 @@ export default function ResumePreview({
       "*",
     );
   };
+  const draftKey = draft ? JSON.stringify(draft) : "";
   useEffect(() => {
     const id = ++seq.current,
-      url = revisionId
-        ? `/api/compositions/${compositionId}/revisions/${revisionId}/render`
-        : `/api/compositions/${compositionId}/render?revision=${revision}`;
-    fetch(url)
+      url = draft
+        ? "/api/templates/preview"
+        : revisionId
+          ? `/api/compositions/${compositionId}/revisions/${revisionId}/render`
+          : `/api/compositions/${compositionId}/render?revision=${revision}`;
+    const request: RequestInit | undefined = draft
+      ? {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ composition_id: compositionId, base_style: draft.baseStyle, settings: draft.settings }),
+        }
+      : undefined;
+    fetch(url, request)
       .then(async (r) => {
         if (!r.ok) {
           const detail = (await r.json().catch(() => ({}))).detail;
@@ -68,7 +81,9 @@ export default function ResumePreview({
       .catch((e) =>
         onFit({ fits: false, state: "measurement-error", message: e.message }),
       );
-  }, [compositionId, revision, revisionId]);
+    // draftKey stands in for draft, which is a new object on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compositionId, revision, revisionId, draftKey]);
   useEffect(() => {
     const fn = (e: MessageEvent) => {
       if (e.source !== frame.current?.contentWindow) return;

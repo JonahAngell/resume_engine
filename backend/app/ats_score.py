@@ -222,9 +222,12 @@ def _parsing(resume: dict, composition: dict) -> dict:
         tips.append("Give every role a date range.")
     ratio = sum(checks) / len(checks)
     detail = f"{sum(checks)} of {len(checks)} parsing checks pass."
-    if (composition.get("template_style") or "") == "sre":
+    layout = composition.get("tools_layout_effective") or (
+        composition.get("tools_layout") or ("table" if composition.get("template_style") == "sre" else "inline")
+    )
+    if layout == "table":
         ratio = max(0.0, ratio - 5 / WEIGHTS["parsing"])
-        detail += " The Skill Table template uses a table, which some ATS read poorly."
+        detail += " The Tools section is a table, which some ATS read poorly."
         tips.append("Prefer a single-column template without tables when applying through an ATS.")
     return _component("parsing", ratio, detail, tips)
 

@@ -211,7 +211,7 @@ async def fetch_library(conn, user_id):
     )
     compositions = await _many(
         conn,
-        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,profile_id,is_starter,is_default_starter,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s AND NOT is_starter ORDER BY updated_at DESC,id",
+        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,template_id,tools_layout,section_sort_modes,profile_id,is_starter,is_default_starter,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s AND NOT is_starter ORDER BY updated_at DESC,id",
         (user_id,),
     )
     composition_bullets = await _many(
@@ -253,7 +253,7 @@ async def fetch_library(conn, user_id):
 async def load_composition(conn, user_id, composition_id, include_archived=False):
     return await _one(
         conn,
-        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,summary_variant_id,profile_id,profile_variant_id,is_starter,is_default_starter,revision,render_payload,interest_layout,section_order,archived_at,created_at,updated_at,autosaved_at FROM resume_compositions WHERE id=%s AND user_id=%s"
+        "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,template_id,tools_layout,section_sort_modes,summary_variant_id,profile_id,profile_variant_id,is_starter,is_default_starter,revision,render_payload,interest_layout,section_order,archived_at,created_at,updated_at,autosaved_at FROM resume_compositions WHERE id=%s AND user_id=%s"
         + ("" if include_archived else " AND archived_at IS NULL"),
         (composition_id, user_id),
     )

@@ -41,6 +41,14 @@ import { DragHandle, dragRowClass, useRowDrag } from "./editor/useRowDrag";
 import OptionGrid from "./OptionGrid";
 import ImportResumeDialog from "./ImportResumeDialog";
 import NewResumeDialog, { type RecommendResult } from "./NewResumeDialog";
+import TemplateDesigner from "./TemplateDesigner";
+import {
+  BASE_LABELS,
+  effectiveToolsLayout,
+  useTemplates,
+  type BaseStyle,
+  type CustomTemplate,
+} from "./templates";
 
 import primaryLogo from "./assets/logo-primary-480.png";
 import compactLogo from "./assets/logo-compact.png";
@@ -58,6 +66,10 @@ type Comp = {
   date_format: "year" | "numeric" | "short" | "long";
   template_style: "classic" | "sheets" | "harvard" | "dais" | "sre";
   skill_row_max: number;
+  /** A custom template, or null for the built-in `template_style`. */
+  template_id?: string | null;
+  /** This resume's Tools layout; null follows the template. */
+  tools_layout?: "table" | "inline" | null;
   section_sort_modes: Record<string, "automatic" | "manual">;
   summary_variant_id?: string | null;
   profile_id?: string | null;
@@ -115,6 +127,12 @@ export default function App() {
     (Omit<RecommendResult, "composition"> & { compositionId: string }) | null
   >(null);
   const [autoCoach, setAutoCoach] = useState(false);
+  const [designer, setDesigner] = useState<{ template: CustomTemplate | null; base: BaseStyle } | null>(null);
+  const {
+    templates,
+    options: templateOptions,
+    reload: reloadTemplates,
+  } = useTemplates(screen === "editor");
   const [previewRevision, setPreviewRevision] = useState<any>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
@@ -498,6 +516,8 @@ export default function App() {
       template_style: comp.template_style || "classic",
       skill_row_max: comp.skill_row_max || 4,
       section_sort_modes: comp.section_sort_modes,
+      template_id: comp.template_id ?? null,
+      tools_layout: comp.tools_layout ?? null,
     };
     const preRevision = comp.revision;
     try {
@@ -1065,6 +1085,41 @@ export default function App() {
     setScreen("home");
     return null;
   }
+  const currentPreferences = {
+    preferred_page_length: comp.preferred_page_length || 1,
+    date_format: comp.date_format || "long",
+    template_style: comp.template_style || "classic",
+    skill_row_max: comp.skill_row_max || 4,
+    section_sort_modes: comp.section_sort_modes || {},
+  };
+  if (designer && templateOptions)
+    return (
+      <TemplateDesigner
+        composition={comp}
+        options={templateOptions}
+        template={designer.template}
+        baseStyle={designer.base}
+        existingNames={templates.map((item) => item.name)}
+        close={() => setDesigner(null)}
+        onCreated={async (made) => {
+          await reloadTemplates();
+          await saveCompositionPreferences({
+            ...currentPreferences,
+            template_style: made.base_style,
+            template_id: made.id,
+          });
+        }}
+        onChanged={async (next) => {
+          if (next) {
+            setComp(next);
+            compRef.current = next;
+          }
+          await reloadTemplates();
+        }}
+      />
+    );
+  const toolsLayout = effectiveToolsLayout(comp, templates);
+  const templateToolsLayout = effectiveToolsLayout({ ...comp, tools_layout: null }, templates);
   const activeSummaries = lib.summary_variants.filter(
     (x: any) => !x.archived_at,
   );
@@ -1536,6 +1591,10 @@ export default function App() {
                 save={saveCompositionMetadata}
                 savePreferences={saveCompositionPreferences}
                 status={status}
+                templates={templates}
+                openDesigner={(template: CustomTemplate | null, base: BaseStyle) =>
+                  setDesigner({ template, base })
+                }
               />
               <div
                 className={`save-status ${status.toLowerCase().replaceAll(" ", "-")}`}
@@ -1574,6 +1633,8 @@ export default function App() {
                 setAiJobId={matchState.setJobId}
                 fit={fit}
                 openShrink={() => setShrinkOpen(true)}
+                toolsLayout={toolsLayout}
+                templateToolsLayout={templateToolsLayout}
               />
             </div>
           </aside>
@@ -1686,8 +1747,18 @@ export default function App() {
     </main>
   );
 }
-function ResumeDetails({ comp, save, savePreferences, status }: any) {
+function ResumeDetails({
+  comp,
+  save,
+  savePreferences,
+  status,
+  templates = [],
+  openDesigner,
+}: any) {
   const [collapsed, setCollapsed] = useState(false);
+  const linkedTemplate: CustomTemplate | undefined = comp.template_id
+    ? templates.find((item: CustomTemplate) => item.id === comp.template_id)
+    : undefined;
   return (
     <section
       className={`resume-details editor-section ${collapsed ? "collapsed" : "expanded"}`}
@@ -1797,24 +1868,72 @@ function ResumeDetails({ comp, save, savePreferences, status }: any) {
               <OptionGrid
                 label="Template"
                 columns={3}
-                value={comp.template_style || "classic"}
+                value={
+                  comp.template_id && linkedTemplate
+                    ? `custom:${comp.template_id}`
+                    : comp.template_style || "classic"
+                }
                 options={[
-                  { value: "classic", label: "Default" },
-                  { value: "sheets", label: "Ruled Serif" },
-                  { value: "harvard", label: "Harvard Style" },
-                  { value: "dais", label: "Times Serif" },
-                  { value: "sre", label: "Skill Table" },
+                  ...(Object.keys(BASE_LABELS) as BaseStyle[]).map((value) => ({
+                    value,
+                    label: BASE_LABELS[value],
+                  })),
+                  ...templates.map((item: CustomTemplate) => ({
+                    value: `custom:${item.id}`,
+                    label: `★ ${item.name}`,
+                  })),
                 ]}
-                onChange={(template_style) =>
+                onChange={(value) => {
+                  const custom = value.startsWith("custom:")
+                    ? templates.find((item: CustomTemplate) => `custom:${item.id}` === value)
+                    : null;
                   savePreferences({
                     preferred_page_length: comp.preferred_page_length || 1,
                     date_format: comp.date_format || "long",
-                    template_style,
+                    template_style: custom ? custom.base_style : value,
                     skill_row_max: comp.skill_row_max || 4,
                     section_sort_modes: comp.section_sort_modes || {},
-                  })
-                }
+                    template_id: custom ? custom.id : null,
+                  });
+                }}
               />
+              {openDesigner && (
+                <div className="template-actions">
+                  {linkedTemplate ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openDesigner(linkedTemplate, linkedTemplate.base_style)}
+                      >
+                        Edit template
+                      </button>
+                      <button
+                        type="button"
+                        className="link-button"
+                        onClick={() => openDesigner(null, linkedTemplate.base_style)}
+                      >
+                        New from {BASE_LABELS[linkedTemplate.base_style as BaseStyle]}
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => openDesigner(null, comp.template_style || "classic")}
+                    >
+                      Customize…
+                    </button>
+                  )}
+                </div>
+              )}
+              <small className="coaching-note">
+                {linkedTemplate
+                  ? `Your template, based on ${BASE_LABELS[linkedTemplate.base_style as BaseStyle]}.${
+                      linkedTemplate.used_by > 1
+                        ? ` Used by ${linkedTemplate.used_by} resumes; editing it changes them all.`
+                        : ""
+                    }`
+                  : "Customize makes your own copy: fonts, sizes, colours, spacing and margins."}
+              </small>
             </div>
           </fieldset>
         </div>
@@ -2599,6 +2718,8 @@ function SectionsPanel({
   setAiJobId,
   fit,
   openShrink,
+  toolsLayout = "inline",
+  templateToolsLayout = "inline",
 }: any) {
   const [compositionItems, setCompositionItems] = useState<any[]>([]),
     [placements, setPlacements] = useState<any[]>([]),
@@ -3754,6 +3875,17 @@ function SectionsPanel({
       </article>
     );
   };
+  const setToolsLayout = (next: "table" | "inline" | null) => {
+    if (next === (comp.tools_layout ?? null)) return;
+    saveCompositionPreferences({
+      preferred_page_length: comp.preferred_page_length || 1,
+      date_format: comp.date_format || "long",
+      template_style: comp.template_style || "classic",
+      skill_row_max: comp.skill_row_max || 4,
+      section_sort_modes: comp.section_sort_modes || {},
+      tools_layout: next,
+    });
+  };
   const setSkillRows = (next: number) => {
     const rows = Math.min(20, Math.max(1, next));
     if (rows === (comp.skill_row_max || 4)) return;
@@ -3822,7 +3954,35 @@ function SectionsPanel({
     if (key === "tools") {
       return (
         <div className="entry-list">
-          {(comp.template_style || "classic") === "sre" && (
+          <div className="preference-field tools-layout-field">
+            <span id="tools-layout-label">Layout</span>
+            <div className="qual-filters" role="radiogroup" aria-labelledby="tools-layout-label">
+              {(
+                [
+                  [null, `Template (${templateToolsLayout === "table" ? "table" : "one line"})`],
+                  ["inline", "One line per group"],
+                  ["table", "Table"],
+                ] as ["table" | "inline" | null, string][]
+              ).map(([value, label]) => (
+                <button
+                  key={value || "template"}
+                  type="button"
+                  role="radio"
+                  aria-checked={(comp.tools_layout ?? null) === value}
+                  className={(comp.tools_layout ?? null) === value ? "active" : ""}
+                  onClick={() => setToolsLayout(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {toolsLayout === "table" && (
+              <small className="coaching-note">
+                Some applicant tracking systems read tables poorly; the ATS score takes off 5 points.
+              </small>
+            )}
+          </div>
+          {toolsLayout === "table" && (
             <div className="target-length-field">
               <span id="skill-rows-label">Skill rows</span>
               <div className="skill-rows-controls">

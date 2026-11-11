@@ -495,8 +495,8 @@ async def set_composition_archive(conn,user_id,cid,revision,archived):
 async def duplicate(conn, user_id, cid, name):
     async with conn.transaction():
         row = await one(conn,"""INSERT INTO resume_compositions(
-            user_id,name,description,display_title,target_company,target_role,job_description_id,tags,summary_variant_id,profile_id,profile_variant_id,render_payload,interest_layout,section_order,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes
-        ) SELECT user_id,%s,description,display_title,target_company,target_role,job_description_id,tags,summary_variant_id,profile_id,profile_variant_id,render_payload,interest_layout,section_order,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes
+            user_id,name,description,display_title,target_company,target_role,job_description_id,tags,summary_variant_id,profile_id,profile_variant_id,render_payload,interest_layout,section_order,preferred_page_length,date_format,template_style,skill_row_max,template_id,tools_layout,section_sort_modes
+        ) SELECT user_id,%s,description,display_title,target_company,target_role,job_description_id,tags,summary_variant_id,profile_id,profile_variant_id,render_payload,interest_layout,section_order,preferred_page_length,date_format,template_style,skill_row_max,template_id,tools_layout,section_sort_modes
         FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL
         RETURNING *""",(name.strip(),cid,user_id))
         if row:
@@ -549,7 +549,12 @@ async def restore_revision(conn, user_id, cid, rid, expected):
                 company,role=linked["company"],linked["role"]
             else:
                 job_id=None
-        row=await one(conn,"""UPDATE resume_compositions SET name=%s,description=%s,display_title=%s,target_company=%s,target_role=%s,job_description_id=%s,render_payload=%s::jsonb,preferred_page_length=%s,date_format=%s,template_style=%s,skill_row_max=%s,section_sort_modes=%s::jsonb,section_order=%s::jsonb,interest_layout=%s,summary_variant_id=%s,profile_id=%s,revision=revision+1,updated_at=now(),autosaved_at=now() WHERE id=%s AND user_id=%s RETURNING *""",(name,value("description"),value("display_title"),company,role,job_id,json.dumps(snap.get("resume",current["render_payload"])),value("preferred_page_length"),value("date_format"),value("template_style") or "classic",value("skill_row_max") or 4,json.dumps(value("section_sort_modes") or {}),json.dumps(value("section_order") or []),value("interest_layout"),value("summary_variant_id"),value("profile_id"),cid,user_id))
+        # The template the revision used, if it still exists; older revisions were built-in.
+        restored_template=None
+        if snap.get("template_id"):
+            kept=await one(conn,"SELECT id FROM resume_templates WHERE id=%s AND user_id=%s",(snap["template_id"],user_id))
+            restored_template=kept["id"] if kept else None
+        row=await one(conn,"""UPDATE resume_compositions SET name=%s,description=%s,display_title=%s,target_company=%s,target_role=%s,job_description_id=%s,render_payload=%s::jsonb,preferred_page_length=%s,date_format=%s,template_style=%s,skill_row_max=%s,template_id=%s,tools_layout=%s,section_sort_modes=%s::jsonb,section_order=%s::jsonb,interest_layout=%s,summary_variant_id=%s,profile_id=%s,revision=revision+1,updated_at=now(),autosaved_at=now() WHERE id=%s AND user_id=%s RETURNING *""",(name,value("description"),value("display_title"),company,role,job_id,json.dumps(snap.get("resume",current["render_payload"])),value("preferred_page_length"),value("date_format"),value("template_style") or "classic",value("skill_row_max") or 4,restored_template,snap.get("tools_layout"),json.dumps(value("section_sort_modes") or {}),json.dumps(value("section_order") or []),value("interest_layout"),value("summary_variant_id"),value("profile_id"),cid,user_id))
         if "composition_items" in snap:
             await conn.execute("DELETE FROM composition_items WHERE composition_id=%s",(cid,))
             for x in snap["composition_items"]: await conn.execute("INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order) VALUES(%s,%s,%s,%s,%s)",(cid,x["section"],x["item_id"],x.get("variant_id"),x.get("sort_order",0)))

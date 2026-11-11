@@ -25,7 +25,7 @@ from .library_schemas import (
 )
 from .schemas import Resume
 from .api_common import MAX_IMPORT_BYTES, ROOT, SEED, owner
-from .routers import ai, compositions, defaults, jobs, library
+from .routers import ai, compositions, defaults, jobs, library, templates
 
 FRONTEND = ROOT / "frontend" / "dist"
 
@@ -95,7 +95,7 @@ def ai_status(identity: CurrentUser = Depends(resolve_current_user)):
     }
 
 
-for _router in (library.router, compositions.router, defaults.router, jobs.router, ai.router):
+for _router in (library.router, compositions.router, defaults.router, jobs.router, ai.router, templates.router):
     app.include_router(_router)
 
 
