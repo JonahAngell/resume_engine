@@ -223,20 +223,20 @@
       .template-dais .skill-items {
         font-style: italic;
       }
-      .template-sre .skill-table {
+      .skill-table {
         width: 100%;
         border-collapse: collapse;
         table-layout: fixed;
       }
-      .template-sre .skill-table th,
-      .template-sre .skill-table td {
+      .skill-table th,
+      .skill-table td {
         padding: 0 0.12in 0 0;
         text-align: left;
         vertical-align: top;
         font-weight: 400;
         line-height: 1.22;
       }
-      .template-sre .skill-table th {
+      .skill-table th {
         font-weight: 700;
         padding-bottom: 2px;
       }
@@ -265,6 +265,7 @@
       mark.resume-keyword-hit, .resume-line-suggestion { cursor: pointer; }
       mark.resume-keyword-hit:focus-visible, .resume-line-suggestion:focus-visible { outline: 2px solid #1f5fbf; outline-offset: 1px; }
       {% endif %}
+      {{ custom_css | safe }}
       @media print {
         .pages {
           gap: 0;
@@ -275,7 +276,7 @@
       }
     </style>
   </head>
-  <body class="template-{{ template_style }}">
+  <body class="template-{{ template_style }}{% if custom_template %} custom-template{% endif %}">
     {% macro section_heading(key, fallback) -%}
     {%- if template_style == 'harvard' and key == 'work_experience' -%}Experience
     {%- elif template_style == 'harvard' and key == 'leadership' -%}Leadership &amp; Activities
@@ -391,7 +392,7 @@
       {% elif key in ['tools','tool_groups'] and resume.tool_groups %}
       <section class="section" data-section-id="tools">
         <h2 class="section-title">{{ section_heading('tools', 'Skills') }}</h2>
-        {% if template_style == 'sre' %}
+        {% if tools_layout == 'table' %}
         <table class="skill-table item" data-item-id="tools">
           <thead>
             <tr>

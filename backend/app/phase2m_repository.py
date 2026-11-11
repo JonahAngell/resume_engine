@@ -4,6 +4,7 @@ from copy import deepcopy
 from psycopg.rows import dict_row
 from .phase2l import preprocess_resume
 from .render import normalize_skill_row_max, normalize_template_style
+from .templates_repository import appearance_for, appearance_from_snapshot
 
 RENDERER_CONTRACT_VERSION = "2m.1"
 
@@ -17,7 +18,7 @@ async def materialize_composition(conn, user_id, composition_id, revision=None):
     revision_clause=""
     if revision is not None:
         revision_clause=" AND revision=%s"; params.append(revision)
-    row=await one(conn, """SELECT id,name,revision,render_payload,preferred_page_length,date_format,template_style,skill_row_max,section_sort_modes,section_order,interest_layout,archived_at FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL"""+revision_clause, tuple(params))
+    row=await one(conn, """SELECT id,name,revision,render_payload,preferred_page_length,date_format,template_style,skill_row_max,template_id,tools_layout,section_sort_modes,section_order,interest_layout,archived_at FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL"""+revision_clause, tuple(params))
     if not row:
         exists=await one(conn,"SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s AND archived_at IS NULL",(composition_id,user_id))
         return None, "stale" if exists and revision is not None else "missing"
@@ -27,7 +28,8 @@ async def materialize_composition(conn, user_id, composition_id, revision=None):
     resume=preprocess_resume(resume,row.get("section_sort_modes") or {},row.get("date_format") or "long")
     # Hidden state is authoritative in section_order and never mutates Library data.
     resume["section_order"]=[x for x in resume.get("section_order",[]) if not str(x).startswith("hidden:")]
-    return {"composition_id":str(row["id"]),"revision":row["revision"],"name":row["name"],"preferred_page_count":row["preferred_page_length"],"renderer_contract_version":RENDERER_CONTRACT_VERSION,"section_sort_modes":row.get("section_sort_modes") or {},"date_format":row.get("date_format") or "long","template_style":normalize_template_style(row.get("template_style")),"skill_row_max":normalize_skill_row_max(row.get("skill_row_max")),"resume":resume},None
+    appearance=await appearance_for(conn,user_id,row.get("template_id"),row.get("tools_layout"))
+    return {"appearance":appearance,"composition_id":str(row["id"]),"revision":row["revision"],"name":row["name"],"preferred_page_count":row["preferred_page_length"],"renderer_contract_version":RENDERER_CONTRACT_VERSION,"section_sort_modes":row.get("section_sort_modes") or {},"date_format":row.get("date_format") or "long","template_style":normalize_template_style(row.get("template_style")),"skill_row_max":normalize_skill_row_max(row.get("skill_row_max")),"resume":resume},None
 
 
 async def materialize_revision(conn,user_id,composition_id,revision_id):
@@ -39,4 +41,5 @@ async def materialize_revision(conn,user_id,composition_id,revision_id):
     template_style=normalize_template_style(snapshot.get("template_style"), row.get("template_style") or "classic")
     skill_row_max=normalize_skill_row_max(snapshot.get("skill_row_max"), row.get("skill_row_max") or 4)
     resume=preprocess_resume(resume,modes,date_format);resume["section_order"]=[x for x in resume.get("section_order",[]) if not str(x).startswith("hidden:")]
-    return {"resume":resume,"section_sort_modes":modes,"date_format":date_format,"template_style":template_style,"skill_row_max":skill_row_max,"renderer_contract_version":RENDERER_CONTRACT_VERSION},None
+    appearance=appearance_from_snapshot(snapshot,template_style)
+    return {"resume":resume,"section_sort_modes":modes,"date_format":date_format,"template_style":template_style,"skill_row_max":skill_row_max,"appearance":appearance,"renderer_contract_version":RENDERER_CONTRACT_VERSION},None

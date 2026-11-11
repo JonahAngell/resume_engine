@@ -37,6 +37,24 @@ Preview and PDF both render [`backend/app/templates/resume.html`](backend/app/te
 
 Date format and section sort (automatic or manual) are applied on that same render path. PDF export sends the HTML to [Gotenberg](https://gotenberg.dev/).
 
+### Custom templates
+
+**Customize…** under Template (Resume Details) opens the template designer: settings on the left, a live preview of the open resume on the right. A custom template starts from one of the styles above, which supplies the layout and section names, and saves to the user's account under its own name. Any resume can then pick it from the Template list (marked ★).
+
+| Setting | Range |
+| --- | --- |
+| Font | Arial, Carlito, Lato, Inter, EB Garamond, Tinos, Source Serif 4 (all but Arial are bundled in `backend/app/templates/fonts/`, SIL OFL) |
+| Sizes | Name, section headings, job titles, body text, contact line (pt) |
+| Colours | Text; name and headings; divider lines |
+| Section headings | All caps or as written; bold or regular; no divider, a line below, or lines above and below |
+| Entries | Bullet character; dates right-aligned or after the title; Tools as one line per group or a table |
+| Page | Margins per side (0.3–1.25 in; bottom from 0.15 in), with Narrow, Normal, and Wide presets; line spacing 1.0–1.6; space after sections and bullets |
+
+- Built-in styles stay read-only. A custom template that changes nothing renders exactly like its base: only settings that differ from the base produce CSS ([`backend/app/template_settings.py`](backend/app/template_settings.py)).
+- Editing a template changes every resume linked to it. Each linked resume gets a new revision and a history entry that records the template's settings at that moment, so older revisions still preview as they looked. Deleting a template puts its resumes back on its base style, also with a history entry.
+- The Tools layout can also be set per resume (Tools section → Layout); that choice beats the template's. A table on any template costs 5 points in the ATS score's parseability check, as the Skill Table style always has.
+- API: `GET /api/templates` (templates plus fonts, bullets, base defaults and limits), `POST /api/templates`, `PUT /api/templates/{id}` (with `revision`; returns the open resume's new state when `composition_id` is sent), `DELETE /api/templates/{id}`, and `POST /api/templates/preview` (one resume rendered with unsaved settings). Resumes link through `template_id` and `tools_layout` on `PUT /api/compositions/{id}/preferences`; leaving either out keeps the current value.
+
 ## First-run seed
 
 When the signed-in user has no compositions, the app imports [`seed/nia-calder-resume.json`](seed/nia-calder-resume.json) under the seed key `nia-calder-resume-v1`. That file is a fictional sample resume. The same seed key and file contents import once.
@@ -82,6 +100,8 @@ Copy [`.env.example`](.env.example) to `.env` for Compose. The API reads:
 | `backend/app/main.py` | FastAPI app. The image runs `uvicorn app.main:app`. |
 | `backend/migrations/` | Ordered SQL migrations, applied at startup in file-name order. Two files share the `020_` prefix; they were applied under those names, so they keep them. New files take the next unused number. |
 | `backend/app/templates/resume.html` | Preview and PDF template. |
+| `backend/app/template_settings.py`, `backend/app/templates_repository.py`, `backend/app/routers/templates.py` | Custom template settings, storage, and API. |
+| `frontend/src/TemplateDesigner.tsx`, `frontend/src/templates.ts` | Template designer page and shared template types. |
 | `backend/app/related_skills.yaml` | Clusters, aliases, and phrases used by job match. See [`docs/related-skills.md`](docs/related-skills.md). |
 | `seed/` | Resume JSON used by import. |
 | `tests/` | Pytest suite. Browser layout checks use Playwright (`npm run test:browser`). |

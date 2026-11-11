@@ -100,6 +100,8 @@ class CompositionState(BaseModel):
     date_format: str = "long"
     template_style: str = "classic"
     skill_row_max: int = 4
+    template_id: UUID | None = None
+    tools_layout: str | None = None
     section_sort_modes: dict[str, str] = {}
     summary_variant_id: UUID | None = None
     profile_id: UUID | None = None
@@ -215,6 +217,9 @@ class CompositionPreferencesWrite(BaseModel):
     template_style: TemplateStyle = "classic"
     skill_row_max: int = Field(default=4, ge=1, le=20)
     section_sort_modes: dict[str, Literal["automatic", "manual"]] = {}
+    # Left out: unchanged. null: a built-in style (template_style) / follow the template.
+    template_id: UUID | None = None
+    tools_layout: Literal["table", "inline"] | None = None
 
 
 class EntryCreateWrite(BaseModel):

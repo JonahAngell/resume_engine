@@ -6090,3 +6090,220 @@ mark.doc-hit:focus-visible {
   color: #7a5400;
   font-size: 12.5px;
 }
+
+/* Template designer: settings on the left, live preview of the current resume on the right. */
+.template-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 6px;
+}
+.tools-layout-field {
+  margin-bottom: 8px;
+}
+.template-designer {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--app-surface, #f2f5fa);
+  color: var(--brand-navy, #1f2a44);
+}
+.designer-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid #d9e2ef;
+  background: #fff;
+}
+.designer-header h1 {
+  margin: 0;
+  font-size: 18px;
+}
+.designer-header-spacer {
+  flex: 1 1 auto;
+}
+.designer-shared {
+  font-size: 13px;
+  color: #8a5a00;
+  background: #fff3d1;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.designer-error {
+  margin: 8px 16px 0;
+}
+.designer-body {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  min-height: 0;
+}
+.designer-form {
+  overflow-y: auto;
+  padding: 16px;
+  border-right: 1px solid #d9e2ef;
+  background: #fff;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+.designer-form fieldset {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d9e2ef;
+  border-radius: 8px;
+}
+.designer-form legend {
+  padding: 0 4px;
+  font-weight: 700;
+  font-size: 14px;
+}
+.designer-name,
+.designer-select,
+.designer-number,
+.designer-color,
+.designer-range {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  min-width: 0;
+}
+.designer-name input,
+.designer-select select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 14px;
+}
+.designer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px 12px;
+}
+.designer-margins {
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+}
+.designer-number-input,
+.designer-color-inputs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.designer-number-input input {
+  width: 100%;
+  min-width: 0;
+  max-width: 96px;
+  font: inherit;
+}
+.designer-number-input small {
+  color: #5c6e91;
+}
+.designer-color-inputs input[type="color"] {
+  width: 36px;
+  height: 32px;
+  min-width: 36px;
+  padding: 2px;
+  border: 1px solid #c9d4e4;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.designer-color-inputs input[type="text"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 96px;
+  font: inherit;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.designer-choice {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.designer-choice .qual-filters {
+  margin: 0;
+}
+.designer-bullet {
+  display: inline-block;
+  min-width: 1em;
+  font-size: 16px;
+  line-height: 1;
+}
+.designer-range input {
+  width: 100%;
+}
+.designer-range output {
+  font-weight: 600;
+  margin-left: 4px;
+}
+.designer-footer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+.link-button.danger {
+  color: #b42318;
+}
+.designer-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.designer-preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #d9e2ef;
+  background: #fff;
+}
+.designer-fit {
+  font-size: 13px;
+  color: #157347;
+}
+.designer-fit.over {
+  color: #8a5a00;
+}
+.designer-canvas {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+/* The canvas scrolls on its own; it must not widen the page on small screens. */
+.designer-preview .preview-canvas.designer-canvas {
+  min-width: 0;
+  max-width: 100%;
+}
+/* Shrink the frame's layout box to its scaled size, so centring never pushes the page off-screen. */
+.designer-canvas .preview {
+  transform-origin: top left;
+  margin-left: 0;
+  margin-right: calc(8.5in * (var(--preview-zoom) - 1));
+  margin-bottom: calc(11in * (var(--preview-zoom) - 1));
+}
+@media (max-width: 900px) {
+  .template-designer {
+    height: auto;
+    min-height: 100vh;
+  }
+  .designer-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .designer-form {
+    border-right: 0;
+    border-bottom: 1px solid #d9e2ef;
+    overflow: visible;
+  }
+  .designer-preview {
+    min-height: 70vh;
+  }
+}

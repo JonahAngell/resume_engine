@@ -109,8 +109,10 @@ def test_preferences_and_editor_wire_style_and_coaching():
     assert main.count('materialized.get("template_style","classic")') >= 2
     assert "Template" in app
     details = app.split("function ResumeDetails", 1)[1].split("function HomeScreen", 1)[0]
-    for label in ("Default", "Ruled Serif", "Harvard Style", "Times Serif", "Skill Table"):
-        assert f'label: "{label}"' in details
+    labels = (ROOT / "frontend/src/templates.ts").read_text(encoding="utf-8")
+    assert "BASE_LABELS" in details
+    for style, label in (("classic", "Default"), ("sheets", "Ruled Serif"), ("harvard", "Harvard Style"), ("dais", "Times Serif"), ("sre", "Skill Table")):
+        assert f'{style}: "{label}"' in labels
     assert 'label: "Current"' not in details
     assert "SheetsResume" not in details
     assert "firstJobCoaching" in app and "dateFormatCoaching" in app

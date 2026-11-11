@@ -3,6 +3,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from .schemas import Resume
 from .phase2l import preprocess_resume
+from .template_settings import embedded_family, settings_css
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 FONT_DIR = TEMPLATE_DIR / "fonts"
@@ -24,6 +25,18 @@ _FONT_FACES = (
     ("Tinos", 700, "normal", "tinos-700.woff2"),
     ("Tinos", 400, "italic", "tinos-400-italic.woff2"),
     ("Tinos", 700, "italic", "tinos-700-italic.woff2"),
+    ("Lato", 400, "normal", "lato-400.woff2"),
+    ("Lato", 700, "normal", "lato-700.woff2"),
+    ("Lato", 400, "italic", "lato-400-italic.woff2"),
+    ("Lato", 700, "italic", "lato-700-italic.woff2"),
+    ("Inter", 400, "normal", "inter-400.woff2"),
+    ("Inter", 700, "normal", "inter-700.woff2"),
+    ("Inter", 400, "italic", "inter-400-italic.woff2"),
+    ("Inter", 700, "italic", "inter-700-italic.woff2"),
+    ("Source Serif 4", 400, "normal", "source-serif-4-400.woff2"),
+    ("Source Serif 4", 700, "normal", "source-serif-4-700.woff2"),
+    ("Source Serif 4", 400, "italic", "source-serif-4-400-italic.woff2"),
+    ("Source Serif 4", 700, "italic", "source-serif-4-700-italic.woff2"),
 )
 
 
@@ -90,19 +103,34 @@ def _font_css(only_family: str) -> str:
 FONT_CSS_BY_FAMILY = {family: _font_css(family) for family in {f for f, *_ in _FONT_FACES}}
 
 
-def font_css_for(style: str) -> str:
-    family = STYLE_FONTS.get(style)
+def font_css_for(style: str, settings: dict | None = None) -> str:
+    family = embedded_family(settings) if settings else STYLE_FONTS.get(style)
     return FONT_CSS_BY_FAMILY.get(family, "") if family else ""
 
 
-def render_resume(resume: Resume | dict, measure: bool = True, renderer_contract_version: str = "legacy", sort_modes: dict | None = None, date_format: str = "long", template_style: str = "classic", skill_row_max: int = 4) -> str:
+def tools_layout_for(style: str, settings: dict | None = None, override: str | None = None) -> str:
+    """Table or one line per group: the resume's choice, else its template's, else the style's."""
+    if override in {"table", "inline"}:
+        return override
+    if settings and settings.get("tools_layout") in {"table", "inline"}:
+        return settings["tools_layout"]
+    return "table" if style == "sre" else "inline"
+
+
+def render_resume(resume: Resume | dict, measure: bool = True, renderer_contract_version: str = "legacy", sort_modes: dict | None = None, date_format: str = "long", template_style: str = "classic", skill_row_max: int = 4, appearance: dict | None = None) -> str:
+    """`appearance` carries a custom template's resolved `settings` (or None for a built-in)
+    and this resume's `tools_layout` override (or None to follow the template)."""
     data = resume.model_dump() if isinstance(resume, Resume) else resume
     style = normalize_template_style(template_style)
     prepared = preprocess_resume(data, sort_modes, date_format)
+    settings = (appearance or {}).get("settings") or None
     return env.get_template("resume.html").render(
         resume=prepared, measure=measure,
         renderer_contract_version=renderer_contract_version,
         template_style=style,
-        font_css=font_css_for(style),
+        font_css=font_css_for(style, settings),
+        custom_css=settings_css(style, settings),
+        custom_template=bool(settings),
+        tools_layout=tools_layout_for(style, settings, (appearance or {}).get("tools_layout")),
         skill_table=skill_table(prepared.get("tool_groups"), skill_row_max),
     )
