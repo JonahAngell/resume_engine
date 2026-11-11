@@ -26,6 +26,18 @@ class KeywordReview(BaseModel):
     matched: list[str] = []
     # Keywords the user lacks: hidden from highlights, still missing in scores.
     skipped: list[str] = []
+    # AI-found requirement texts the user accepted: they count at full weight.
+    ai_accepted: list[str] = []
+
+
+class AiAnalysisSummary(BaseModel):
+    """What the job page shows about its saved AI analysis. current is False once the posting
+    text has changed since it was analysed."""
+
+    current: bool
+    model: str = ""
+    analyzed_at: str = ""
+    requirement_count: int = 0
 
 
 class JobDescriptionWrite(BaseModel):
@@ -59,6 +71,7 @@ class JobDescriptionRecord(BaseModel):
     body: str
     composition_id: UUID | None
     keyword_review: KeywordReview = Field(default_factory=KeywordReview)
+    ai_analysis: AiAnalysisSummary | None = None
     salary: str = ""
     locations: list[str] = []
     archived_at: datetime | None
@@ -109,6 +122,10 @@ class RequirementRow(BaseModel):
     detail: str = ""
     keywords: list[RequirementKeyword]
     suggestions: list[TagSuggestion]
+    # "ai" when only the AI analysis found it. ai_pending: not accepted yet, so it counts at lower weight.
+    source: Literal["rules", "ai"] = "rules"
+    ai_pending: bool = False
+    ai_confirmed: bool = False
 
 
 class AnalysisRow(BaseModel):
@@ -120,6 +137,9 @@ class AnalysisRow(BaseModel):
     category: str = ""
     section: str = ""
     weight: float = 0
+    source: Literal["rules", "ai"] = "rules"
+    ai_pending: bool = False
+    ai_confirmed: bool = False
 
 
 class JobAnalysis(BaseModel):
@@ -179,3 +199,12 @@ class JobMatch(BaseModel):
     scores: ScoreComponents = ScoreComponents()
     eligibility: Eligibility = Eligibility()
     families: list[JobFamily] = []
+    ai_pending_count: int = 0
+
+
+class AiJobAnalysisResult(BaseModel):
+    """status ok saves the analysis on the job; any other status leaves the job as it was."""
+
+    status: Literal["ok", "unavailable", "rate_limited", "invalid"]
+    detail: str = ""
+    job: JobDescriptionRecord | None = None

@@ -20,6 +20,7 @@ from ..library_repository import (
 from ..ai_review import review_resume
 from ..ai_schemas import AiReview, ChatRequest, ChatTurn, CoachResult, KeywordAssist, KeywordDefinition, ResumeRecommendRequest, ResumeRecommendResult, VariantPick, VariantSuggestions
 from ..ai_define import define_keyword
+from ..ai_job_analysis import analyze_job
 from ..ai_variant_pick import pick_variants
 from ..ai_condense import condense_resume
 from ..ai_schemas import CondenseResult
@@ -37,8 +38,10 @@ from ..job_repository import (
     load_pick_inputs,
     load_condense_inputs,
     load_variant_inputs,
+    save_ai_analysis,
 )
 from ..job_schemas import (
+    AiJobAnalysisResult,
     JobMatchRequest,
 )
 from ..rate_limit import ai_rate_limit
@@ -233,3 +236,23 @@ async def define_job_keyword(job_id: UUID, req: KeywordDefineRequest, identity: 
     if not job:
         raise HTTPException(404, "Job description not found")
     return await define_keyword(job["body"], req.keyword, req.requirement)
+
+
+@router.post("/api/job-descriptions/{job_id}/ai-analysis", response_model=AiJobAnalysisResult, dependencies=[Depends(ai_rate_limit)])
+async def analyze_job_with_ai(job_id: UUID, identity: CurrentUser = Depends(resolve_current_user)):
+    """Run only when the user asks. On success the analysis is saved on the job and used by every
+    resume compared with it until the posting text changes."""
+    async with connection() as c:
+        u = await owner(identity, c)
+        job = await get_job_description(c, u["id"], job_id)
+    if not job:
+        raise HTTPException(404, "Job description not found")
+    result = await analyze_job(job["body"])
+    if result["status"] != "ok":
+        return {"status": result["status"], "detail": result["detail"], "job": job}
+    async with connection() as c:
+        u = await owner(identity, c)
+        saved = await save_ai_analysis(c, u["id"], job_id, result["analysis"])
+    if not saved:
+        raise HTTPException(404, "Job description not found")
+    return {"status": "ok", "detail": "", "job": saved}

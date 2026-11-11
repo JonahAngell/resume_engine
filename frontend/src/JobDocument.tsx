@@ -68,10 +68,10 @@ export default function JobDocument({
               <mark
                 key={`${segment.mark.id}-${index}`}
                 data-match-id={segment.mark.id}
-                className={`doc-hit ${segment.mark.kind}${activeIds.includes(segment.mark.id) ? " hit-paired" : ""}`}
+                className={`doc-hit ${segment.mark.kind}${segment.mark.ai ? " ai" : ""}${activeIds.includes(segment.mark.id) ? " hit-paired" : ""}`}
                 role="button"
                 tabIndex={0}
-                aria-label={`${segment.text}: ${segment.mark.kind === "match" ? "matched" : "suggested"}. Show details`}
+                aria-label={`${segment.text}: ${segment.mark.kind === "match" ? "matched" : "suggested"}${segment.mark.ai ? ", found by AI" : ""}. Show details`}
                 onClick={(event) => open(event.currentTarget)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {

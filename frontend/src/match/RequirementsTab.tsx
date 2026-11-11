@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import AiAnalysisBar from "../AiAnalysisBar";
 import { activeIdsForTerms } from "../matchMarks";
 import type { JobMatchState } from "./useJobMatch";
 import {
@@ -139,10 +140,26 @@ function RequirementItem({
           </span>
           <span className="req-text">{row.text}</span>
         </span>
+        {row.source === "ai" && (
+          <span className={`ai-badge${row.ai_pending ? " pending" : ""}`} title={row.ai_pending ? "Found by AI. Counts at half weight until you accept it." : "Found by AI and accepted."}>
+            ✦ AI
+          </span>
+        )}
         <span className={`badge status-${status.tone}`}>{status.label}</span>
       </button>
       {open && (
         <div className="req-detail">
+          {row.ai_pending && (
+            <p className="req-hint ai-pending-note">
+              Found by AI in the posting, not by the rules. It counts at half weight until you accept it.{" "}
+              <button type="button" className="link-button" disabled={state.busy} onClick={() => state.acceptAi(row)}>
+                Accept
+              </button>{" "}
+              <button type="button" className="link-button danger-text" disabled={state.busy} onClick={() => state.dismissRequirement(row)}>
+                Dismiss
+              </button>
+            </p>
+          )}
           {(row.kind === "education" || row.kind === "degree") && row.detail && <p>{row.detail}</p>}
           {row.keywords
             .filter((item) => item.evidence && item.found)
@@ -233,6 +250,7 @@ export default function RequirementsTab({
 
   return (
     <div className="req-tab" ref={list}>
+      <AiAnalysisBar analysis={state.selected?.ai_analysis} pending={match.ai_pending_count} busy={state.busy} running={state.analysing} onRun={state.runAiAnalysis} />
       <div className="segmented" role="group" aria-label="Filter requirements">
         {(
           [

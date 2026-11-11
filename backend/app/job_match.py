@@ -329,8 +329,8 @@ PREFERRED_EDUCATION_HEADING = re.compile(r"^preferred education$", re.IGNORECASE
 BARE_EDUCATION_HEADING = re.compile(r"^education$", re.IGNORECASE)
 DEGREE_LEVELS = (
     (5, re.compile(r"\b(?:ph\.?d\.?|doctorate|doctoral)\b", re.IGNORECASE)),
-    (4, re.compile(r"\b(?:mba|m\.b\.a\.?|master(?:'s|s)|master of|m\.s\.?|m\.a\.?)\b", re.IGNORECASE)),
-    (3, re.compile(r"\b(?:bachelor(?:'s|s)?|bachelor of|b\.s\.?|b\.a\.?|undergraduate degree)\b", re.IGNORECASE)),
+    (4, re.compile(r"\b(?:mba|m\.b\.a\.?|master(?:'s|s)|master of|m\.s\.?|m\.a\.?|(?-i:MSc|MEng))\b", re.IGNORECASE)),
+    (3, re.compile(r"\b(?:bachelor(?:'s|s)?|bachelor of|b\.s\.?|b\.a\.?|undergraduate degree|(?-i:B[AS]c?|BEng|BBA))\b", re.IGNORECASE)),
     (2, re.compile(r"\b(?:associate(?:'s|s)|associate degree|a\.a\.?|a\.s\.?)\b", re.IGNORECASE)),
     (1, re.compile(r"\b(?:high school|ged|secondary school)\b", re.IGNORECASE)),
 )
@@ -367,6 +367,7 @@ EVIDENCE_STRENGTH = {
     "alias": 0.9,
     "cluster": 0.55,
     "combination": 0.45,
+    "phrase": 0.8,
     "semantic": 0.0,
 }
 GATE_CATEGORIES = {"degree", "experience_duration", "credential"}
@@ -410,11 +411,14 @@ TRAVEL_CUE = re.compile(r"\b(\d+\s*%\s*travel|travel(?:\s+up)?(?:\s+to)?\s+\d+\s
 EMPLOYMENT_CUE = re.compile(r"\b(contract|permanent|temporary|hourly|internship)\b", re.IGNORECASE)
 WORK_MODE_CUE = re.compile(r"\b(remote|hybrid|on[- ]site|onsite)\b", re.IGNORECASE)
 STRONG_LINE = re.compile(
-    r"(?:experience\s+(?:with|using|in)|familiarity\s+(?:with|in)|proficien(?:cy|t)(?:\s+(?:in|with))?|knowledge\s+of|skilled\s+in)",
+    r"(?:experience\s+(?:with|using|in)|familiarity\s+(?:with|in)|proficien(?:cy|t)(?:\s+(?:in|with))?|knowledge\s+of|skilled\s+in"
+    r"|expertise\s+(?:in|with)|background\s+in|understanding\s+of|fluen(?:t|cy)\s+in|hands-on\s+experience"
+    r"|(?:have|has)\s+(?:worked|used|built)\s+(?:with|on|in)?|comfortable\s+(?:with|using)|track\s+record\s+(?:of|in))",
     re.IGNORECASE,
 )
 YEARS_LINE = re.compile(
-    r"(?:\d+\s*\+\s*years|\d+\s*-\s*\d+\s*years|minimum(?:\s+of)?\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+years)",
+    r"(?:\d+\s*\+\s*years?|\d+\s*-\s*\d+\s*years?|(?:minimum|at least)(?:\s+of)?\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\+?\s+years?"
+    r"|\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:or more\s+)?years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience)",
     re.IGNORECASE,
 )
 EXAMPLE_CUE = re.compile(
@@ -439,7 +443,7 @@ def parse_requirements(text: str) -> dict:
 def analyze_requirements(description: str, review: dict | None = None) -> dict:
     """Return qualification keywords without comparing them to a resume."""
     parsed = parse_requirements(description or "")
-    rows = apply_review(_parsed_rows(parsed), review or {})
+    rows = apply_ai(apply_review(_parsed_rows(parsed), review or {}), review or {})
     routed = _route(rows)
     return {key: [_analysis_item(row) for row in routed[key]] for key in routed}
 
@@ -451,7 +455,7 @@ def match_qualifications(description: str, resume: dict, bullets: list | None = 
     parsed = parse_requirements(description)
     facts = extract_facts(description)
     review = review or {}
-    routed = _route(apply_review(_parsed_rows(parsed), review))
+    routed = _route(apply_ai(apply_review(_parsed_rows(parsed), review), review))
     families = classify_families(description)
     education = [item for item in resume.get("education") or [] if isinstance(item, dict)]
     accepted = {_norm(item) for item in review.get("matched") or []}
@@ -467,15 +471,17 @@ def match_qualifications(description: str, resume: dict, bullets: list | None = 
         ]
         for key in routed
     }
-    required_rows = evaluated["required"]
-    preferred_rows = evaluated["preferred"]
+    # AI-found rows the user has not accepted count in the weighted scores only, not in the totals.
+    required_rows = [row for row in evaluated["required"] if not row.get("ai_pending")]
+    preferred_rows = [row for row in evaluated["preferred"] if not row.get("ai_pending")]
     return {
         "required_count": len(required_rows),
         "required_matched": sum(1 for row in required_rows if row["matched"]),
         "preferred_count": len(preferred_rows),
         "preferred_matched": sum(1 for row in preferred_rows if row["matched"]),
-        "required": required_rows,
-        "preferred": preferred_rows,
+        "ai_pending_count": sum(1 for key in evaluated for row in evaluated[key] if row.get("ai_pending")),
+        "required": evaluated["required"],
+        "preferred": evaluated["preferred"],
         "responsibilities": evaluated["responsibilities"],
         "eligibility_rows": evaluated["eligibility"],
         "salary": facts["salary"],
@@ -522,6 +528,64 @@ def apply_review(rows: list[dict], review: dict) -> list[dict]:
     return kept
 
 
+# An AI-found requirement counts for this share of its section's weight until the user accepts it.
+AI_PENDING_WEIGHT = 0.5
+
+
+def apply_ai(rows: list[dict], review: dict) -> list[dict]:
+    """Add requirements the AI analysis found that the rule-based parser missed.
+
+    review["ai"] holds the saved analysis rows (only while the posting is unchanged). A rule-based
+    row the AI also found is marked ai_confirmed. A new one keeps the posting's exact words, so it
+    highlights there, and counts at AI_PENDING_WEIGHT until its text is in review["ai_accepted"].
+    """
+    found = review.get("ai") or []
+    if not found:
+        return rows
+    dismissed = {_norm(item) for item in review.get("dismissed") or []}
+    accepted = {_norm(item) for item in review.get("ai_accepted") or []}
+    kept = list(rows)
+    for item in found:
+        text = _text(item.get("text")).strip()
+        if not text or _norm(text) in dismissed:
+            continue
+        overlap = next((row for row in kept if _same_requirement(row["text"], text)), None)
+        if overlap is not None:
+            overlap["ai_confirmed"] = True
+            continue
+        row = _ai_row(item, text)
+        if row is None:
+            continue
+        pending = _norm(text) not in accepted
+        row["source"] = "ai"
+        row["ai_pending"] = pending
+        if pending:
+            row["weight"] = round(float(row["weight"]) * AI_PENDING_WEIGHT, 4)
+        kept.append(row)
+    return kept
+
+
+def _same_requirement(left: str, right: str) -> bool:
+    a, b = _norm(left), _norm(right)
+    return bool(a and b) and (a in b or b in a)
+
+
+def _ai_row(item: dict, text: str) -> dict | None:
+    group = item.get("group") if item.get("group") in {"required", "preferred", "responsibility"} else "required"
+    # Degrees, years and certifications keep the rule-based reading: they drive eligibility checks.
+    ruled = _requirement(text, group, "skill", group)
+    if ruled and ruled.get("category") in GATE_CATEGORIES:
+        return ruled
+    keywords = _dedupe_keywords([_text(keyword) for keyword in item.get("keywords") or [] if _text(keyword).strip()])
+    if not keywords and ruled:
+        return ruled
+    if not keywords:
+        return None
+    category = item.get("category") if item.get("category") in RELEVANCE_CATEGORIES else "domain"
+    mode = "any" if item.get("match_mode") == "any" and len(keywords) > 1 else "all"
+    return _blank_row(text, group, group, category, keywords, mode, [{"mode": mode, "keywords": keywords}], _short_label(text))
+
+
 def _parsed_rows(parsed: dict) -> list[dict]:
     return [
         *(parsed.get("required") or []),
@@ -541,6 +605,9 @@ def _analysis_item(row: dict) -> dict:
         "category": row.get("category") or row.get("kind") or "",
         "section": row.get("section") or row.get("group") or "",
         "weight": float(row.get("weight") or 0),
+        "source": row.get("source") or "rules",
+        "ai_pending": bool(row.get("ai_pending")),
+        "ai_confirmed": bool(row.get("ai_confirmed")),
     }
 
 
@@ -599,16 +666,25 @@ def _headed_requirements(text: str) -> list[dict]:
         line = _clean_requirement_line(raw)
         if not line or _is_location_line(line):
             continue
-        if len(line.split()) > 45 or _is_pay_line(line):
+        if _is_pay_line(line):
             group = None
+            continue
+        if len(line.split()) > 45:
+            # A paragraph. Inside a requirements section, each sentence is a requirement; anywhere
+            # else it ends the section, and only sentences that clearly ask for something count.
+            if group not in (None, "skip") and group[0] in {"required", "preferred"} and group[1] != "education":
+                for chunk in _outside_chunks(line):
+                    if len(chunk.split()) <= 45 and not _is_pay_line(chunk) and _strong_outside(chunk):
+                        add(chunk, group[0], group[0])
+                continue
+            if group != "skip":
+                group = None
+                _add_outside(line, add)
             continue
         if group == "skip":
             continue
         if group is None:
-            for chunk in _outside_chunks(line):
-                if _is_pay_line(chunk) or len(chunk.split()) > 45 or not _strong_outside(chunk):
-                    continue
-                add(chunk, "required", "outside")
+            _add_outside(line, add)
             continue
         target, hint = group
         if target == "inline":
@@ -623,6 +699,19 @@ def _headed_requirements(text: str) -> list[dict]:
             continue
         add(line, target, "education" if hint == "education" else target)
     return rows
+
+
+PREFERRED_CUE = re.compile(
+    r"\b(?:ideally|a plus|is a plus|bonus|nice to have|preferred|desirable|an asset|would be great|would be helpful)\b",
+    re.IGNORECASE,
+)
+
+
+def _add_outside(line: str, add) -> None:
+    for chunk in _outside_chunks(line):
+        if _is_pay_line(chunk) or len(chunk.split()) > 45 or not _strong_outside(chunk):
+            continue
+        add(chunk, "preferred" if PREFERRED_CUE.search(chunk) else "required", "outside")
 
 
 def _outside_chunks(line: str) -> list[str]:
@@ -657,6 +746,17 @@ def _requirement(text: str, group: str, kind: str = "skill", section: str | None
             clauses.append({"mode": mode, "keywords": keywords})
     keywords = _dedupe_keywords([keyword for clause in clauses for keyword in clause["keywords"]])
     category = _line_category(text, keywords, "responsibility" if section == "responsibility" else section)
+    if section in {"required", "preferred"} and category in {"", "soft_skill"} and not (
+        category == "soft_skill" and _soft_skill_labels(text)
+    ):
+        # Nothing from the dictionary: take the skill the sentence names ("experience with Unreal
+        # Engine", "knowledge of fire codes") so the line is still a requirement.
+        phrases = _phrase_keywords(text, keywords)
+        if phrases:
+            mode = "any" if len(phrases) > 1 and _is_any_clause(text) else "all"
+            products = [phrase for phrase in phrases if _product_name(phrase)]
+            kind = "tool" if products and len(products) == len(phrases) else "domain"
+            return _blank_row(text, group, section, kind, phrases, mode, [{"mode": mode, "keywords": phrases}], _short_label(text))
     if category == "degree":
         return _degree_row(text, group, "education")
     if category == "credential":
@@ -744,6 +844,127 @@ def _majority_category(categories: list[str]) -> str:
     return winners[0]
 
 
+LEAD_IN = re.compile(
+    r"\b(?:experience|expertise|background|knowledge|understanding|proficiency|proficient|familiarity|familiar|"
+    r"fluency|fluent|skilled|skills|competence|competency|training|track record|grounding|exposure|"
+    r"command|mastery|literacy|certified|qualified)\b"
+    r"(?:\s+(?:and|or)\s+\w+)?\s*(?:(?:in|with|of|using|on|across|within|around|as|at|to)\b|:)\s*"
+    r"|\bexperience\s+(?=\w+ing\b)",
+    re.IGNORECASE,
+)
+PHRASE_STOP = re.compile(
+    r"\s*(?:[,;:(]|\.(?:\s|$)|\s[-–—]\s|\b(?:including|such as|like|e\.g\.|i\.e\.|or similar|or equivalent|or related|"
+    r"is a plus|a plus|is preferred|preferred|required|is required|is desired|desired|strongly|highly|ideally|is an asset|an asset|"
+    r"to (?!(?:\w+ )?(?:data|code|model|design))\w+|that|which|who|where|while|as well as|along with|in order|"
+    r"for (?:a|an|the|our|this|both|all|large|high|multiple|various)\b|at scale|at a|within a|in a|in an|in the|in production|"
+    r"across (?:a|the|multiple|various)|and/or|etc)\b)",
+    re.IGNORECASE,
+)
+PHRASE_DROP_LEAD = re.compile(
+    r"^(?:(?:a|an|the|any|all|some|their|its|your|our|strong|solid|deep|broad|proven|demonstrated|extensive|significant|"
+    r"advanced|basic|working|general|good|excellent|exceptional|thorough|practical|hands-on|hands on|direct|prior|previous|"
+    r"relevant|related|modern|current|various|multiple|several|one|two|at least|least|both|similar|other|industry|"
+    r"in-depth|in depth|firm|sound|keen|robust|comprehensive|expert|expert-level|professional|technical|applicable|"
+    r"leading|common|core|key|standard|major|complex|large|large-scale|enterprise-level|high|best|with|in|working|working in|or|and|global|selected|both)\s+)+",
+    re.IGNORECASE,
+)
+PHRASE_DROP_TAIL = re.compile(
+    r"(?:\s+(?:experience|skills?|knowledge|background|environments?|principles|concepts|fundamentals|practices|"
+    r"techniques|methods|tools|platforms?|technologies|systems? experience|space|field|areas?|settings?|role|roles|"
+    r"capabilities|functions?|industry|sector|work|programs?|is|are|and|or|with|of|in))+$",
+    re.IGNORECASE,
+)
+WEAK_PHRASE = {
+    "work", "working", "it", "this", "these", "them", "others", "people", "teams", "team", "business", "data", "time",
+    "deadlines", "priorities", "projects", "tasks", "details", "detail", "pressure", "change", "ambiguity", "guidance",
+    "supervision", "minimal supervision", "direction", "english", "computers", "computer", "the role",
+}
+
+
+def _phrase_keywords(text: str, known: list[str] | None = None) -> list[str]:
+    """Skill phrases a requirement sentence names outside the dictionary, e.g. "experience with
+    Unreal Engine" → Unreal Engine, "knowledge of building and fire codes" → building and fire codes."""
+    found: list[str] = list(known or [])
+    for name in _product_names(text):
+        if not any(_norm(name) == _norm(item) for item in found):
+            found.append(name)
+    for match in LEAD_IN.finditer(text or ""):
+        rest = text[match.end() :]
+        stop = PHRASE_STOP.search(rest)
+        chunk = rest[: stop.start()] if stop else rest
+        for piece in _phrase_pieces(chunk):
+            if not any(_norm(piece) == _norm(item) or _covers(_tokens(item), _tokens(piece)) for item in found):
+                found.append(piece)
+    if not found and len((text or "").split()) <= 5 and not re.search(r"\b(?:ability|able|willing|must|should|will)\b", text or "", re.IGNORECASE):
+        # A short list item under a requirements heading is itself the skill: "Stochastic optimization".
+        found.extend(_phrase_pieces(text))
+    return _dedupe_keywords(found)[:6]
+
+
+def _phrase_pieces(chunk: str) -> list[str]:
+    chunk = re.sub(r"\s+", " ", chunk).strip(" .;:,-–—")
+    words = chunk.split()
+    if not words:
+        return []
+    # "sales and customer relationship management" names two things; "building and fire codes" one.
+    parts = [chunk]
+    if re.search(r"\s(?:and|or)\s", chunk) and len(words) > 4:
+        parts = [part for part in re.split(r"\s+(?:and|or)\s+", chunk) if part]
+    out = []
+    for part in parts:
+        part = PHRASE_DROP_LEAD.sub("", part.strip())
+        part = PHRASE_DROP_TAIL.sub("", part).strip(" .,-")
+        tokens = part.split()
+        if len(tokens) > 5:
+            # Too long to be one skill: keep what comes before the first preposition.
+            head = re.split(r"\s+(?:for|to|in|on|with|at|from|by|across|through|into|via)\s+", part, maxsplit=1)[0]
+            part = PHRASE_DROP_TAIL.sub("", head).strip(" .,-")
+            tokens = part.split()
+        if not 1 <= len(tokens) <= 5:
+            continue
+        content = [token for token in re.findall(r"[a-z0-9+#]+", part.lower()) if token not in STOPWORDS and token not in GENERIC_WORDS]
+        if not content or part.lower() in WEAK_PHRASE or all(len(token) < 3 for token in content):
+            continue
+        if len(tokens) == 1 and (part.lower() in GENERIC_LIST or part.lower() in STOPWORDS):
+            continue
+        first = tokens[0]
+        if first[:1].isupper() and first[1:].islower() and not _product_name(part):
+            part = first.lower() + part[len(first) :]
+        out.append(part)
+    return out
+
+
+PRODUCT_WORD = r"(?:[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)*|[A-Z]{2,}[a-z]*|[A-Z][a-z]*[A-Z][A-Za-z0-9]*)"
+PRODUCT_NAME = re.compile(rf"(?<![\w.])({PRODUCT_WORD}(?:\s+(?:&\s+)?{PRODUCT_WORD}){{1,4}})(?![\w])")
+NOT_PRODUCT = {
+    "Disney", "The", "Walt", "Company", "Monday", "Friday", "Saturday", "Sunday", "English", "Spanish", "French",
+    "Bachelor", "Bachelors", "Master", "Masters", "Degree", "Associate", "Science", "Arts", "Experience", "Strong",
+    "Ability", "Knowledge", "Excellent", "Must", "Preferred", "Required", "Minimum", "Proven",
+}
+
+
+def _product_names(text: str) -> list[str]:
+    """Multi-word capitalised names inside a sentence ("Unreal Engine", "Blue Yonder Warehouse
+    Management System"). The sentence's first word is skipped: it is capitalised anyway."""
+    names = []
+    for match in PRODUCT_NAME.finditer(text or ""):
+        words = match.group(1).split()
+        if match.start() == len(text) - len(text.lstrip()) or _sentence_start(text, match.start()):
+            words = words[1:]
+        while words and words[0] in NOT_PRODUCT:
+            words = words[1:]
+        while words and words[-1] in NOT_PRODUCT:
+            words = words[:-1]
+        if len(words) >= 2 and not all(word.lower() in GENERIC_LIST or word.lower() in STOPWORDS for word in words):
+            names.append(" ".join(words))
+    return names
+
+
+def _product_name(phrase: str) -> bool:
+    words = phrase.split()
+    return bool(words) and all(word[:1].isupper() or word == "&" for word in words)
+
+
 def _soft_skill_labels(text: str) -> list[str]:
     return [label for label, pattern in SOFT_SKILLS if pattern.search(text or "")]
 
@@ -755,7 +976,8 @@ def _credential_labels(text: str) -> list[str]:
 def _min_years(text: str) -> float | None:
     found = []
     pattern = re.compile(
-        r"(\d+)\s*\+\s*years|\b(\d+)\s*-\s*\d+\s*years|minimum(?:\s+of)?\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+years",
+        r"(\d+)\s*\+\s*years?|\b(\d+)\s*-\s*\d+\s*years?|(?:minimum|at least)(?:\s+of)?\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\+?\s+years?"
+        r"|\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:or more\s+)?years?\s+(?:of\s+)?(?:[\w-]+\s+){0,3}experience",
         re.IGNORECASE,
     )
     for match in pattern.finditer(text or ""):
@@ -1068,13 +1290,16 @@ def _public_row(row: dict, category: str, label: str, match_mode: str, matched: 
         # skill: the keyword belongs in Skills, so the UI offers Add to Skills, not AI wording.
         "keywords": [{**item, "skill": is_skill_keyword(item.get("keyword") or "", category)} for item in keywords],
         "suggestions": suggestions,
+        "source": row.get("source") or "rules",
+        "ai_pending": bool(row.get("ai_pending")),
+        "ai_confirmed": bool(row.get("ai_confirmed")),
     }
 
 
 def _keyword_payload(keyword: str, requirement: str, candidates: list) -> dict:
     evidence = _best_evidence(keyword, requirement, candidates)
     relation = evidence["relation"] if evidence else ""
-    found = relation in {"exact", "alias"}
+    found = relation in {"exact", "alias", "phrase"}
     return {
         "keyword": keyword,
         "found": found,
@@ -1118,7 +1343,41 @@ def _relation_on(keyword: str, text: str) -> tuple[str | None, str | None, str |
     combo = combination_mention(keyword, text)
     if combo:
         return "combination", None, combo
+    if _phrase_hit(keyword, text):
+        return "phrase", None, None
     return None, None, None
+
+
+def _stem(word: str) -> str:
+    word = word.lower()
+    for suffix in ("ations", "ation", "ments", "ment", "ings", "ing", "ies", "ers", "er", "ed", "es", "s"):
+        if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+            word = word[: -len(suffix)]
+            break
+    return word[:-1] if word.endswith("e") and len(word) > 4 else word
+
+
+def _content_stems(text: str) -> list[str]:
+    return [
+        _stem(token)
+        for token in re.findall(r"[a-z0-9+#]+", (text or "").lower())
+        if token not in STOPWORDS and token not in GENERIC_WORDS and len(token) >= 3
+    ]
+
+
+def _phrase_hit(keyword: str, text: str) -> bool:
+    """A phrase from outside the dictionary counts when one resume line uses all its words, in
+    any order and form: "visual search systems" matches "built a visual search system"."""
+    if is_known_term(keyword):
+        return False
+    words = keyword.split()
+    if len(words) >= 3 and words[0].lower().endswith("ing"):
+        # "building visual search systems": the verb's tense varies ("built"), the object does not.
+        keyword = " ".join(words[1:])
+    wanted = set(_content_stems(keyword))
+    if len(wanted) < 2:
+        return False
+    return wanted <= set(_content_stems(text))
 
 
 def _evidence_explanation(keyword: str, relation: str, related: str | None, combo: str | None) -> str:
@@ -1130,6 +1389,8 @@ def _evidence_explanation(keyword: str, relation: str, related: str | None, comb
         return f'This text mentions {related}, which is in the same group as "{keyword}".'
     if relation == "combination":
         return f'This text mentions {combo}, which relates to "{keyword}".'
+    if relation == "phrase":
+        return f'This text uses the words of "{keyword}".'
     return ""
 
 
@@ -1579,11 +1840,103 @@ def _heading_group(raw: str):
         return ("responsibility", "responsibility")
     if BOILERPLATE_HEADING.match(cleaned) or SCHEDULE_HEADING.match(cleaned):
         return "skip"
+    return _loose_heading_group(raw, cleaned)
+
+
+# Headings worded differently from the exact ones above. They only count when the line looks like
+# a heading: not a bullet, short, and either ends with a colon, is bold or ALL CAPS, or starts with
+# one of these heading phrases. "Communication skills" alone is a requirement, not a heading.
+LOOSE_SKIP = re.compile(
+    r"^(?:pay transparency|disclaimer|.*accommodation|submitting your application|.*benefits?\b|(?:the )?perks|"
+    r"about (?:us|the company|our company|the business)|.*reasons why|department description|"
+    r"additional information|equal (?:employment )?opportunity|eeo\b|why (?:join|work)|life at|our (?:values|culture|commitment)|"
+    r"compensation|salary|how to apply|application process|what we offer|we offer)",
+    re.IGNORECASE,
+)
+LOOSE_PREFERRED = re.compile(
+    r"^(?:(?:preferred|desired|desirable|additional|bonus|nice[- ]to[- ]haves?|good[- ]to[- ]haves?|helpful|optional)\b"
+    r"|(?:it(?:'|’)?s|it is|it would be|would be) (?:a )?(?:plus|bonus|great|nice|helpful)|bonus points|extra credit|ideally|even better|you(?:'|’)ll stand out|"
+    r"what would (?:make you stand out|set you apart)|(?:.*\b)?(?:a plus|plus(?:es)?)$)",
+    re.IGNORECASE,
+)
+LOOSE_REQUIRED = re.compile(
+    r"^(?:(?:required|minimum|basic|key|core|essential|job|the|your|our|must[- ]have|technical|professional|relevant|work)\s+)*"
+    r"(?:qualifications?|requirements?|skills?|competenc(?:e|ies|y)|experience|knowledge|expertise|must[- ]haves?|criteria|abilities)\b"
+    r"|^(?:you must|must have|what you(?:'|’)?ll need|what you need|what we need|what we(?:'|’)?re looking for|what we are looking for|"
+    r"who you are|about you|you are|you have|you(?:'|’)?ll have|you will have|you(?:'|’)?ll bring|what you(?:'|’)?ll bring|what you bring|"
+    r"what it takes|to be successful|.*need(?:ed)? (?:from you )?to be successful|.*what you need to|the ideal candidate|ideal candidate|"
+    r"we(?:'|’)?re looking for|we are looking for|expected areas of competence|is this you|do you have|ideally you(?:'|’)?ll have)",
+    re.IGNORECASE,
+)
+LOOSE_RESPONSIBILITY = re.compile(
+    r"^(?:(?:your|key|main|primary|core|job|essential)\s+)*(?:responsibilities|duties|accountabilities|contributions|impact|role)\b"
+    r"|^(?:what you(?:'|’)?ll do|what you will do|what will you do|what you(?:'|’)?ll be doing|day[- ]to[- ]day|a day in the life|"
+    r"in this role|the work|how you(?:'|’)?ll|you will|you(?:'|’)?ll)",
+    re.IGNORECASE,
+)
+# Career sites put these above the whole posting, company blurb included.
+PAGE_TITLE = re.compile(r"^(?:job requirements|job description|job details|description|job posting)$", re.IGNORECASE)
+LOOSE_EDUCATION = re.compile(r"\beducation\b|\bdegrees?\b|\bcertifications?\b", re.IGNORECASE)
+
+
+def _looks_like_heading(raw: str, cleaned: str) -> bool:
+    text = _text(raw).strip().replace("\u200b", "")
+    if re.match(r"^\s*(?:[-*•●▪◦·]|\d+[.)])\s+", text) and not re.match(r"^\s*(?:\*\*|__)", text):
+        return False
+    words = cleaned.split()
+    if not 1 <= len(words) <= 12 or cleaned.endswith(".") or cleaned.endswith(","):
+        return False
+    return len(words) <= 6 or (_marked_heading(raw, cleaned) and len(words) <= 9) or text.rstrip(" *_").endswith(":")
+
+
+def _marked_heading(raw: str, cleaned: str) -> bool:
+    """A colon, bold, a Markdown heading or ALL CAPS: the writer marked this line as a heading."""
+    text = _text(raw).strip().replace("\u200b", "")
+    marked = text.rstrip(" *_").endswith(":") or bool(re.match(r"^\s*(?:#{1,6}\s|\*\*|__)", text))
+    shouting = sum(char.isalpha() for char in cleaned) >= 4 and cleaned.upper() == cleaned
+    return marked or shouting
+
+
+# Words a heading can be made of. An unmarked line must be only these, so "Experience with SQL"
+# stays a requirement while "Skills and Experience" is a heading.
+HEADING_WORDS = re.compile(
+    r"^(?:(?:and|&|/|,|of|the|our|your|key|core|required|minimum|basic|essential|preferred|desired|additional|job|work|"
+    r"technical|professional|relevant|education|educational|experience|skills?|qualifications?|requirements?|training|"
+    r"knowledge|abilities|attributes|competenc(?:e|ies|y)|expertise|background|certifications?|licen[cs]es?|"
+    r"responsibilities|duties|role|what|who|you|you(?:'|’)?ll|will|do|bring|have|need|are|must|looking|for|we(?:'|’)?re|"
+    r"we|is|this|it|takes|to|be|successful|ideal|candidate|about|nice|good|bonus|points|plus|a|day|in|life|"
+    r"expected|areas|personal|stand|out|even|better|ideally|helpful|haves?|must-haves?|nice-to-haves?)\s*)+$",
+    re.IGNORECASE,
+)
+
+
+def _loose_heading_group(raw: str, cleaned: str):
+    if not _looks_like_heading(raw, cleaned):
+        return None
+    text = cleaned.strip(" :*#_")
+    if PAGE_TITLE.match(text):
+        return None
+    if LOOSE_SKIP.match(text):
+        return "skip"
+    if not (_marked_heading(raw, cleaned) or HEADING_WORDS.match(text)):
+        return None
+    if LOOSE_PREFERRED.match(text):
+        only_education = LOOSE_EDUCATION.search(text) and not re.search(r"skill|experience|qualif", text, re.IGNORECASE)
+        return ("preferred", "education" if only_education else "skill")
+    if LOOSE_REQUIRED.match(text):
+        return ("required", "skill")
+    if LOOSE_RESPONSIBILITY.match(text):
+        return ("responsibility", "responsibility")
+    if LOOSE_EDUCATION.match(text) and len(text.split()) <= 4:
+        preferred = re.search(r"preferred|desired", text, re.IGNORECASE)
+        return ("preferred" if preferred else "required", "education")
     return None
 
 
 def _normalize_heading(raw: str) -> str:
-    cleaned = _clean_requirement_line(raw).strip(" :.-")
+    cleaned = re.sub(r"^\s*#{1,6}\s*", "", _text(raw)).replace("\u200b", "")
+    cleaned = re.sub(r"(?:\*\*|__)", "", cleaned)
+    cleaned = _clean_requirement_line(cleaned).strip(" :.-")
     if not cleaned or len(cleaned) > 80:
         return ""
     cleaned = re.sub(r"\s*(?:&|and)\s+skills$", "", cleaned, flags=re.IGNORECASE)

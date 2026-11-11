@@ -3,10 +3,11 @@ from uuid import UUID
 
 from psycopg.rows import dict_row
 
+from .ai_job_analysis import is_current
 from .job_match import analyze_requirements, extract_facts, match_qualifications
 from .library_repository import load_composition
 
-COLUMNS = "id, company, role, title, body, composition_id, keyword_review, archived_at, created_at, updated_at"
+COLUMNS = "id, company, role, title, body, composition_id, keyword_review, ai_analysis, archived_at, created_at, updated_at"
 SECTION_LABELS = {
     "work_experience": "Work Experience",
     "projects": "Projects",
@@ -31,7 +32,22 @@ def _normalize(row):
         "added": list(review.get("added") or []),
         "matched": list(review.get("matched") or []),
         "skipped": list(review.get("skipped") or []),
+        "ai_accepted": list(review.get("ai_accepted") or []),
     }
+    stored = row.get("ai_analysis")
+    if isinstance(stored, str):
+        stored = json.loads(stored)
+    row["ai_analysis_raw"] = stored if isinstance(stored, dict) else None
+    row["ai_analysis"] = (
+        {
+            "current": is_current(stored, row.get("body") or ""),
+            "model": str(stored.get("model") or ""),
+            "analyzed_at": str(stored.get("analyzed_at") or ""),
+            "requirement_count": len(stored.get("requirements") or []),
+        }
+        if isinstance(stored, dict)
+        else None
+    )
     facts = extract_facts(row.get("body") or "")
     row["salary"] = facts["salary"]
     row["locations"] = facts["locations"]
@@ -162,13 +178,29 @@ async def archive_job_description(conn, user_id, job_id):
     return row
 
 
+def review_for(job: dict) -> dict:
+    """The job's keyword review plus its AI-found requirements, while the posting is unchanged."""
+    review = dict(job.get("keyword_review") or {})
+    stored = job.get("ai_analysis_raw")
+    if is_current(stored, job.get("body") or ""):
+        review["ai"] = list(stored.get("requirements") or [])
+    return review
+
+
+async def save_ai_analysis(conn, user_id, job_id, analysis: dict):
+    return await _one(
+        conn,
+        f"""UPDATE job_descriptions SET ai_analysis=%s::jsonb, updated_at=now()
+             WHERE id=%s AND user_id=%s AND archived_at IS NULL RETURNING {COLUMNS}""",
+        (json.dumps(analysis), job_id, user_id),
+    )
+
+
 async def analyze_job_description(conn, user_id, job_id):
     job = await get_job_description(conn, user_id, job_id)
     if not job:
         return None
-    review = job.get("keyword_review") or {}
-    if isinstance(review, str):
-        review = json.loads(review)
+    review = review_for(job)
     return analyze_requirements(job["body"], review)
 
 
@@ -182,9 +214,7 @@ async def compare_job_description(conn, user_id, job_id, composition_id: UUID):
     payload = composition["render_payload"] or {}
     if isinstance(payload, str):
         payload = json.loads(payload)
-    review = job.get("keyword_review") or {}
-    if isinstance(review, str):
-        review = json.loads(review)
+    review = review_for(job)
     bullets = await _placed_bullets(conn, user_id, composition_id)
     result = match_qualifications(job["body"], payload, bullets, review)
     await link_job_composition(conn, user_id, job_id, composition_id)
@@ -202,9 +232,7 @@ async def load_ai_review_inputs(conn, user_id, job_id, composition_id: UUID):
     payload = composition["render_payload"] or {}
     if isinstance(payload, str):
         payload = json.loads(payload)
-    review = job.get("keyword_review") or {}
-    if isinstance(review, str):
-        review = json.loads(review)
+    review = review_for(job)
     bullets = await _placed_bullets(conn, user_id, composition_id)
     return {
         "description": job["body"],

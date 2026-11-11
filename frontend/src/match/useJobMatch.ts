@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { CompareJob } from "../matchMarks";
-import type { JobDescription, JobMatch, KeywordReview, RequirementRow } from "./types";
+import type { AiJobAnalysisResult, JobDescription, JobMatch, KeywordReview, RequirementRow } from "./types";
 
 /** Jobs, the selected job and its deterministic match for one resume. Shared by the dashboard and both documents. */
 export function useJobMatch({
@@ -22,6 +22,7 @@ export function useJobMatch({
   const [jobId, setJobIdState] = useState("");
   const [match, setMatch] = useState<JobMatch | null>(null);
   const [busy, setBusy] = useState(false);
+  const [analysing, setAnalysing] = useState(false);
   const [error, setError] = useState("");
   const [generation, setGeneration] = useState(0);
   const request = useRef(0);
@@ -107,6 +108,7 @@ export function useJobMatch({
     added: job.keyword_review?.added || [],
     matched: job.keyword_review?.matched || [],
     skipped: job.keyword_review?.skipped || [],
+    ai_accepted: job.keyword_review?.ai_accepted || [],
   });
 
   const saveReview = async (review: KeywordReview) => {
@@ -168,6 +170,34 @@ export function useJobMatch({
     });
   };
 
+  /** Accept an AI-found requirement: it counts at full weight from now on. */
+  const acceptAi = (row: Pick<RequirementRow, "text">) => {
+    if (!selected) return;
+    const review = reviewOf(selected);
+    const accepted = review.ai_accepted || [];
+    if (accepted.some((text) => sameText(text, row.text))) return;
+    saveReview({ ...review, ai_accepted: [...accepted, row.text] });
+  };
+
+  /** Run the AI reading of the selected posting. Only on request; the result is saved on the job. */
+  const runAiAnalysis = async () => {
+    if (!selected) return;
+    setBusy(true);
+    setAnalysing(true);
+    setError("");
+    try {
+      const result = await api<AiJobAnalysisResult>(`/api/job-descriptions/${selected.id}/ai-analysis`, { method: "POST" });
+      setJobs((rows) => rows.map((row) => (row.id === result.job.id ? result.job : row)));
+      if (result.status !== "ok") setError(result.detail);
+      else refresh();
+    } catch (reason: any) {
+      setError(reason.message);
+    } finally {
+      setAnalysing(false);
+      setBusy(false);
+    }
+  };
+
   const addTag = async (bulletId: string, keyword: string) => {
     if (!selected || !keyword) return;
     setBusy(true);
@@ -195,6 +225,7 @@ export function useJobMatch({
     compareJob,
     match,
     busy,
+    analysing,
     error,
     setError,
     refresh,
@@ -202,6 +233,8 @@ export function useJobMatch({
     markRequirement,
     skipKeyword,
     addTag,
+    acceptAi,
+    runAiAnalysis,
   };
 }
 

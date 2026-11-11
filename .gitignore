@@ -12,3 +12,4 @@ test-results/
 *.zip
 frontend/dist/
 docs/archive/
+.job-corpus/
