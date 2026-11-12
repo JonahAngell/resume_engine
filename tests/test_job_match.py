@@ -601,7 +601,7 @@ def test_analyze_requirements_skips_the_resume_and_applies_review():
     assert "dbt" in keywords
     assert result["preferred"] == []
     for row in result["required"]:
-        assert set(row) == {"text", "kind", "label", "keywords", "match_mode", "category", "section", "weight"}
+        assert set(row) == {"text", "kind", "label", "keywords", "match_mode", "category", "section", "weight", "source", "ai_pending", "ai_confirmed"}
         assert all(isinstance(keyword, str) for keyword in row["keywords"])
 
 

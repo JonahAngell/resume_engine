@@ -14,6 +14,8 @@ export type MatchMark = {
   targets?: LineTarget[];
   /** What the item popover shows when this highlight is clicked. */
   items?: MarkItem[];
+  /** Only AI-found requirements use this term: shown with a dotted underline. */
+  ai?: boolean;
 };
 
 export type MarkItem = {
@@ -74,9 +76,11 @@ function addMark(map: Map<string, MatchMark>, mark: MatchMark) {
       excerpts: mark.kind === "match" ? [] : unique(mark.excerpts),
       targets: mark.kind === "match" ? [] : mergeTargets([], mark.targets),
       items: mergeItems([], mark.items),
+      ai: !!mark.ai,
     });
     return;
   }
+  current.ai = !!current.ai && !!mark.ai;
   current.terms = unique([...current.terms, ...mark.terms]);
   current.items = mergeItems(current.items, mark.items);
   if (current.kind === "match" || mark.kind === "match") {
@@ -139,6 +143,7 @@ export function buildMatchMarks(rows: RequirementRow[]): MatchMark[] {
         lineIds: [],
         excerpts: [],
         items: [rowItem(row, label, found)],
+        ai: row.source === "ai",
       });
       continue;
     }
@@ -168,6 +173,7 @@ export function buildMatchMarks(rows: RequirementRow[]): MatchMark[] {
                 action: item.action as LineAction,
               })),
         items: [rowItem(row, term, found, !keyword.skill)],
+        ai: row.source === "ai",
       });
     }
   }
