@@ -23,6 +23,11 @@ const membersOf = (lib: any): SetMember[] => lib.default_set_members || [];
 const clip = (text: string, size = 70) =>
   text.length > size ? `${text.slice(0, size - 1)}…` : text;
 
+/** A record's active field variants (skill groups, interests, entries, education). */
+function fieldVariantsOf(row: any) {
+  return (row.field_variants || []).filter((v: any) => !v.archived_at);
+}
+
 export function bulletVariantOptions(variants: any[]): VariantOption[] {
   return variants
     .filter((v: any) => !v.archived_at && !v.variant_archived_at)
@@ -105,7 +110,7 @@ export function SetMembershipEditor({
               />
               {set.name}
             </label>
-            {row && variants && variants.length > 1 && (
+            {row && variants && variants.length > (itemType === "bullet" ? 1 : 0) && (
               <select
                 aria-label={`Wording for ${set.name}`}
                 value={row.variant_id || ""}
@@ -421,6 +426,21 @@ function SetContents({
                     />
                     {name(row) || "Untitled"}
                   </label>
+                  {included && fieldVariantsOf(row).length > 0 && (
+                    <select
+                      className="set-wording"
+                      aria-label={`Variant of ${name(row) || "this entry"} for ${set.name}`}
+                      value={members.find((m) => m.item_type === type && m.item_id === row.id)?.variant_id || ""}
+                      onChange={(event) => toggle(type, row.id, true, event.target.value || null)}
+                    >
+                      <option value="">Default variant</option>
+                      {fieldVariantsOf(row).map((v: any) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   {included && bullets.size > 0 && (
                     <ul>
                       {[...bullets].map(([id, body]) => {

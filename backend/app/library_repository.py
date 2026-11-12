@@ -1654,7 +1654,7 @@ async def select_education(conn, user_id, cid, expected, education_id, included)
 async def composition_items(conn,user_id,cid):
     exists=await _one(conn,"SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s",(cid,user_id))
     if not exists:return None
-    return await _many(conn,"SELECT i.section,i.item_id,i.sort_order FROM composition_items i JOIN resume_compositions c ON c.id=i.composition_id WHERE i.composition_id=%s AND c.user_id=%s ORDER BY i.section,i.sort_order,i.id",(cid,user_id))
+    return await _many(conn,"SELECT i.section,i.item_id,i.variant_id,i.sort_order FROM composition_items i JOIN resume_compositions c ON c.id=i.composition_id WHERE i.composition_id=%s AND c.user_id=%s ORDER BY i.section,i.sort_order,i.id",(cid,user_id))
 
 async def create_and_include_entry(conn,user_id,cid,payload):
     from types import SimpleNamespace

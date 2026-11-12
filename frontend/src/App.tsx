@@ -2421,6 +2421,69 @@ function moveIndex<T>(items: T[], from: number, to: number) {
   next.splice(to, 0, item);
   return next;
 }
+/** The skills a group shows, using the resume's chosen variant (its tools, in its order). */
+function variantSkills(
+  items: any[],
+  variant: any | null,
+  toolOrder: Record<string, number>,
+) {
+  const skills = orderedSkills(items, toolOrder);
+  if (!variant) return skills;
+  const position = new Map<string, number>(
+    (variant.tool_ids || []).map((id: string, index: number) => [String(id), index]),
+  );
+  return skills
+    .filter((skill) => position.has(String(skill.id)))
+    .sort((a, b) => {
+      const left = toolOrder[String(a.id)];
+      const right = toolOrder[String(b.id)];
+      if (left != null && right != null && left !== right) return left - right;
+      if (left != null && right == null) return -1;
+      if (left == null && right != null) return 1;
+      return (position.get(String(a.id)) || 0) - (position.get(String(b.id)) || 0);
+    });
+}
+
+/** Choose which variant of a skill group or interest this resume uses. */
+function ItemVariantSelect({
+  item,
+  current,
+  label,
+  originalLabel,
+  onPick,
+}: {
+  item: any;
+  current: any | null;
+  label: string;
+  originalLabel: string;
+  onPick: (variantId: string | null) => void;
+}) {
+  const options = (item.field_variants || []).filter(
+    (variant: any) =>
+      !variant.archived_at || String(variant.id) === String(current?.id),
+  );
+  if (!options.length) return null;
+  return (
+    <label className="item-variant-select">
+      <span>Variant</span>
+      <select
+        aria-label={label}
+        value={current ? String(current.id) : ""}
+        onChange={(event) => onPick(event.target.value || null)}
+      >
+        <option value="">{originalLabel}</option>
+        {options.map((variant: any) => (
+          <option key={variant.id} value={String(variant.id)}>
+            {variant.name}
+            {variant.is_default ? " (default)" : ""}
+            {variant.archived_at ? " (archived)" : ""}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function orderedSkills(items: any[], toolOrder: Record<string, number>) {
   return items
     .filter((skill) => !skill.archived_at)
@@ -2941,6 +3004,28 @@ function SectionsPanel({
     leadership: lib.leadership,
     personal_interests: lib.interests,
   };
+  const chosenVariant = (section: string, item: any) => {
+    const link = compositionItems.find(
+      (row) => row.section === section && String(row.item_id) === String(item.id),
+    );
+    if (!link?.variant_id) return null;
+    return (
+      (item.field_variants || []).find(
+        (variant: any) => String(variant.id) === String(link.variant_id),
+      ) || null
+    );
+  };
+  const pickVariant = async (
+    section: "tool_groups" | "personal_interests",
+    itemId: string,
+    variantId: string | null,
+  ) => {
+    try {
+      await libraryActions.pickItemVariant(section, itemId, variantId);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
   const sectionEntries = (key: string) => {
     const stored = storageSection(key);
     let a = compositionItems
@@ -3349,11 +3434,21 @@ function SectionsPanel({
     },
     saveEntry: async (section: string, id: string, draft: any) => {
       if (section === "tool_groups") {
-        await api(`/api/library/tool-groups/${id}`, {
-          method: "PUT",
-          body: JSON.stringify({ name: (draft.name || "").trim() }),
-        });
-        await refreshResume();
+        if (!(draft.name || "").trim()) throw new Error("Group name is required.");
+        const mode = await chooseSaveMode("skill group");
+        if (!mode) return false;
+        setComp(
+          await api(`/api/compositions/${comp.id}/tool-groups/${id}/save`, {
+            method: "POST",
+            body: JSON.stringify({
+              revision: comp.revision,
+              mode,
+              group_name: draft.name.trim(),
+            }),
+          }),
+        );
+        await reloadLibrary();
+        setStatus("Saved");
         return;
       }
       const mode = await chooseSaveMode("entry");
@@ -3528,11 +3623,38 @@ function SectionsPanel({
     saveInterest: async (id: string, draft: any) => {
       if (!(draft.body || "").trim())
         throw new Error("Interest text is required.");
-      await api(`/api/library/interests/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ body: draft.body.trim() }),
-      });
-      await refreshResume();
+      const mode = await chooseSaveMode("interest");
+      if (!mode) return false;
+      setComp(
+        await api(`/api/compositions/${comp.id}/interests/${id}/save`, {
+          method: "POST",
+          body: JSON.stringify({
+            revision: comp.revision,
+            mode,
+            body: draft.body.trim(),
+          }),
+        }),
+      );
+      await reloadLibrary();
+      setStatus("Saved");
+    },
+    pickItemVariant: async (
+      section: "tool_groups" | "personal_interests",
+      itemId: string,
+      variantId: string | null,
+    ) => {
+      setComp(
+        await api(`/api/compositions/${comp.id}/item-variant`, {
+          method: "PUT",
+          body: JSON.stringify({
+            revision: comp.revision,
+            section,
+            item_id: itemId,
+            variant_id: variantId,
+          }),
+        }),
+      );
+      setStatus("Saved");
     },
     addSkill: async (groupId: string, name: string) => {
       await api("/api/library/tools", {
@@ -4024,7 +4146,9 @@ function SectionsPanel({
             </div>
           )}
           {items.map((group: any, groupIndex: number) => {
-            const skills = orderedSkills(group.items || [], toolOrder);
+            const variant = chosenVariant("tool_groups", group);
+            const groupLabel = variant?.group_name || group.name;
+            const skills = variantSkills(group.items || [], variant, toolOrder);
             const expansionKey = `skill:${group.id}`;
             const expanded = entryExpanded[expansionKey] ?? true;
             return (
@@ -4044,15 +4168,15 @@ function SectionsPanel({
                     drag={rowDrag}
                   />
                 )}
-                <strong>{group.name}</strong>
+                <strong>{groupLabel}</strong>
                 <span className="skill-group-tools">
                   <RecordActions
-                    name={group.name}
+                    name={groupLabel}
                     onEdit={() =>
                       setLibraryDialog({
                         mode: "edit-entry",
                         section: "tool_groups",
-                        item: group,
+                        item: { ...group, name: groupLabel },
                       })
                     }
                     onReplace={() =>
@@ -4084,6 +4208,15 @@ function SectionsPanel({
               </div>
               {expanded && (
               <div className="entry-card-body">
+                <ItemVariantSelect
+                  item={group}
+                  current={variant}
+                  label={`Variant of ${group.name} on this resume`}
+                  originalLabel={`Original (${group.name})`}
+                  onPick={(variantId) =>
+                    pickVariant("tool_groups", group.id, variantId)
+                  }
+                />
                 {skills.map((skill: any, skillIndex: number) => (
                     <div
                       className={`skill-line ${skills.length > 1 ? "has-drag" : ""} ${dragRowClass(rowDrag.drag, `skills:${group.id}`, skillIndex)}`}
@@ -4146,7 +4279,10 @@ function SectionsPanel({
     if (key === "personal_interests") {
       return (
         <div className="entry-list interest-list">
-          {items.map((item: any, interestIndex: number) => (
+          {items.map((item: any, interestIndex: number) => {
+            const variant = chosenVariant("personal_interests", item);
+            const body = variant?.body || item.body;
+            return (
             <div
               className={`bullet-row ${items.length > 1 ? "has-drag" : ""} ${dragRowClass(rowDrag.drag, "interests", interestIndex)}`}
               data-drag-list={items.length > 1 ? "interests" : undefined}
@@ -4162,11 +4298,25 @@ function SectionsPanel({
                   drag={rowDrag}
                 />
               )}
-              <span>{item.body}</span>
+              <div className="interest-text">
+                <span>{body}</span>
+                <ItemVariantSelect
+                  item={item}
+                  current={variant}
+                  label={`Variant of ${item.body} on this resume`}
+                  originalLabel="Original"
+                  onPick={(variantId) =>
+                    pickVariant("personal_interests", item.id, variantId)
+                  }
+                />
+              </div>
               <RecordActions
-                name={item.body}
+                name={body}
                 onEdit={() =>
-                  setLibraryDialog({ mode: "edit-interest", item })
+                  setLibraryDialog({
+                    mode: "edit-interest",
+                    item: { ...item, body },
+                  })
                 }
                 onReplace={() =>
                   setLibraryDialog({
@@ -4177,7 +4327,8 @@ function SectionsPanel({
                 onRemove={() => chooseInterest(item, false)}
               />
             </div>
-          ))}
+            );
+          })}
           <button
             type="button"
             className="add-entry-button"

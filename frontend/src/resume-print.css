@@ -6307,3 +6307,28 @@ mark.doc-hit:focus-visible {
     min-height: 70vh;
   }
 }
+
+/* Which variant of a skill group or interest this resume uses. */
+.item-variant-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--muted, #5b6472);
+  margin: 2px 0 6px;
+}
+.item-variant-select select {
+  max-width: 220px;
+  font-size: 0.85rem;
+}
+.interest-list .interest-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.interest-list .item-variant-select {
+  margin: 0;
+}

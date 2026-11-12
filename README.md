@@ -23,6 +23,29 @@ The rail is Home, Library, Jobs, and Bin.
 - **Job match** is a tab in the editor. It scores the open resume against a job description and highlights matching lines in the preview. Choosing a job description in Resume Details links that job and copies its company and role onto the composition. A match request only returns the comparison. Clicking a missing keyword (other than a tool, which goes to Skills) offers **Work into resume**: AI wording that puts the keyword into existing bullets, or a new bullet for a role or project. Nothing saves until you accept, and new bullets can't be saved while they still have a `[placeholder]`.
 - **Bin** is the Home view of archived resumes. Restore puts one back under My Resumes.
 
+## Skill group and interest variants
+
+Skill groups and interests can have variants, like other entries.
+
+- A **skill group variant** has its own label and its own pick and order of the group's skills. For example, "Technical Languages" can have a "Data roles" variant labelled "Data Languages" that shows only Python and SQL.
+- An **interest variant** is another wording of the interest.
+- Each resume chooses which one to show from the **Variant** menu on the skill group or interest in the editor. "Original" is the record itself. The resume's own skill hiding and ordering still apply on top of a variant.
+- Editing a skill group or interest in the editor asks how to keep the change:
+  - **Overwrite** updates what the resume uses: the chosen variant, or the record itself. For a skill group that has no variant chosen, overwrite changes only the label.
+  - **Create a new** makes a separate record. For a skill group, it copies the skills the resume currently shows.
+  - **Save as a variant** saves the label and the skills shown, in order, as a new variant chosen for this resume.
+- Manage variants on the Library record's **Variants** tab: add, edit, set **Use for new resumes** (the default), archive or restore.
+  - New resumes start with the default variant.
+  - A defaults set can choose a variant per record.
+  - Archiving a variant clears its default. Resumes that already use it keep it, but it can't be chosen again until restored.
+- API:
+  - `POST /api/library/tool-groups/{id}/variants` with `name`, `group_name` and `tool_ids`
+  - `POST /api/library/interests/{id}/variants` with `name` and `body`
+  - `PUT /api/library/tool-group-variants/{id}` and `PUT /api/library/interest-variants/{id}`, where fields you leave out stay as they are and `is_default` sets or clears the default
+  - `POST .../{id}/archive` and `POST .../{id}/restore`
+  - `PUT /api/compositions/{id}/item-variant` with `revision`, `section`, `item_id` and `variant_id`, where `null` means the record itself
+  - `POST /api/compositions/{id}/tool-groups/{group_id}/save` and `POST /api/compositions/{id}/interests/{interest_id}/save` for the save modes
+
 ## Templates
 
 Preview and PDF both render [`backend/app/templates/resume.html`](backend/app/templates/resume.html). A composition picks one template style:
