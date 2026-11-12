@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
+import AiAnalysisBar from "./AiAnalysisBar";
 import { AppIcon } from "./AppIcon";
 import { confirmDialog } from "./ConfirmDialog";
 import JobDescriptionFields, { emptyJobDraft, type JobDraft } from "./JobDescriptionFields";
 import compactLogo from "./assets/logo-compact.png";
+import { highlightSegments, matchMarkId, type MatchMark } from "./matchMarks";
+import type { AiAnalysisSummary, KeywordReview } from "./match/types";
 
 type JobDescription = {
   id: string;
@@ -17,6 +20,8 @@ type JobDescription = {
   archived_at: string | null;
   created_at: string;
   updated_at: string;
+  keyword_review?: KeywordReview;
+  ai_analysis?: AiAnalysisSummary | null;
 };
 
 type AnalysisRow = {
@@ -25,6 +30,9 @@ type AnalysisRow = {
   label?: string;
   match_mode?: "any" | "all";
   keywords: string[];
+  source?: "rules" | "ai";
+  ai_pending?: boolean;
+  ai_confirmed?: boolean;
 };
 
 type JobAnalysis = {
@@ -93,7 +101,8 @@ function leadSplit(line: string) {
 }
 
 function isSectionHeading(line: string) {
-  if (leadSplit(line)) return false;
+  // A bullet is an item, even one that mentions "experience" or "skills".
+  if (leadSplit(line) || isBullet(line.trim())) return false;
   const text = headingText(cleanHeadingLine(line));
   if (!text || text.length > 80) return false;
   const words = text.split(/\s+/);
@@ -236,7 +245,46 @@ function postingSections(body: string): PostingSection[] {
   return sections;
 }
 
-function PostingView({ body }: { body: string }) {
+/** One highlight per keyword. A term only AI found keeps the AI style; the rules finding it too wins. */
+function postingMarks(analysis: JobAnalysis | null): MatchMark[] {
+  if (!analysis) return [];
+  const marks = new Map<string, MatchMark>();
+  const rows = [...analysis.required, ...analysis.preferred, ...(analysis.responsibilities || [])];
+  for (const row of rows) {
+    for (const term of row.keywords) {
+      const id = matchMarkId(term);
+      if (!id) continue;
+      const ai = row.source === "ai";
+      const current = marks.get(id);
+      if (current) current.ai = !!current.ai && ai;
+      else marks.set(id, { id, kind: "match", terms: [term], lineIds: [], excerpts: [], ai });
+    }
+  }
+  return [...marks.values()];
+}
+
+function Highlighted({ text, marks }: { text: string; marks: MatchMark[] }) {
+  if (!marks.length) return <>{text}</>;
+  return (
+    <>
+      {highlightSegments(text, marks).map((segment, index) =>
+        segment.mark ? (
+          <mark
+            key={index}
+            className={`posting-hit${segment.mark.ai ? " ai" : ""}`}
+            title={segment.mark.ai ? "Keyword found by AI" : "Keyword"}
+          >
+            {segment.text}
+          </mark>
+        ) : (
+          <React.Fragment key={index}>{segment.text}</React.Fragment>
+        ),
+      )}
+    </>
+  );
+}
+
+function PostingView({ body, marks = [] }: { body: string; marks?: MatchMark[] }) {
   const sections = useMemo(() => postingSections(body), [body]);
   const [open, setOpen] = useState<Record<number, boolean>>({ 0: true });
   useEffect(() => {
@@ -267,13 +315,19 @@ function PostingView({ body }: { body: string }) {
                   block.kind === "list" ? (
                     <ul key={blockIndex}>
                       {block.items.map((item, itemIndex) => (
-                        <li key={`${itemIndex}-${item}`}>{item}</li>
+                        <li key={`${itemIndex}-${item}`}>
+                          <Highlighted text={item} marks={marks} />
+                        </li>
                       ))}
                     </ul>
                   ) : (
                     <p key={blockIndex}>
-                      {block.lead && <strong>{block.lead}. </strong>}
-                      {block.text}
+                      {block.lead && (
+                        <strong>
+                          <Highlighted text={block.lead} marks={marks} />.{" "}
+                        </strong>
+                      )}
+                      <Highlighted text={block.text} marks={marks} />
                     </p>
                   ),
                 )}
@@ -287,7 +341,17 @@ function PostingView({ body }: { body: string }) {
 }
 
 
-function KeywordGroups({ analysis }: { analysis: JobAnalysis }) {
+function KeywordGroups({
+  analysis,
+  busy,
+  onAccept,
+  onDismiss,
+}: {
+  analysis: JobAnalysis;
+  busy: boolean;
+  onAccept: (row: AnalysisRow) => void;
+  onDismiss: (row: AnalysisRow) => void;
+}) {
   const groups = (
     [
       ["Required", analysis.required],
@@ -318,7 +382,7 @@ function KeywordGroups({ analysis }: { analysis: JobAnalysis }) {
           <h3>{title}</h3>
           <ul className="requirement-list">
             {rows.map((row) => (
-              <li className="requirement-row" key={`${row.kind || "skill"}:${row.text}`}>
+              <li className={`requirement-row${row.ai_pending ? " ai-pending" : ""}`} key={`${row.kind || "skill"}:${row.text}`} title={row.text}>
                 <span className="qual-keywords">
                   {row.match_mode === "any" && row.keywords.length > 1 && (
                     <span className="qual-any">Any of</span>
@@ -333,6 +397,24 @@ function KeywordGroups({ analysis }: { analysis: JobAnalysis }) {
                     <span className="qual-label">{row.label || row.text}</span>
                   )}
                 </span>
+                {row.source === "ai" && (
+                  <span
+                    className={`ai-badge${row.ai_pending ? " pending" : ""}`}
+                    title={row.ai_pending ? "Found by AI. Counts at half weight until you accept it." : "Found by AI and accepted."}
+                  >
+                    ✦ AI
+                  </span>
+                )}
+                {row.ai_pending && (
+                  <span className="ai-row-actions">
+                    <button type="button" className="link-button" disabled={busy} onClick={() => onAccept(row)}>
+                      Accept
+                    </button>
+                    <button type="button" className="link-button danger-text" disabled={busy} onClick={() => onDismiss(row)}>
+                      Dismiss
+                    </button>
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -360,6 +442,7 @@ export default function JobsPage({
   const [describing, setDescribing] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [analysing, setAnalysing] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const request = useRef(0);
 
@@ -449,6 +532,67 @@ export default function JobsPage({
     await loadAnalysis(saved.id, token);
     return saved;
   };
+
+  const sameText = (left: string, right: string) => left.trim().toLowerCase() === right.trim().toLowerCase();
+
+  /** Accept or dismiss an AI-found requirement. Saved in the job's keyword review, like the editor does. */
+  const reviewAi = async (row: AnalysisRow, action: "accept" | "dismiss") => {
+    if (!editing) return;
+    const current = editing.keyword_review || { dismissed: [], added: [], matched: [], skipped: [] };
+    const field = action === "accept" ? "ai_accepted" : "dismissed";
+    const list = current[field] || [];
+    if (list.some((text) => sameText(text, row.text))) return;
+    setBusy(true);
+    setError("");
+    try {
+      const saved = await api<JobDescription>(`/api/job-descriptions/${editing.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          company: editing.company,
+          role: editing.role,
+          title: editing.title,
+          body: editing.body,
+          composition_id: editing.composition_id,
+          keyword_review: { ...current, [field]: [...list, row.text] },
+        }),
+      });
+      setEditing(saved);
+      setJobs((rows) => rows.map((job) => (job.id === saved.id ? { ...job, ...saved } : job)));
+      await loadAnalysis(saved.id, ++request.current);
+    } catch (reason: any) {
+      setError(reason.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** Only on request: the posting (never a resume) is read by AI and the result saved on the job. */
+  const runAiAnalysis = async () => {
+    if (!editing) return;
+    setBusy(true);
+    setAnalysing(true);
+    setError("");
+    try {
+      const result = await api<{ status: string; detail: string; job: JobDescription }>(
+        `/api/job-descriptions/${editing.id}/ai-analysis`,
+        { method: "POST" },
+      );
+      setEditing(result.job);
+      setJobs((rows) => rows.map((job) => (job.id === result.job.id ? { ...job, ...result.job } : job)));
+      if (result.status !== "ok") setError(result.detail);
+      else await loadAnalysis(result.job.id, ++request.current);
+    } catch (reason: any) {
+      setError(reason.message);
+    } finally {
+      setAnalysing(false);
+      setBusy(false);
+    }
+  };
+
+  const marks = useMemo(() => postingMarks(analysis), [analysis]);
+  const aiPending = analysis
+    ? [...analysis.required, ...analysis.preferred, ...(analysis.responsibilities || [])].filter((row) => row.ai_pending).length
+    : 0;
 
   const archive = async (job: JobDescription) => {
     const confirmed = await confirmDialog({
@@ -679,7 +823,7 @@ export default function JobsPage({
                           <AppIcon name="pencil" />
                         </button>
                       </div>
-                      <PostingView body={editing?.body || ""} />
+                      <PostingView body={editing?.body || ""} marks={marks} />
                       {editing && (
                         <button
                           type="button"
@@ -694,12 +838,20 @@ export default function JobsPage({
                 </section>
                 <section className="jobs-panel" aria-live="polite">
                   <h2>Keywords</h2>
+                  {editing && !describing && (
+                    <AiAnalysisBar analysis={editing.ai_analysis} pending={aiPending} busy={busy} running={analysing} onRun={runAiAnalysis} />
+                  )}
                   {!editing ? (
                     <p>Save the description to see its keywords.</p>
                   ) : !analysis ? (
                     <p>{error ? "Keywords could not be read." : "Reading keywords from this description…"}</p>
                   ) : (
-                    <KeywordGroups analysis={analysis} />
+                    <KeywordGroups
+                      analysis={analysis}
+                      busy={busy}
+                      onAccept={(row) => reviewAi(row, "accept")}
+                      onDismiss={(row) => reviewAi(row, "dismiss")}
+                    />
                   )}
                 </section>
               </div>

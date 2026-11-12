@@ -21,6 +21,7 @@ The rail is Home, Library, Jobs, and Bin.
 - **Reusable Library** (`#library`) is where entries and bullets are authored. It has list and card views, details, wording variants, tags, usage across resumes, and bulk actions. Edit in Library from the editor can return you to the same resume.
 - **Jobs** (`#jobs`) stores job descriptions. Saving one extracts required and preferred keywords, and locations and salary when the posting states them.
 - **Job match** is a tab in the editor. It scores the open resume against a job description and highlights matching lines in the preview. Choosing a job description in Resume Details links that job and copies its company and role onto the composition. A match request only returns the comparison. Clicking a missing keyword (other than a tool, which goes to Skills) offers **Work into resume**: AI wording that puts the keyword into existing bullets, or a new bullet for a role or project. Nothing saves until you accept, and new bullets can't be saved while they still have a `[placeholder]`.
+- **AI job analysis** runs only when you click **Analyse with AI**, on the Jobs page or in the editor's Job match → Requirements tab. Only the posting is sent, never a resume. Each requirement the model returns must quote the posting exactly, and each keyword must appear inside its quote; anything else is dropped. The result is saved on the job (`job_descriptions.ai_analysis`) and is used only while the posting text is unchanged: editing the posting marks it stale until you run it again. Requirements the rules already found are marked as confirmed. Ones only the AI found are marked **✦ AI**, get a dotted-underline highlight in the posting, and count at half weight in the match score until you **Accept** them (or **Dismiss** them). Both choices are saved in the job's keyword review (`ai_accepted`, `dismissed`).
 - **Bin** is the Home view of archived resumes. Restore puts one back under My Resumes.
 
 ## Templates
@@ -103,6 +104,8 @@ Copy [`.env.example`](.env.example) to `.env` for Compose. The API reads:
 | `backend/app/template_settings.py`, `backend/app/templates_repository.py`, `backend/app/routers/templates.py` | Custom template settings, storage, and API. |
 | `frontend/src/TemplateDesigner.tsx`, `frontend/src/templates.ts` | Template designer page and shared template types. |
 | `backend/app/related_skills.yaml` | Clusters, aliases, and phrases used by job match. See [`docs/related-skills.md`](docs/related-skills.md). |
+| `backend/app/job_match.py`, `backend/app/ai_job_analysis.py` | Rule-based requirement parsing and matching; the on-request AI reading of a posting and how its rows merge in. |
+| `tools/job_parsing_eval.py` | Scores the requirement parser against live postings: `--fetch 60` downloads a sample from the Disney Careers sitemap into `.job-corpus/` (git-ignored, since the postings are someone else's text), and a plain run rescores it after a parser change. |
 | `seed/` | Resume JSON used by import. |
 | `tests/` | Pytest suite. Browser layout checks use Playwright (`npm run test:browser`). |
 | `docker-compose.yml` | Local app, database, and Gotenberg. |

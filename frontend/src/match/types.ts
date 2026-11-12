@@ -6,6 +6,16 @@ export type KeywordReview = {
   matched: string[];
   /** Keywords the user lacks: no highlight or suggestions, still missing in every score. */
   skipped: string[];
+  /** AI-found requirements the user accepted: full weight instead of half. */
+  ai_accepted?: string[];
+};
+
+/** The saved AI reading of a posting. current is false once the posting text changes. */
+export type AiAnalysisSummary = {
+  current: boolean;
+  model: string;
+  analyzed_at: string;
+  requirement_count: number;
 };
 
 export type JobDescription = {
@@ -16,7 +26,10 @@ export type JobDescription = {
   body: string;
   composition_id: string | null;
   keyword_review?: KeywordReview;
+  ai_analysis?: AiAnalysisSummary | null;
 };
+
+export type AiJobAnalysisResult = { status: string; detail: string; job: JobDescription };
 
 export type KeywordEvidence = {
   source_requirement: string;
@@ -64,6 +77,12 @@ export type RequirementRow = {
   detail?: string;
   keywords: RequirementKeyword[];
   suggestions: TagSuggestion[];
+  /** "ai": found only by the AI analysis. */
+  source?: "rules" | "ai";
+  /** AI-found and not accepted yet: counts at half weight. */
+  ai_pending?: boolean;
+  /** Found by the rules and also by the AI analysis. */
+  ai_confirmed?: boolean;
 };
 
 export type ScoreComponents = {
@@ -93,6 +112,8 @@ export type JobMatch = {
   scores?: ScoreComponents;
   eligibility?: Record<string, EligibilityGate>;
   families?: { id: string; label: string; confidence: number }[];
+  /** AI-found requirements awaiting Accept or Dismiss. */
+  ai_pending_count?: number;
 };
 
 /** A placed bullet the Suggest wording dialog can rewrite. */

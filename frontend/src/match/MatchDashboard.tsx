@@ -303,7 +303,7 @@ export default function MatchDashboard({
                 <span>Keywords</span>
               </button>
             </div>
-            <p className="dash-note">Match score: deterministic, never changed by AI.</p>
+            <p className="dash-note">Match score is rule-based. AI-found requirements count at half weight until you accept them.</p>
           </div>
         )}
         {tabs}
