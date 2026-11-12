@@ -6,6 +6,7 @@ from .editing_repository import many, one, render_historical
 from .library_repository import (
     _custom_render,
     _education_render,
+    _interests_render,
     _profile_header,
     _tool_groups_render,
 )
@@ -192,21 +193,39 @@ async def apply_library_selection(
                  AND (NOT %s OR pick.item_id IS NOT NULL)""",
             (composition_id, education_ids, education_variants, user_id, education_on),
         )
-        groups_on, group_ids, _ = _picked(selection, "tool_group")
+        groups_on, group_ids, group_variants = _picked(selection, "tool_group")
         await conn.execute(
-            """INSERT INTO composition_items(composition_id,section,item_id,sort_order)
-               SELECT %s,'tool_groups',g.id, row_number() OVER (ORDER BY g.sort_order, g.id) - 1
-               FROM tool_groups g WHERE g.user_id=%s AND g.archived_at IS NULL
-                 AND (NOT %s OR g.id = ANY(%s::uuid[]))""",
-            (composition_id, user_id, groups_on, group_ids),
+            """INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order)
+               SELECT %s,'tool_groups',g.id,v.id, row_number() OVER (ORDER BY g.sort_order, g.id) - 1
+               FROM tool_groups g
+               LEFT JOIN unnest(%s::uuid[], %s::uuid[]) AS pick(item_id, variant_id)
+                 ON pick.item_id=g.id
+               LEFT JOIN LATERAL (
+                 SELECT id FROM tool_group_variants
+                 WHERE tool_group_id=g.id AND user_id=g.user_id AND archived_at IS NULL
+                   AND (is_default OR id=pick.variant_id)
+                 ORDER BY (id IS NOT DISTINCT FROM pick.variant_id) DESC, sort_order, id LIMIT 1
+               ) v ON true
+               WHERE g.user_id=%s AND g.archived_at IS NULL
+                 AND (NOT %s OR pick.item_id IS NOT NULL)""",
+            (composition_id, group_ids, group_variants, user_id, groups_on),
         )
-        interests_on, interest_ids, _ = _picked(selection, "interest")
+        interests_on, interest_ids, interest_variants = _picked(selection, "interest")
         await conn.execute(
-            """INSERT INTO composition_items(composition_id,section,item_id,sort_order)
-               SELECT %s,'personal_interests',i.id, row_number() OVER (ORDER BY i.sort_order, i.id) - 1
-               FROM interests i WHERE i.user_id=%s AND i.archived_at IS NULL
-                 AND (NOT %s OR i.id = ANY(%s::uuid[]))""",
-            (composition_id, user_id, interests_on, interest_ids),
+            """INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order)
+               SELECT %s,'personal_interests',i.id,v.id, row_number() OVER (ORDER BY i.sort_order, i.id) - 1
+               FROM interests i
+               LEFT JOIN unnest(%s::uuid[], %s::uuid[]) AS pick(item_id, variant_id)
+                 ON pick.item_id=i.id
+               LEFT JOIN LATERAL (
+                 SELECT id FROM interest_variants
+                 WHERE interest_id=i.id AND user_id=i.user_id AND archived_at IS NULL
+                   AND (is_default OR id=pick.variant_id)
+                 ORDER BY (id IS NOT DISTINCT FROM pick.variant_id) DESC, sort_order, id LIMIT 1
+               ) v ON true
+               WHERE i.user_id=%s AND i.archived_at IS NULL
+                 AND (NOT %s OR pick.item_id IS NOT NULL)""",
+            (composition_id, interest_ids, interest_variants, user_id, interests_on),
         )
         custom_on, custom_ids, _ = _picked(selection, "custom_section")
         await conn.execute(
@@ -320,15 +339,8 @@ async def apply_library_selection(
         resume["tool_groups"] = await _tool_groups_render(
             conn, user_id, [item["item_id"] for item in groups], composition_id
         )
-        interests = await many(
-            conn,
-            """SELECT x.body FROM composition_items i
-               JOIN interests x ON x.id=i.item_id
-               WHERE i.composition_id=%s AND i.section='personal_interests'
-               ORDER BY i.sort_order,i.id""",
-            (composition_id,),
-        )
-        resume["personal_interests"] = [item["body"] for item in interests]
+        resume["personal_interest_items"] = []
+        resume = await _interests_render(conn, composition_id, resume)
         custom = await many(
             conn,
             """SELECT s.* FROM composition_custom_sections x
@@ -632,6 +644,23 @@ async def rerender(conn, user_id, cid, source):
         )
         if profile:
             resume["header"] = _profile_header(profile)
+    groups = await many(
+        conn,
+        """SELECT item_id FROM composition_items
+           WHERE composition_id=%s AND section='tool_groups' ORDER BY sort_order,id""",
+        (cid,),
+    )
+    if groups:
+        resume["tool_groups"] = await _tool_groups_render(
+            conn, user_id, [item["item_id"] for item in groups], cid
+        )
+    has_interests = await one(
+        conn,
+        "SELECT 1 FROM composition_items WHERE composition_id=%s AND section='personal_interests' LIMIT 1",
+        (cid,),
+    )
+    if has_interests:
+        resume = await _interests_render(conn, cid, resume)
     resume = await apply_placements(conn, user_id, cid, resume)
     saved = await one(
         conn,

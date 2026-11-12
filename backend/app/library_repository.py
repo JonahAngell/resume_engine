@@ -156,8 +156,19 @@ async def fetch_library(conn, user_id):
         ),
         "group_id",
     )
+    group_variants = _group_by(
+        await _many(
+            conn,
+            """SELECT id,tool_group_id,name,group_name,tool_ids,is_default,archived_at
+               FROM tool_group_variants WHERE user_id=%s ORDER BY sort_order,id""",
+            (user_id,),
+        ),
+        "tool_group_id",
+        keep_key=True,
+    )
     for group in groups:
         group["items"] = tools_by_group.get(group["id"], [])
+        group["field_variants"] = group_variants.get(group["id"], [])
 
     content_variants = await _many(
         conn,
@@ -209,6 +220,18 @@ async def fetch_library(conn, user_id):
         "SELECT id,body,sort_order,archived_at,created_at,updated_at FROM interests WHERE user_id=%s ORDER BY sort_order,id",
         (user_id,),
     )
+    interest_variants = _group_by(
+        await _many(
+            conn,
+            """SELECT id,interest_id,name,body,is_default,archived_at
+               FROM interest_variants WHERE user_id=%s ORDER BY sort_order,id""",
+            (user_id,),
+        ),
+        "interest_id",
+        keep_key=True,
+    )
+    for interest in interests:
+        interest["field_variants"] = interest_variants.get(interest["id"], [])
     compositions = await _many(
         conn,
         "SELECT id,name,description,display_title,target_company,target_role,job_description_id,preferred_page_length,date_format,template_style,skill_row_max,template_id,tools_layout,section_sort_modes,profile_id,is_starter,is_default_starter,archived_at,created_at,updated_at,autosaved_at,revision FROM resume_compositions WHERE user_id=%s AND NOT is_starter ORDER BY updated_at DESC,id",
@@ -221,7 +244,7 @@ async def fetch_library(conn, user_id):
     )
     composition_items = await _many(
         conn,
-        "SELECT i.composition_id,i.section,i.item_id FROM composition_items i JOIN resume_compositions c ON c.id=i.composition_id WHERE c.user_id=%s",
+        "SELECT i.composition_id,i.section,i.item_id,i.variant_id FROM composition_items i JOIN resume_compositions c ON c.id=i.composition_id WHERE c.user_id=%s",
         (user_id,),
     )
     composition_custom_sections = await _many(
@@ -584,18 +607,12 @@ async def _refresh_interest_compositions(conn, user_id, interest_id):
         (user_id, interest_id),
     )
     for item in composition_ids:
-        selected = await _many(
-            conn,
-            "SELECT x.body FROM composition_items i JOIN interests x ON x.id=i.item_id WHERE i.composition_id=%s AND i.section='personal_interests' ORDER BY i.sort_order",
-            (item["id"],),
-        )
         composition = await _one(
             conn,
             "SELECT render_payload FROM resume_compositions WHERE id=%s AND user_id=%s FOR UPDATE",
             (item["id"], user_id),
         )
-        resume = composition["render_payload"]
-        resume["personal_interests"] = [x["body"] for x in selected]
+        resume = await _interests_render(conn, item["id"], composition["render_payload"])
         await _save_library_refresh(
             conn, user_id, item["id"], resume, "interest-library-update"
         )
@@ -686,24 +703,24 @@ async def select_interest(
             )
             return None, "stale" if exists else "missing"
         if included:
+            # A newly added interest uses its default variant, if it has one.
             await conn.execute(
-                "INSERT INTO composition_items(composition_id,section,item_id,sort_order) VALUES(%s,'personal_interests',%s,(SELECT COALESCE(max(sort_order)+1,0) FROM composition_items WHERE composition_id=%s AND section='personal_interests')) ON CONFLICT DO NOTHING",
-                (composition_id, interest_id, composition_id),
+                "INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order) VALUES(%s,'personal_interests',%s,(SELECT id FROM interest_variants WHERE interest_id=%s AND is_default AND archived_at IS NULL),(SELECT COALESCE(max(sort_order)+1,0) FROM composition_items WHERE composition_id=%s AND section='personal_interests')) ON CONFLICT DO NOTHING",
+                (composition_id, interest_id, interest_id, composition_id),
             )
         else:
             await conn.execute(
                 "DELETE FROM composition_items WHERE composition_id=%s AND section='personal_interests' AND item_id=%s",
                 (composition_id, interest_id),
             )
-        selected = await _many(
-            conn,
-            "SELECT x.body FROM composition_items i JOIN interests x ON x.id=i.item_id WHERE i.composition_id=%s AND i.section='personal_interests' ORDER BY i.sort_order",
-            (composition_id,),
+        current = await _one(
+            conn, "SELECT render_payload FROM resume_compositions WHERE id=%s", (composition_id,)
         )
+        resume = await _interests_render(conn, composition_id, current["render_payload"])
         row = await _one(
             conn,
-            "UPDATE resume_compositions SET render_payload=jsonb_set(render_payload,'{personal_interests}',%s::jsonb),revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",
-            (json.dumps([x["body"] for x in selected]), composition_id, user_id),
+            "UPDATE resume_compositions SET render_payload=%s::jsonb,revision=revision+1,autosaved_at=now(),updated_at=now() WHERE id=%s AND user_id=%s RETURNING *",
+            (json.dumps(resume), composition_id, user_id),
         )
         await conn.execute(
             "INSERT INTO composition_revisions(composition_id,user_id,revision,source,snapshot) VALUES(%s,%s,%s,'interest-selection',%s::jsonb)",
@@ -971,7 +988,20 @@ async def restore_tool(conn, user_id, rid, outcome, group_id=None):
 
 
 async def _tool_groups_render(conn, user_id, group_ids, composition_id):
-    """Render a composition's tool groups, in the given order, with two queries."""
+    """Render a composition's tool groups, in the given order.
+
+    A group the resume uses a variant of shows the variant's label and only the variant's
+    tools, in the variant's order. The resume's own hidden tools and tool order still apply
+    on top.
+    """
+    return [
+        None if group is None else {"id": group["id"], "name": group["name"], "items": [t["name"] for t in group["tools"]]}
+        for group in await _tool_groups_shown(conn, user_id, group_ids, composition_id)
+    ]
+
+
+async def _tool_groups_shown(conn, user_id, group_ids, composition_id):
+    """The label and the visible tool rows ({id,name}) each group shows on a resume."""
     group_ids = list(group_ids)
     if not group_ids:
         return []
@@ -981,22 +1011,73 @@ async def _tool_groups_render(conn, user_id, group_ids, composition_id):
         (user_id, group_ids),
     )
     names = {str(x["id"]): x["name"] for x in groups}
+    variants = {
+        str(x["item_id"]): x
+        for x in await _many(
+            conn,
+            """SELECT i.item_id,v.group_name,v.tool_ids FROM composition_items i
+               JOIN tool_group_variants v ON v.id=i.variant_id AND v.tool_group_id=i.item_id
+               WHERE i.composition_id=%s AND i.section='tool_groups' AND v.user_id=%s""",
+            (composition_id, user_id),
+        )
+    }
     tools = await _many(
         conn,
-        """SELECT t.id,t.name,t.group_id FROM tools t
+        """SELECT t.id,t.name,t.group_id,o.sort_order resume_order FROM tools t
            LEFT JOIN composition_tool_order o ON o.tool_id=t.id AND o.composition_id=%s
            WHERE t.user_id=%s AND t.group_id=ANY(%s) AND t.archived_at IS NULL
              AND NOT EXISTS (SELECT 1 FROM composition_hidden_tools h WHERE h.composition_id=%s AND h.tool_id=t.id)
            ORDER BY o.sort_order NULLS LAST, t.sort_order, t.id""",
         (composition_id, user_id, group_ids, composition_id),
     )
-    items: dict[str, list[str]] = {}
+    by_group: dict[str, list[dict]] = {}
     for tool in tools:
-        items.setdefault(str(tool["group_id"]), []).append(tool["name"])
-    return [
-        {"name": names[str(gid)], "items": items.get(str(gid), [])} if str(gid) in names else None
-        for gid in group_ids
+        by_group.setdefault(str(tool["group_id"]), []).append(tool)
+    shown = []
+    for gid in group_ids:
+        key = str(gid)
+        if key not in names:
+            shown.append(None)
+            continue
+        rows = by_group.get(key, [])
+        variant = variants.get(key)
+        name = names[key]
+        if variant:
+            name = variant["group_name"]
+            position = {str(tool_id): index for index, tool_id in enumerate(variant["tool_ids"] or [])}
+            rows = [row for row in rows if str(row["id"]) in position]
+            # The resume's own order wins; otherwise the variant's order.
+            rows.sort(key=lambda row: (row["resume_order"] is None, row["resume_order"] or 0, position[str(row["id"])]))
+        shown.append({"id": key, "name": name, "tools": [{"id": row["id"], "name": row["name"]} for row in rows]})
+    return shown
+
+
+async def _interests_render(conn, composition_id, resume):
+    """Set a composition's interests, using the variant wording a resume chose.
+
+    Keeps personal_interest_items (which carry each interest's id and bullets) in step
+    with personal_interests, since the template pairs them by text.
+    """
+    rows = await _many(
+        conn,
+        """SELECT x.id, COALESCE(v.body, x.body) body FROM composition_items i
+           JOIN interests x ON x.id=i.item_id
+           LEFT JOIN interest_variants v ON v.id=i.variant_id AND v.interest_id=i.item_id
+           WHERE i.composition_id=%s AND i.section='personal_interests'
+           ORDER BY i.sort_order,i.id""",
+        (composition_id,),
+    )
+    bullets = {
+        str(item.get("id")): item.get("bullets") or []
+        for item in resume.get("personal_interest_items") or []
+        if isinstance(item, dict)
+    }
+    resume["personal_interests"] = [row["body"] for row in rows]
+    resume["personal_interest_items"] = [
+        {"id": str(row["id"]), "body": row["body"], "bullets": bullets.get(str(row["id"]), [])}
+        for row in rows
     ]
+    return resume
 
 
 async def _refresh_tool_compositions(conn, user_id, group_id, source):
@@ -1015,6 +1096,9 @@ async def _refresh_tool_compositions(conn, user_id, group_id, source):
         resume["tool_groups"] = await _tool_groups_render(
             conn, user_id, [x["item_id"] for x in selected], comp["id"]
         )
+        from .phase2j_repository import apply_placements
+
+        resume = await apply_placements(conn, user_id, comp["id"], resume)
         await _save_library_refresh(conn, user_id, comp["id"], resume, source)
 
 
@@ -1044,8 +1128,8 @@ async def select_tool_group(conn, user_id, cid, expected, group_id, included):
             )
         if included:
             await conn.execute(
-                "INSERT INTO composition_items(composition_id,section,item_id,sort_order) VALUES(%s,'tool_groups',%s,(SELECT COALESCE(max(sort_order)+1,0) FROM composition_items WHERE composition_id=%s AND section='tool_groups')) ON CONFLICT DO NOTHING",
-                (cid, group_id, cid),
+                "INSERT INTO composition_items(composition_id,section,item_id,variant_id,sort_order) VALUES(%s,'tool_groups',%s,(SELECT id FROM tool_group_variants WHERE tool_group_id=%s AND is_default AND archived_at IS NULL),(SELECT COALESCE(max(sort_order)+1,0) FROM composition_items WHERE composition_id=%s AND section='tool_groups')) ON CONFLICT DO NOTHING",
+                (cid, group_id, group_id, cid),
             )
         else:
             await conn.execute(
@@ -1535,8 +1619,7 @@ async def reorder_composition_items(conn, user_id, cid, payload):
         elif payload.section == "tool_groups":
             resume["tool_groups"] = await _tool_groups_render(conn, user_id, payload.ids, cid)
         elif payload.section == "personal_interests":
-            ordered = await _many(conn, "SELECT x.body FROM composition_items i JOIN interests x ON x.id=i.item_id WHERE i.composition_id=%s AND i.section='personal_interests' ORDER BY i.sort_order,i.id", (cid,))
-            resume["personal_interests"] = [x["body"] for x in ordered]
+            resume = await _interests_render(conn, cid, resume)
         else:
             resume[payload.section] = [await render_historical_for_order(conn, user_id, rid, cid) for rid in payload.ids]
             resume = await _apply_resume_placements(conn, user_id, cid, resume)
@@ -1571,7 +1654,7 @@ async def select_education(conn, user_id, cid, expected, education_id, included)
 async def composition_items(conn,user_id,cid):
     exists=await _one(conn,"SELECT id FROM resume_compositions WHERE id=%s AND user_id=%s",(cid,user_id))
     if not exists:return None
-    return await _many(conn,"SELECT i.section,i.item_id,i.sort_order FROM composition_items i JOIN resume_compositions c ON c.id=i.composition_id WHERE i.composition_id=%s AND c.user_id=%s ORDER BY i.section,i.sort_order,i.id",(cid,user_id))
+    return await _many(conn,"SELECT i.section,i.item_id,i.variant_id,i.sort_order FROM composition_items i JOIN resume_compositions c ON c.id=i.composition_id WHERE i.composition_id=%s AND c.user_id=%s ORDER BY i.section,i.sort_order,i.id",(cid,user_id))
 
 async def create_and_include_entry(conn,user_id,cid,payload):
     from types import SimpleNamespace

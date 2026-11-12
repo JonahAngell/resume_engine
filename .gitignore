@@ -12,4 +12,6 @@ test-results/
 *.zip
 frontend/dist/
 docs/archive/
+
+# Local cache of downloaded job postings used for parser evaluation
 .job-corpus/

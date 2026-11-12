@@ -48,7 +48,9 @@ export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
 
 export type SaveMode = "variant" | "new" | "overwrite";
 
-export function chooseSaveMode(noun: "bullet" | "entry"): Promise<SaveMode | null> {
+export function chooseSaveMode(
+  noun: "bullet" | "entry" | "skill group" | "interest",
+): Promise<SaveMode | null> {
   return new Promise((resolve) => {
     const host = document.createElement("div");
     document.body.append(host);

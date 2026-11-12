@@ -1772,6 +1772,239 @@ function FieldVariantList({ kind, detail }: { kind: string; detail: any }) {
   );
 }
 
+/** Add, edit, set default, archive and restore variants of a skill group or interest. */
+function SkillInterestVariants({
+  kind,
+  detail,
+  mutate,
+}: {
+  kind: "tool-group" | "interest";
+  detail: any;
+  mutate: (fn: () => Promise<any>) => Promise<void>;
+}) {
+  const isGroup = kind === "tool-group";
+  const base = isGroup ? "tool-group-variants" : "interest-variants";
+  const parent = isGroup ? "tool-groups" : "interests";
+  const tools = (detail.items || []).filter((tool: any) => !tool.archived_at);
+  const toolName = (id: string) =>
+    (detail.items || []).find((tool: any) => String(tool.id) === String(id))?.name;
+  const variants = detail.field_variants || [];
+  const [editing, setEditing] = useState<any>(null);
+  const blank = () => ({
+    id: null,
+    name: "",
+    group_name: detail.name || "",
+    tool_ids: tools.map((tool: any) => String(tool.id)),
+    body: detail.body || "",
+    is_default: false,
+  });
+  const save = async () => {
+    const draft = editing;
+    const payload: any = isGroup
+      ? { name: draft.name.trim(), group_name: draft.group_name.trim(), tool_ids: draft.tool_ids }
+      : { name: draft.name.trim(), body: draft.body.trim() };
+    if (!draft.id) payload.is_default = draft.is_default;
+    try {
+      await mutate(() =>
+        draft.id
+          ? api(`/api/library/${base}/${draft.id}`, { method: "PUT", body: JSON.stringify(payload) })
+          : api(`/api/library/${parent}/${detail.id}/variants`, {
+              method: "POST",
+              body: JSON.stringify(payload),
+            }),
+      );
+      setEditing(null);
+    } catch {
+      // mutate already shows the error; keep the form open.
+    }
+  };
+  const valid =
+    editing &&
+    editing.name.trim() &&
+    (isGroup ? editing.group_name.trim() : editing.body.trim());
+  const move = (index: number, delta: number) => {
+    const ids = [...editing.tool_ids];
+    const target = index + delta;
+    if (target < 0 || target >= ids.length) return;
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    setEditing({ ...editing, tool_ids: ids });
+  };
+  const form = editing && (
+    <article className="variant-card variant-editor">
+      <label>
+        Variant name
+        <input
+          value={editing.name}
+          placeholder="e.g. Data roles"
+          onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+        />
+      </label>
+      {isGroup ? (
+        <>
+          <label>
+            Group label on the resume
+            <input
+              value={editing.group_name}
+              onChange={(e) => setEditing({ ...editing, group_name: e.target.value })}
+            />
+          </label>
+          <fieldset className="variant-tools">
+            <legend>Skills in this variant, in order</legend>
+            {editing.tool_ids.map((id: string, index: number) => (
+              <div className="skill-manage-row" key={id}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked
+                    onChange={() =>
+                      setEditing({
+                        ...editing,
+                        tool_ids: editing.tool_ids.filter((x: string) => x !== id),
+                      })
+                    }
+                  />
+                  {toolName(id)}
+                </label>
+                <button type="button" aria-label={`Move ${toolName(id)} up`} disabled={index === 0} onClick={() => move(index, -1)}>
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move ${toolName(id)} down`}
+                  disabled={index === editing.tool_ids.length - 1}
+                  onClick={() => move(index, 1)}
+                >
+                  ↓
+                </button>
+              </div>
+            ))}
+            {tools
+              .filter((tool: any) => !editing.tool_ids.includes(String(tool.id)))
+              .map((tool: any) => (
+                <div className="skill-manage-row" key={tool.id}>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      onChange={() =>
+                        setEditing({ ...editing, tool_ids: [...editing.tool_ids, String(tool.id)] })
+                      }
+                    />
+                    {tool.name}
+                  </label>
+                </div>
+              ))}
+          </fieldset>
+        </>
+      ) : (
+        <label>
+          Wording
+          <textarea
+            value={editing.body}
+            onChange={(e) => setEditing({ ...editing, body: e.target.value })}
+          />
+        </label>
+      )}
+      {!editing.id && (
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={editing.is_default}
+            onChange={(e) => setEditing({ ...editing, is_default: e.target.checked })}
+          />
+          Use for new resumes
+        </label>
+      )}
+      <div className="variant-actions">
+        <button type="button" onClick={() => setEditing(null)}>
+          Cancel
+        </button>
+        <button type="button" className="primary" disabled={!valid} onClick={save}>
+          {editing.id ? "Save variant" : "Add variant"}
+        </button>
+      </div>
+    </article>
+  );
+  return (
+    <div className="variant-management variant-list">
+      <p className="coaching-note">
+        {isGroup
+          ? "A variant has its own label and its own pick and order of this group's skills. Each resume chooses which one it shows."
+          : "A variant is another wording of this interest. Each resume chooses which one it shows."}
+      </p>
+      {variants.map((variant: any) =>
+        editing?.id === variant.id ? (
+          <React.Fragment key={variant.id}>{form}</React.Fragment>
+        ) : (
+          <article className={`variant-card ${variant.archived_at ? "is-archived" : ""}`} key={variant.id}>
+            <div className="variant-card-header">
+              <strong>{variant.name}</strong>
+              {variant.is_default && <span className="badge">Default</span>}
+              {variant.archived_at && <span className="badge">Archived</span>}
+            </div>
+            <p className="variant-wording">
+              {isGroup
+                ? `${variant.group_name}: ${(variant.tool_ids || []).map(toolName).filter(Boolean).join(", ") || "no skills"}`
+                : variant.body}
+            </p>
+            <div className="variant-actions">
+              {!variant.archived_at && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditing({
+                      ...blank(),
+                      ...variant,
+                      tool_ids: (variant.tool_ids || []).map(String),
+                      body: variant.body || "",
+                      group_name: variant.group_name || "",
+                    })
+                  }
+                >
+                  Edit
+                </button>
+              )}
+              {!variant.archived_at && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    mutate(() =>
+                      api(`/api/library/${base}/${variant.id}`, {
+                        method: "PUT",
+                        body: JSON.stringify({ is_default: !variant.is_default }),
+                      }),
+                    ).catch(() => undefined)
+                  }
+                >
+                  {variant.is_default ? "Stop using for new resumes" : "Use for new resumes"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  mutate(() =>
+                    api(`/api/library/${base}/${variant.id}/${variant.archived_at ? "restore" : "archive"}`, {
+                      method: "POST",
+                    }),
+                  ).catch(() => undefined)
+                }
+              >
+                {variant.archived_at ? "Restore" : "Archive"}
+              </button>
+            </div>
+          </article>
+        ),
+      )}
+      {editing && !editing.id && form}
+      {!editing && (
+        <button type="button" className="add-entry-button" onClick={() => setEditing(blank())}>
+          + Add variant
+        </button>
+      )}
+    </div>
+  );
+}
+
 function EntryDetails({
   lib,
   section: librarySection,
@@ -1825,7 +2058,13 @@ function EntryDetails({
         path = `/api/library/profiles/${detail.id}`;
       else path = `/api/library/custom-sections/${detail.id}`;
       const body =
-        kind === "profile" ? profilePayload(detail) : detail;
+        kind === "profile"
+          ? profilePayload(detail)
+          : kind === "tool-group"
+            ? { name: detail.name }
+            : kind === "interest"
+              ? { body: detail.body }
+              : detail;
       const message = kind === "profile" ? profileWriteError(detail) : "";
       if (message) {
         setError(message);
@@ -2005,6 +2244,21 @@ function EntryDetails({
             </article>
             </div>
           </div>
+        ) : kind === "tool-group" || kind === "interest" ? (
+          <div className="entry-variants">
+            <SkillInterestVariants
+              kind={kind}
+              detail={detail}
+              mutate={refreshAfterVariant}
+            />
+            {bullets.map((b: any) => (
+              <Variants
+                key={b.id}
+                detail={variantDetail(b, section)}
+                mutate={refreshAfterVariant}
+              />
+            ))}
+          </div>
         ) : (
           <div className="entry-variants">
             <FieldVariantList kind={kind} detail={detail} />
@@ -2031,7 +2285,7 @@ function EntryDetails({
             itemId={detail.id}
             label={`Include this ${sectionLabel(section).toLowerCase()} entry in`}
             variants={
-              ["employment", "project", "leadership", "education", "profile"].includes(kind)
+              ["employment", "project", "leadership", "education", "profile", "tool-group", "interest"].includes(kind)
                 ? fieldVariants.map((v: any) => ({ id: v.id, label: v.name }))
                 : undefined
             }

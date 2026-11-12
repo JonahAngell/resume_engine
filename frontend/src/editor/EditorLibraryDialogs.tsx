@@ -485,7 +485,7 @@ export function EditorLibraryDialogs({
     saveBullet: (placement: any, body: string) => Promise<void | false>;
     pickInterest: (item: any, replaceId?: string) => Promise<void>;
     createInterest: (draft: any) => Promise<void>;
-    saveInterest: (id: string, draft: any) => Promise<void>;
+    saveInterest: (id: string, draft: any) => Promise<void | false>;
     addSkill: (groupId: string, name: string) => Promise<void>;
     renameSkill: (groupId: string, id: string, name: string) => Promise<void>;
     archiveSkill: (id: string) => Promise<void>;
@@ -628,8 +628,8 @@ export function EditorLibraryDialogs({
         initial={entryDraft(section, dialog.item)}
         close={close}
         note={
-          section === "personal_interests" || section === "tool_groups"
-            ? undefined
+          section === "tool_groups"
+            ? "Saves this label with the skills this resume shows. Choose how to keep it when you save."
             : "Choose how to keep this change when you save."
         }
         onSave={(draft) =>
