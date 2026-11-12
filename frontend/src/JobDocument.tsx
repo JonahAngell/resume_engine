@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React from "react";
 import { highlightSegments, type CompareJob, type MatchMark } from "./matchMarks";
 import type { PopoverAnchor } from "./match/MarkPopover";
 
@@ -16,15 +16,6 @@ export default function JobDocument({
   /** A highlight was clicked or activated from the keyboard. */
   onMarkClick?: (markId: string, anchor: PopoverAnchor) => void;
 }) {
-  const paper = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!activeIds.length || !paper.current) return;
-    const hit = [...paper.current.querySelectorAll<HTMLElement>("[data-match-id]")].find((el) =>
-      activeIds.includes(el.dataset.matchId || ""),
-    );
-    hit?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeIds, job, marks]);
-
   if (!job) {
     return (
       <div className="job-document-empty">
@@ -42,7 +33,6 @@ export default function JobDocument({
   return (
     <article
       className="job-paper"
-      ref={paper}
       aria-label="Job description"
       onMouseOver={(event) => {
         const hit = (event.target as HTMLElement).closest<HTMLElement>("[data-match-id]");

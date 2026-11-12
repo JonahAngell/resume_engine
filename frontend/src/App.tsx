@@ -1203,7 +1203,6 @@ export default function App() {
               ? { marks: matchMarks, activeIds: activeMatchIds }
               : { marks: [], activeIds: [] }
           }
-          onHighlightPage={setCurrentPage}
           onHighlightHover={onActiveMatch}
           onMarkClick={editorTab === "match" ? onPreviewMarkClick : undefined}
         />
