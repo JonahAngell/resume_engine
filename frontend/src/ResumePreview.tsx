@@ -15,7 +15,6 @@ export default function ResumePreview({
   onFit,
   currentPage,
   highlight = emptyHighlight,
-  onHighlightPage,
   onHighlightHover,
   onMarkClick,
   draft,
@@ -27,7 +26,6 @@ export default function ResumePreview({
   onFit: (x: Fit) => void;
   currentPage: number;
   highlight?: PreviewHighlight;
-  onHighlightPage?: (page: number) => void;
   onHighlightHover?: (ids: string[]) => void;
   onMarkClick?: (click: PreviewMarkClick) => void;
   /** Unsaved template settings: the resume is rendered with them instead of its own look. */
@@ -37,8 +35,7 @@ export default function ResumePreview({
     seq = useRef(0),
     frame = useRef<HTMLIFrameElement>(null),
     measured = useRef<Fit | null>(null),
-    highlightRef = useRef(highlight),
-    fromFrame = useRef(false);
+    highlightRef = useRef(highlight);
   highlightRef.current = highlight;
   const postMarks = () => {
     frame.current?.contentWindow?.postMessage(
@@ -89,24 +86,7 @@ export default function ResumePreview({
       if (e.source !== frame.current?.contentWindow) return;
       if (e.data?.type === "resume-highlight-hover") {
         const id = String(e.data.id || "");
-        fromFrame.current = Boolean(id);
         onHighlightHover?.(id ? [id] : []);
-        return;
-      }
-      if (e.data?.type === "resume-highlight-anchor") {
-        if (fromFrame.current) {
-          fromFrame.current = false;
-          return;
-        }
-        const frameEl = frame.current;
-        const pane = frameEl?.closest<HTMLElement>(".stage");
-        const offset = Number(e.data.top);
-        if (!frameEl || !pane || !Number.isFinite(offset)) return;
-        const top = frameEl.getBoundingClientRect().top + offset;
-        const paneRect = pane.getBoundingClientRect();
-        if (top < paneRect.top + 24 || top > paneRect.bottom - 48) {
-          pane.scrollBy({ top: top - paneRect.top - 72 });
-        }
         return;
       }
       if (e.data?.type === "resume-mark-click") {
@@ -127,11 +107,6 @@ export default function ResumePreview({
             bottom: box.top + at(rect.bottom),
           },
         });
-        return;
-      }
-      if (e.data?.type === "resume-highlight-page") {
-        const page = Number(e.data.pageIndex) + 1;
-        if (page >= 1) onHighlightPage?.(page);
         return;
       }
       if (e.data?.type !== "resume-pages") return;
@@ -155,7 +130,7 @@ export default function ResumePreview({
     };
     addEventListener("message", fn);
     return () => removeEventListener("message", fn);
-  }, [onFit, onHighlightHover, onHighlightPage, onMarkClick, preferredPageCount]);
+  }, [onFit, onHighlightHover, onMarkClick, preferredPageCount]);
   useEffect(() => {
     const last = measured.current;
     if (!last?.actualPageCount) return;

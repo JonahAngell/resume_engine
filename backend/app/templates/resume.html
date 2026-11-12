@@ -918,20 +918,8 @@
             const hits = [...root.querySelectorAll("[data-match-id], [data-match-ids]")].filter((el) =>
               matchIdsOf(el).some((id) => ids.has(id)),
             );
+            // Highlight only: hovering never scrolls or switches pages.
             hits.forEach((el) => el.classList.add("hit-paired"));
-            const first = hits[0];
-            if (!first) return;
-            const page = first.closest(".resume-page");
-            const pageIndex = Number(page?.dataset.pageIndex);
-            if (page && page.dataset.activePage !== "true" && Number.isFinite(pageIndex)) {
-              showPage(pageIndex);
-              parent.postMessage({ type: "resume-highlight-page", pageIndex }, "*");
-            }
-            first.scrollIntoView({ block: "nearest", inline: "nearest" });
-            parent.postMessage({
-              type: "resume-highlight-anchor",
-              top: first.getBoundingClientRect().top,
-            }, "*");
           };
           const pagesRoot = document.getElementById("pages");
           pagesRoot?.addEventListener("mouseover", (event) => {
