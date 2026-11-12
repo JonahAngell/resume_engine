@@ -459,3 +459,44 @@ class AtsScoreRequest(BaseModel):
     composition_id: UUID
     page_count: int | None = Field(default=None, ge=1, le=20)
 
+
+
+class ToolGroupVariantWrite(BaseModel):
+    """Create (name and group_name required) or edit (anything left out stays) a skill group variant."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=120, pattern=r"\S")
+    group_name: str | None = Field(default=None, min_length=1, max_length=160, pattern=r"\S")
+    tool_ids: list[UUID] | None = Field(default=None, max_length=200)
+    is_default: bool | None = None
+
+
+class InterestVariantWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=120, pattern=r"\S")
+    body: str | None = Field(default=None, min_length=1, max_length=2000, pattern=r"\S")
+    is_default: bool | None = None
+
+
+class ItemVariantPick(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    section: Literal["tool_groups", "personal_interests"]
+    item_id: UUID
+    variant_id: UUID | None = None
+
+
+class ToolGroupSaveChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    mode: SaveMode = "variant"
+    group_name: str = Field(min_length=1, max_length=160, pattern=r"\S")
+    name: str | None = Field(default=None, max_length=120)
+
+
+class InterestSaveChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: int = Field(ge=1)
+    mode: SaveMode = "variant"
+    body: str = Field(min_length=1, max_length=2000, pattern=r"\S")
+    name: str | None = Field(default=None, max_length=120)

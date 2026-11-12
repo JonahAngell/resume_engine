@@ -305,7 +305,9 @@ async def save_from_composition(conn, user_id, cid, name, replace_id=None):
                     set_id,
                     kind,
                     item["item_id"],
-                    item["variant_id"] if kind in ("content_item", "education_item") else None,
+                    item["variant_id"]
+                    if kind in ("content_item", "education_item", "tool_group", "interest")
+                    else None,
                     item["sort_order"],
                 ),
             )
